@@ -9,6 +9,7 @@
           border: 5px solid black;
         }
     </style>
+    <link rel="stylesheet" href="./benchmark.css" type="text/css" media="screen">
 </head>
 <body>
     <h2>Scratch VM Benchmark</h2>
@@ -23,6 +24,18 @@
     <div class="profile-count">Blocks total time:&nbsp;<span class="profile-count-value profile-count-blocks-total-time"></span></div>
     <div class="profile-count">Overhead total time:&nbsp;<span class="profile-count-value profile-count-overhead-total-time"></span></div>
     <div class="profile-count">Render total time:&nbsp;<span class="profile-count-value profile-count-render-total-time"></span></div>
+
+    <div class="profile-tables">
+    <table class="profile-count-frame-table">
+      <tr class="profile-count-frame-head"><th>Frame</th><th>Self Time</th><th>Total Time</th><th>Executions</th></tr>
+    </table>
+
+    <table class="profile-count-opcode-table">
+      <tr class="profile-count-opcode-head">
+        <th>opcode</th><th>Self Time</th><th>Total Time</th><th>Executions</th>
+      </tr>
+    </table>
+    </div>
 
     <div id="blocks"></div>
 

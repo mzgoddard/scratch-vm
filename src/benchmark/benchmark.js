@@ -88,15 +88,21 @@ window.onload = function () {
     const drawId = profiler.idByName('RenderWebGL.draw');
     const stepThreadsId = profiler.idByName('Sequencer.stepThreads');
     const stepThreadsInnerId = profiler.idByName('Sequencer.stepThreads#inner');
+    const executeId = profiler.idByName('execute');
     const blockFunctionId = profiler.idByName('blockFunction');
-    profiler.onFrame = function({id, totalTime}) {
+    const ids = [stepId, drawId, stepThreadsId, stepThreadsInnerId, executeId, blockFunctionId];
+    ids.sort();
+    const frames = [];
+    const executes = {};
+    const opcodes = {};
+    profiler.onFrame = function({id, selfTime, totalTime, arg}) {
         if (id === stepId) {
             document.getElementsByClassName('profile-count-steps-looped')[0].innerText = executed.steps;
             document.getElementsByClassName('profile-count-blocks-executed')[0].innerText = executed.blocks;
-            document.getElementsByClassName('profile-count-steps-total-time')[0].innerText = times.stepThreads / 1000;
-            document.getElementsByClassName('profile-count-render-total-time')[0].innerText = times.render / 1000;
-            document.getElementsByClassName('profile-count-blocks-total-time')[0].innerText = times.blocks / 1000;
-            document.getElementsByClassName('profile-count-overhead-total-time')[0].innerText = times.stepThreads / 1000 - times.blocks / 1000;
+            document.getElementsByClassName('profile-count-steps-total-time')[0].innerText = (times.stepThreads / 1000).toPrecision(3);
+            document.getElementsByClassName('profile-count-render-total-time')[0].innerText = (times.render / 1000).toPrecision(3);
+            document.getElementsByClassName('profile-count-blocks-total-time')[0].innerText = (times.blocks / 1000).toPrecision(3);
+            document.getElementsByClassName('profile-count-overhead-total-time')[0].innerText = (times.stepThreads / 1000 - times.blocks / 1000).toPrecision(3);
         }
         else if (id === drawId) {
             times.render += totalTime;
@@ -108,7 +114,27 @@ window.onload = function () {
         else if (id === blockFunctionId) {
             executed.blocks++;
             times.blocks += totalTime;
+            if (!opcodes[arg]) {
+                opcodes[arg] = {
+                    executions: 0,
+                    selfTime: 0,
+                    totalTime: 0,
+                };
+            }
+            opcodes[arg].executions++;
+            opcodes[arg].selfTime += selfTime;
+            opcodes[arg].totalTime += totalTime;
         }
+        if (!frames[id]) {
+            frames[id] = {
+                executions: 0,
+                selfTime: 0,
+                totalTime: 0,
+            };
+        }
+        frames[id].executions++;
+        frames[id].selfTime += selfTime;
+        frames[id].totalTime += totalTime;
     };
 
     // // Loading projects from the server.
@@ -127,6 +153,54 @@ window.onload = function () {
           vm.stopAll();
           clearTimeout(vm.runtime._steppingInterval);
           vm.runtime.profiler = null;
+
+          let table = document.getElementsByClassName('profile-count-frame-table')[0];
+          let keys = Object.keys(frames);
+          keys.sort();
+          for (const key of keys) {
+              const row = document.createElement('tr');
+              let cell = document.createElement('td');
+              cell.innerText = profiler.nameById(Number(key));
+              row.appendChild(cell);
+
+              cell = document.createElement('td');
+              cell.innerText = (frames[Number(key)].selfTime / 1000).toPrecision(3);
+              row.appendChild(cell);
+
+              cell = document.createElement('td');
+              cell.innerText = (frames[Number(key)].totalTime / 1000).toPrecision(3);
+              row.appendChild(cell);
+
+              cell = document.createElement('td');
+              cell.innerText = frames[Number(key)].executions;
+              row.appendChild(cell);
+
+              table.appendChild(row);
+          }
+
+          table = document.getElementsByClassName('profile-count-opcode-table')[0];
+          keys = Object.keys(opcodes);
+          keys.sort();
+          for (const key of keys) {
+              const row = document.createElement('tr');
+              let cell = document.createElement('td');
+              cell.innerText = key;
+              row.appendChild(cell);
+
+              cell = document.createElement('td');
+              cell.innerText = (opcodes[key].selfTime  / 1000).toPrecision(3);
+              row.appendChild(cell);
+
+              cell = document.createElement('td');
+              cell.innerText = (opcodes[key].totalTime / 1000).toPrecision(3);
+              row.appendChild(cell);
+
+              cell = document.createElement('td');
+              cell.innerText = opcodes[key].executions;
+              row.appendChild(cell);
+
+              table.appendChild(row);
+          }
       }, 2100);
     });
 
