@@ -145,10 +145,12 @@ window.onload = function () {
     loadProject();
 
     vm.on('workspaceUpdate', () => {
+    setTimeout(() => {
+        vm.greenFlag();
+    }, 100);
       setTimeout(() => {
-          vm.greenFlag();
           vm.runtime.profiler = profiler;
-      }, 100);
+      }, 4100);
       setTimeout(() => {
           vm.stopAll();
           clearTimeout(vm.runtime._steppingInterval);
@@ -201,7 +203,7 @@ window.onload = function () {
 
               table.appendChild(row);
           }
-      }, 2100);
+      }, 10100);
     });
 
     // Instantiate the renderer and connect it to the VM.
