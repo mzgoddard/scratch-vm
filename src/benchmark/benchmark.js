@@ -2,11 +2,20 @@ const Scratch = window.Scratch = window.Scratch || {};
 
 const ASSET_SERVER = 'https://cdn.assets.scratch.mit.edu/';
 const PROJECT_SERVER = 'https://cdn.projects.scratch.mit.edu/';
+const slow = .5;
+
+let projectInput = document.querySelector('input');
+
+document.querySelector('.run')
+  .addEventListener("click", () => {
+    window.location.hash = projectInput.value;
+    location.reload();
+  }, false);
 
 const loadProject = function () {
     let id = location.hash.substring(1);
     if (id.length < 1 || !isFinite(id)) {
-        id = '119615668';
+        id = projectInput.value;
     }
     Scratch.vm.downloadProjectId(id);
 };
@@ -182,9 +191,19 @@ window.onload = function () {
 
           table = document.getElementsByClassName('profile-count-opcode-table')[0];
           keys = Object.keys(opcodes);
+
+          const blockFunctionTotalTime = frames[profiler.idByName('blockFunction')].totalTime;
+
           keys.sort();
           for (const key of keys) {
-              const row = document.createElement('tr');
+              const rowTotalTime = opcodes[key].totalTime
+              const percentOfRun = rowTotalTime/blockFunctionTotalTime;
+              const row = document.createElement('tr')
+
+              console.log(percentOfRun, slow, (percentOfRun > slow));
+
+              row.setAttribute('class', percentOfRun > slow ? '' : 'slow');
+
               let cell = document.createElement('td');
               cell.innerText = key;
               row.appendChild(cell);
@@ -203,6 +222,7 @@ window.onload = function () {
 
               table.appendChild(row);
           }
+          document.querySelectorAll('img').forEach((i) =>{console.log(i.parentNode.removeChild(i))})
       }, 10100);
     });
 
