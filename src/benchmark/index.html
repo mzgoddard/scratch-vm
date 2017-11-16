@@ -1,0 +1,66 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Scratch VM Benchmark</title>
+    <link rel="stylesheet" href="./benchmark.css" type="text/css" media="screen">
+</head>
+<body>
+  <h2>Scratch VM Benchmark</h2>
+  <p>
+    Welcome to the scratch-vm benchmark. This tool helps you profile a scratch
+    project. When you load the page, it:
+    <ol>
+      <li>loads the default project
+      <li>runs the project for 4 seconds to warm up
+      <li>profiles for 6 seconds
+      <li>stops and reports
+    </ol>
+  </p>
+  <input type="text" value="119615668">
+  <button class="run">run</button>
+  <p>
+    <i>Try a different project, like `130041250`</i>
+  </p>
+
+  <canvas id="scratch-stage"></canvas><br />
+
+  <div class="loading">
+    <label>Loading:</label>
+    <span class="loading-complete">0</span> / <span class="loading-total">0</span>
+  </div>
+  <div class="profile-count"><label>Steps looped:</label><span class="profile-count-value profile-count-steps-looped">...</span></div>
+  <div class="profile-count"><label>Steps total time:</label><span class="profile-count-value profile-count-steps-total-time">...</span></div>
+  <div class="profile-count"><label>Blocks executed:</label><span class="profile-count-value profile-count-blocks-executed">...</span></div>
+  <div class="profile-count"><label>Blocks total time:</label><span class="profile-count-value profile-count-blocks-total-time">...</span></div>
+  <div class="profile-count"><label>Overhead total time:</label><span class="profile-count-value profile-count-overhead-total-time">...</span></div>
+  <div class="profile-count"><label>Render total time:</label><span class="profile-count-value profile-count-render-total-time">...</span></div>
+
+  <div class="profile-tables">
+  <table class="profile-count-frame-table" cellspacing="0">
+    <tr class="profile-count-frame-head"><th>Frame</th><th>Self Time</th><th>Total Time</th><th>Executions</th></tr>
+  </table>
+  <img src="loading.gif"/>
+
+  <table class="profile-count-opcode-table" cellspacing="0">
+    <tbody>
+    <tr class="profile-count-opcode-head">
+      <th>opcode</th><th>Self Time</th><th>Total Time</th><th>Executions</th>
+    </tr>
+  </table>
+  <img src="loading.gif"/>
+  </div>
+
+  <div id="blocks"></div>
+
+  <!-- FPS counter, Syntax highlighter, Blocks, Renderer -->
+  <script src="../playground/vendor.js"></script>
+  <!-- Storage module -->
+  <script src="../playground/scratch-storage.js"></script>
+  <!-- VM -->
+  <script src="../playground/scratch-vm.js"></script>
+  <!-- Playground -->
+  <script src="./benchmark.js"></script>
+</body>
+</html>

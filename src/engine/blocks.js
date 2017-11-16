@@ -1,6 +1,8 @@
 const adapter = require('./adapter');
 const mutationAdapter = require('./mutation-adapter');
 const xmlEscape = require('../util/xml-escape');
+const MonitorRecord = require('./monitor-record');
+const Clone = require('../util/clone');
 
 /**
  * @fileoverview
@@ -51,7 +53,7 @@ class Blocks {
         return this._scripts;
     }
 
-     /**
+    /**
       * Get the next block for a particular block
       * @param {?string} id ID of block to get the next block for
       * @return {?string} ID of next block in the sequence
@@ -150,26 +152,27 @@ class Blocks {
         for (const id in this._blocks) {
             if (!this._blocks.hasOwnProperty(id)) continue;
             const block = this._blocks[id];
-            if ((block.opcode === 'procedures_defnoreturn' ||
-                block.opcode === 'procedures_defreturn') &&
-                block.mutation.proccode === name) {
-                return id;
+            if (block.opcode === 'procedures_defnoreturn' ||
+                block.opcode === 'procedures_defreturn') {
+                const internal = this._getCustomBlockInternal(block);
+                if (internal && internal.mutation.proccode === name) {
+                    return id; // The outer define block id
+                }
             }
         }
         return null;
     }
 
     /**
-     * Get the procedure definition for a given name.
+     * Get names of parameters for the given procedure.
      * @param {?string} name Name of procedure to query.
-     * @return {?string} ID of procedure definition.
+     * @return {?Array.<string>} List of param names for a procedure.
      */
     getProcedureParamNames (name) {
         for (const id in this._blocks) {
             if (!this._blocks.hasOwnProperty(id)) continue;
             const block = this._blocks[id];
-            if ((block.opcode === 'procedures_defnoreturn' ||
-                block.opcode === 'procedures_defreturn') &&
+            if (block.opcode === 'procedures_callnoreturn_internal' &&
                 block.mutation.proccode === name) {
                 return JSON.parse(block.mutation.argumentnames);
             }
@@ -177,24 +180,33 @@ class Blocks {
         return null;
     }
 
+    duplicate () {
+        const newBlocks = new Blocks();
+        newBlocks._blocks = Clone.simple(this._blocks);
+        newBlocks._scripts = Clone.simple(this._scripts);
+        return newBlocks;
+    }
     // ---------------------------------------------------------------------
 
     /**
-     * Create event listener for blocks. Handles validation and serves as a generic
-     * adapter between the blocks and the runtime interface.
-     * @param {Object} e Blockly "block" event
+     * Create event listener for blocks and variables. Handles validation and
+     * serves as a generic adapter between the blocks, variables, and the
+     * runtime interface.
+     * @param {object} e Blockly "block" or "variable" event
      * @param {?Runtime} optRuntime Optional runtime to forward click events to.
      */
-
     blocklyListen (e, optRuntime) {
         // Validate event
         if (typeof e !== 'object') return;
-        if (typeof e.blockId !== 'string') return;
+        if (typeof e.blockId !== 'string' && typeof e.varId !== 'string') {
+            return;
+        }
+        const stage = optRuntime.getTargetForStage();
 
         // UI event: clicked scripts toggle in the runtime.
         if (e.element === 'stackclick') {
             if (optRuntime) {
-                optRuntime.toggleScript(e.blockId);
+                optRuntime.toggleScript(e.blockId, {stackClick: true});
             }
             return;
         }
@@ -215,7 +227,7 @@ class Blocks {
                 element: e.element,
                 name: e.name,
                 value: e.newValue
-            });
+            }, optRuntime);
             break;
         case 'move':
             this.moveBlock({
@@ -241,6 +253,21 @@ class Blocks {
             this.deleteBlock({
                 id: e.blockId
             });
+            break;
+        case 'var_create':
+            // New variables being created by the user are all global.
+            // Check if this variable exists on the current target or stage.
+            // If not, create it on the stage.
+            // TODO create global and local variables when UI provides a way.
+            if (!optRuntime.getEditingTarget().lookupVariableById(e.varId)) {
+                stage.createVariable(e.varId, e.varName, e.varType);
+            }
+            break;
+        case 'var_rename':
+            stage.renameVariable(e.varId, e.newName);
+            break;
+        case 'var_delete':
+            stage.deleteVariable(e.varId);
             break;
         }
     }
@@ -270,19 +297,48 @@ class Blocks {
     /**
      * Block management: change block field values
      * @param {!object} args Blockly change event to be processed
+     * @param {?Runtime} optRuntime Optional runtime to allow changeBlock to change VM state.
      */
-    changeBlock (args) {
+    changeBlock (args, optRuntime) {
         // Validate
-        if (args.element !== 'field' && args.element !== 'mutation') return;
+        if (['field', 'mutation', 'checkbox'].indexOf(args.element) === -1) return;
         const block = this._blocks[args.id];
         if (typeof block === 'undefined') return;
 
-        if (args.element === 'field') {
+        const wasMonitored = block.isMonitored;
+        switch (args.element) {
+        case 'field':
             // Update block value
             if (!block.fields[args.name]) return;
-            block.fields[args.name].value = args.value;
-        } else if (args.element === 'mutation') {
+            if (args.name === 'VARIABLE' || args.name === 'LIST') {
+                // Get variable name using the id in args.value.
+                const variable = optRuntime.getEditingTarget().lookupVariableById(args.value);
+                if (variable) {
+                    block.fields[args.name].value = variable.name;
+                    block.fields[args.name].id = args.value;
+                }
+            } else {
+                block.fields[args.name].value = args.value;
+            }
+            break;
+        case 'mutation':
             block.mutation = mutationAdapter(args.value);
+            break;
+        case 'checkbox':
+            block.isMonitored = args.value;
+            if (optRuntime && wasMonitored && !block.isMonitored) {
+                optRuntime.requestRemoveMonitor(block.id);
+            } else if (optRuntime && !wasMonitored && block.isMonitored) {
+                optRuntime.requestAddMonitor(MonitorRecord({
+                    // @todo(vm#564) this will collide if multiple sprites use same block
+                    id: block.id,
+                    opcode: block.opcode,
+                    params: this._getBlockParams(block),
+                    // @todo(vm#565) for numerical values with decimals, some countries use comma
+                    value: ''
+                }));
+            }
+            break;
         }
     }
 
@@ -342,6 +398,20 @@ class Blocks {
         }
     }
 
+
+    /**
+     * Block management: run all blocks.
+     * @param {!object} runtime Runtime to run all blocks in.
+     */
+    runAllMonitored (runtime) {
+        Object.keys(this._blocks).forEach(blockId => {
+            if (this.getBlock(blockId).isMonitored) {
+                // @todo handle specific targets (e.g. apple x position)
+                runtime.addMonitorScript(blockId);
+            }
+        });
+    }
+
     /**
      * Block management: delete blocks and their associated scripts.
      * @param {!object} e Blockly delete event to be processed.
@@ -385,11 +455,7 @@ class Blocks {
      * @return {string} String of XML representing this object's blocks.
      */
     toXML () {
-        let xmlString = '<xml xmlns="http://www.w3.org/1999/xhtml">';
-        for (let i = 0; i < this._scripts.length; i++) {
-            xmlString += this.blockToXML(this._scripts[i]);
-        }
-        return `${xmlString}</xml>`;
+        return this._scripts.map(script => this.blockToXML(script)).join();
     }
 
     /**
@@ -406,10 +472,7 @@ class Blocks {
             `<${tagName}
                 id="${block.id}"
                 type="${block.opcode}"
-                ${block.topLevel ?
-                    `x="${block.x}" y="${block.y}"` :
-                    ''
-                }
+                ${block.topLevel ? `x="${block.x}" y="${block.y}"` : ''}
             >`;
         // Add any mutation. Must come before inputs.
         if (block.mutation) {
@@ -436,11 +499,20 @@ class Blocks {
         for (const field in block.fields) {
             if (!block.fields.hasOwnProperty(field)) continue;
             const blockField = block.fields[field];
+            xmlString += `<field name="${blockField.name}"`;
+            const fieldId = blockField.id;
+            if (fieldId) {
+                xmlString += ` id="${fieldId}"`;
+            }
+            const varType = blockField.variableType;
+            if (typeof varType === 'string') {
+                xmlString += ` variabletype="${varType}"`;
+            }
             let value = blockField.value;
             if (typeof value === 'string') {
                 value = xmlEscape(blockField.value);
             }
-            xmlString += `<field name="${blockField.name}">${value}</field>`;
+            xmlString += `>${value}</field>`;
         }
         // Add blocks connected to the next connection.
         if (block.next) {
@@ -472,6 +544,35 @@ class Blocks {
     }
 
     // ---------------------------------------------------------------------
+    /**
+     * Helper to serialize block fields and input fields for reporting new monitors
+     * @param {!object} block Block to be paramified.
+     * @return {!object} object of param key/values.
+     */
+    _getBlockParams (block) {
+        const params = {};
+        for (const key in block.fields) {
+            params[key] = block.fields[key].value;
+        }
+        for (const inputKey in block.inputs) {
+            const inputBlock = this._blocks[block.inputs[inputKey].block];
+            for (const key in inputBlock.fields) {
+                params[key] = inputBlock.fields[key].value;
+            }
+        }
+        return params;
+    }
+
+    /**
+     * Helper to get the corresponding internal procedure definition block
+     * @param {!object} defineBlock Outer define block.
+     * @return {!object} internal definition block which has the mutation.
+     */
+    _getCustomBlockInternal (defineBlock) {
+        if (defineBlock.inputs && defineBlock.inputs.custom_block) {
+            return this._blocks[defineBlock.inputs.custom_block.block];
+        }
+    }
 
     /**
      * Helper to add a stack to `this._scripts`.

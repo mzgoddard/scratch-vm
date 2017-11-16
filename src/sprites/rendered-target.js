@@ -1,17 +1,20 @@
 const log = require('../util/log');
 const MathUtil = require('../util/math-util');
+const StringUtil = require('../util/string-util');
 const Target = require('../engine/target');
 
 /**
  * Rendered target: instance of a sprite (clone), or the stage.
- * @param {!Sprite} sprite Reference to the parent sprite.
- * @param {Runtime} runtime Reference to the runtime.
- * @constructor
  */
 class RenderedTarget extends Target {
+    /**
+     * @param {!Sprite} sprite Reference to the parent sprite.
+     * @param {Runtime} runtime Reference to the runtime.
+     * @constructor
+     */
     constructor (sprite, runtime) {
-        super(sprite.blocks);
-        this.runtime = runtime;
+        super(runtime, sprite.blocks);
+
         /**
          * Reference to the sprite that this is a render of.
          * @type {!Sprite}
@@ -19,7 +22,7 @@ class RenderedTarget extends Target {
         this.sprite = sprite;
         /**
          * Reference to the global renderer for this VM, if one exists.
-         * @type {?RenderWebGLWorker}
+         * @type {?RenderWebGL}
          */
         this.renderer = null;
         if (this.runtime) {
@@ -197,7 +200,7 @@ class RenderedTarget extends Target {
             this.y = y;
         }
         this.emit(RenderedTarget.EVENT_TARGET_MOVED, this, oldX, oldY);
-        this.runtime.spriteInfoReport(this);
+        this.runtime.requestTargetsUpdate(this);
     }
 
     /**
@@ -228,6 +231,9 @@ class RenderedTarget extends Target {
         if (this.isStage) {
             return;
         }
+        if (!isFinite(direction)) {
+            return;
+        }
         // Keep direction between -179 and +180.
         this.direction = MathUtil.wrapClamp(direction, -179, 180);
         if (this.renderer) {
@@ -240,7 +246,7 @@ class RenderedTarget extends Target {
                 this.runtime.requestRedraw();
             }
         }
-        this.runtime.spriteInfoReport(this);
+        this.runtime.requestTargetsUpdate(this);
     }
 
     /**
@@ -250,7 +256,7 @@ class RenderedTarget extends Target {
     setDraggable (draggable) {
         if (this.isStage) return;
         this.draggable = !!draggable;
-        this.runtime.spriteInfoReport(this);
+        this.runtime.requestTargetsUpdate(this);
     }
 
     /**
@@ -287,7 +293,7 @@ class RenderedTarget extends Target {
                 this.runtime.requestRedraw();
             }
         }
-        this.runtime.spriteInfoReport(this);
+        this.runtime.requestTargetsUpdate(this);
     }
 
     /**
@@ -386,7 +392,85 @@ class RenderedTarget extends Target {
                 this.runtime.requestRedraw();
             }
         }
-        this.runtime.spriteInfoReport(this);
+        this.runtime.requestTargetsUpdate(this);
+    }
+
+    /**
+     * Add a costume, taking care to avoid duplicate names.
+     * @param {!object} costumeObject Object representing the costume.
+     */
+    addCostume (costumeObject) {
+        const usedNames = this.sprite.costumes.map(costume => costume.name);
+        costumeObject.name = StringUtil.unusedName(costumeObject.name, usedNames);
+        this.sprite.costumes.push(costumeObject);
+    }
+
+    /**
+     * Rename a costume, taking care to avoid duplicate names.
+     * @param {int} costumeIndex - the index of the costume to be renamed.
+     * @param {string} newName - the desired new name of the costume (will be modified if already in use).
+     */
+    renameCostume (costumeIndex, newName) {
+        const usedNames = this.sprite.costumes
+            .filter((costume, index) => costumeIndex !== index)
+            .map(costume => costume.name);
+        this.sprite.costumes[costumeIndex].name = StringUtil.unusedName(newName, usedNames);
+    }
+
+    /**
+     * Delete a costume by index.
+     * @param {number} index Costume index to be deleted
+     */
+    deleteCostume (index) {
+        const originalCostumeCount = this.sprite.costumes.length;
+        if (originalCostumeCount === 1) return;
+
+        this.sprite.costumes = this.sprite.costumes
+            .slice(0, index)
+            .concat(this.sprite.costumes.slice(index + 1));
+
+        if (index === this.currentCostume && index === originalCostumeCount - 1) {
+            this.setCostume(index - 1);
+        } else if (index < this.currentCostume) {
+            this.setCostume(this.currentCostume - 1);
+        } else {
+            this.setCostume(this.currentCostume);
+        }
+
+        this.runtime.requestTargetsUpdate(this);
+    }
+
+    /**
+     * Add a sound, taking care to avoid duplicate names.
+     * @param {!object} soundObject Object representing the sound.
+     */
+    addSound (soundObject) {
+        const usedNames = this.sprite.sounds.map(sound => sound.name);
+        soundObject.name = StringUtil.unusedName(soundObject.name, usedNames);
+        this.sprite.sounds.push(soundObject);
+    }
+
+    /**
+     * Rename a sound, taking care to avoid duplicate names.
+     * @param {int} soundIndex - the index of the sound to be renamed.
+     * @param {string} newName - the desired new name of the sound (will be modified if already in use).
+     */
+    renameSound (soundIndex, newName) {
+        const usedNames = this.sprite.sounds
+            .filter((sound, index) => soundIndex !== index)
+            .map(sound => sound.name);
+        this.sprite.sounds[soundIndex].name = StringUtil.unusedName(newName, usedNames);
+    }
+
+    /**
+     * Delete a sound by index.
+     * @param {number} index Sound index to be deleted
+     */
+    deleteSound (index) {
+        this.sprite.sounds = this.sprite.sounds
+            .slice(0, index)
+            .concat(this.sprite.sounds.slice(index + 1));
+        this.runtime.requestTargetsUpdate(this);
     }
 
     /**
@@ -411,7 +495,7 @@ class RenderedTarget extends Target {
                 this.runtime.requestRedraw();
             }
         }
-        this.runtime.spriteInfoReport(this);
+        this.runtime.requestTargetsUpdate(this);
     }
 
     /**
@@ -483,7 +567,7 @@ class RenderedTarget extends Target {
                 this.runtime.requestRedraw();
             }
         }
-        this.runtime.spriteInfoReport(this);
+        this.runtime.requestTargetsUpdate(this);
     }
 
     /**
@@ -696,12 +780,38 @@ class RenderedTarget extends Target {
         newClone.effects = JSON.parse(JSON.stringify(this.effects));
         newClone.variables = JSON.parse(JSON.stringify(this.variables));
         newClone.lists = JSON.parse(JSON.stringify(this.lists));
-        newClone._customState = JSON.parse(JSON.stringify(this._customState));
         newClone.initDrawable();
         newClone.updateAllDrawableProperties();
         // Place behind the current target.
         newClone.goBehindOther(this);
         return newClone;
+    }
+
+    /**
+     * Make a duplicate using a duplicate sprite.
+     * @return {RenderedTarget} New clone.
+     */
+    duplicate () {
+        return this.sprite.duplicate().then(newSprite => {
+            const newTarget = newSprite.createClone();
+            // Copy all properties.
+            // @todo refactor with clone methods
+            newTarget.x = Math.random() * 400 / 2;
+            newTarget.y = Math.random() * 300 / 2;
+            newTarget.direction = this.direction;
+            newTarget.draggable = this.draggable;
+            newTarget.visible = this.visible;
+            newTarget.size = this.size;
+            newTarget.currentCostume = this.currentCostume;
+            newTarget.rotationStyle = this.rotationStyle;
+            newTarget.effects = JSON.parse(JSON.stringify(this.effects));
+            newTarget.variables = JSON.parse(JSON.stringify(this.variables));
+            newTarget.lists = JSON.parse(JSON.stringify(this.lists));
+            newTarget.initDrawable();
+            newTarget.updateAllDrawableProperties();
+            newTarget.goBehindOther(this);
+            return newTarget;
+        });
     }
 
     /**
@@ -764,11 +874,13 @@ class RenderedTarget extends Target {
         this.dragging = false;
     }
 
+
     /**
      * Serialize sprite info, used when emitting events about the sprite
-     * @returns {object} sprite data as a simple object
+     * @returns {object} Sprite data as a simple object
      */
     toJSON () {
+        const costumes = this.getCostumes();
         return {
             id: this.id,
             name: this.getName(),
@@ -778,12 +890,16 @@ class RenderedTarget extends Target {
             size: this.size,
             direction: this.direction,
             draggable: this.draggable,
-            costume: this.getCurrentCostume(),
-            costumes: this.getCostumes(),
-            sounds: this.getSounds(),
-            costumeCount: this.getCostumes().length,
+            currentCostume: this.currentCostume,
+            costume: costumes[this.currentCostume],
+            costumeCount: costumes.length,
             visible: this.visible,
-            rotationStyle: this.rotationStyle
+            rotationStyle: this.rotationStyle,
+            blocks: this.blocks._blocks,
+            variables: this.variables,
+            lists: this.lists,
+            costumes: costumes,
+            sounds: this.getSounds()
         };
     }
 
@@ -792,6 +908,8 @@ class RenderedTarget extends Target {
      */
     dispose () {
         this.runtime.changeCloneCounter(-1);
+        this.runtime.stopForTarget(this);
+        this.sprite.removeClone(this);
         if (this.renderer && this.drawableID !== null) {
             this.renderer.destroyDrawable(this.drawableID);
             if (this.visible) {

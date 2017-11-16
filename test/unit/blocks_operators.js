@@ -28,8 +28,8 @@ test('multiply', t => {
 
 test('divide', t => {
     t.strictEqual(blocks.divide({NUM1: '2', NUM2: '2'}), 1);
-    t.strictEqual(blocks.divide({NUM1: '1', NUM2: '0'}), Infinity);   // @todo
-    t.ok(isNaN(blocks.divide({NUM1: 'foo', NUM2: 'bar'})));           // @todo
+    t.strictEqual(blocks.divide({NUM1: '1', NUM2: '0'}), Infinity); // @todo
+    t.ok(isNaN(blocks.divide({NUM1: 'foo', NUM2: 'bar'}))); // @todo
     t.end();
 });
 
@@ -138,6 +138,13 @@ test('length', t => {
     t.strictEqual(blocks.length({STRING: 'foo'}), 3);
     t.strictEqual(blocks.length({STRING: '1'}), 1);
     t.strictEqual(blocks.length({STRING: '100'}), 3);
+    t.end();
+});
+
+test('contains', t => {
+    t.strictEqual(blocks.contains({STRING1: 'hello world', STRING2: 'hello'}), true);
+    t.strictEqual(blocks.contains({STRING1: 'foo', STRING2: 'bar'}), false);
+    t.strictEqual(blocks.contains({STRING1: 'HeLLo world', STRING2: 'hello'}), true);
     t.end();
 });
 

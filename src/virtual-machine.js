@@ -1,12 +1,15 @@
 const EventEmitter = require('events');
 
+const centralDispatch = require('./dispatch/central-dispatch');
+const ExtensionManager = require('./extension-support/extension-manager');
 const log = require('./util/log');
 const Runtime = require('./engine/runtime');
-const sb2import = require('./import/sb2import');
+const sb2 = require('./serialization/sb2');
+const sb3 = require('./serialization/sb3');
 const StringUtil = require('./util/string-util');
 
-const loadCostume = require('./import/load-costume.js');
-const loadSound = require('./import/load-sound.js');
+const {loadCostume} = require('./import/load-costume.js');
+const {loadSound} = require('./import/load-sound.js');
 
 const RESERVED_NAMES = ['_mouse_', '_stage_', '_edge_', '_myself_', '_random_'];
 
@@ -18,46 +21,59 @@ class VirtualMachine extends EventEmitter {
     constructor () {
         super();
 
-        const instance = this;
         /**
          * VM runtime, to store blocks, I/O devices, sprites/targets, etc.
          * @type {!Runtime}
          */
-        instance.runtime = new Runtime();
+        this.runtime = new Runtime();
+        centralDispatch.setService('runtime', this.runtime).catch(e => {
+            log.error(`Failed to register runtime service: ${JSON.stringify(e)}`);
+        });
+
         /**
          * The "currently editing"/selected target ID for the VM.
          * Block events from any Blockly workspace are routed to this target.
-         * @type {!string}
+         * @type {Target}
          */
-        instance.editingTarget = null;
+        this.editingTarget = null;
         // Runtime emits are passed along as VM emits.
-        instance.runtime.on(Runtime.SCRIPT_GLOW_ON, glowData => {
-            instance.emit(Runtime.SCRIPT_GLOW_ON, glowData);
+        this.runtime.on(Runtime.SCRIPT_GLOW_ON, glowData => {
+            this.emit(Runtime.SCRIPT_GLOW_ON, glowData);
         });
-        instance.runtime.on(Runtime.SCRIPT_GLOW_OFF, glowData => {
-            instance.emit(Runtime.SCRIPT_GLOW_OFF, glowData);
+        this.runtime.on(Runtime.SCRIPT_GLOW_OFF, glowData => {
+            this.emit(Runtime.SCRIPT_GLOW_OFF, glowData);
         });
-        instance.runtime.on(Runtime.BLOCK_GLOW_ON, glowData => {
-            instance.emit(Runtime.BLOCK_GLOW_ON, glowData);
+        this.runtime.on(Runtime.BLOCK_GLOW_ON, glowData => {
+            this.emit(Runtime.BLOCK_GLOW_ON, glowData);
         });
-        instance.runtime.on(Runtime.BLOCK_GLOW_OFF, glowData => {
-            instance.emit(Runtime.BLOCK_GLOW_OFF, glowData);
+        this.runtime.on(Runtime.BLOCK_GLOW_OFF, glowData => {
+            this.emit(Runtime.BLOCK_GLOW_OFF, glowData);
         });
-        instance.runtime.on(Runtime.PROJECT_RUN_START, () => {
-            instance.emit(Runtime.PROJECT_RUN_START);
+        this.runtime.on(Runtime.PROJECT_RUN_START, () => {
+            this.emit(Runtime.PROJECT_RUN_START);
         });
-        instance.runtime.on(Runtime.PROJECT_RUN_STOP, () => {
-            instance.emit(Runtime.PROJECT_RUN_STOP);
+        this.runtime.on(Runtime.PROJECT_RUN_STOP, () => {
+            this.emit(Runtime.PROJECT_RUN_STOP);
         });
-        instance.runtime.on(Runtime.VISUAL_REPORT, visualReport => {
-            instance.emit(Runtime.VISUAL_REPORT, visualReport);
+        this.runtime.on(Runtime.VISUAL_REPORT, visualReport => {
+            this.emit(Runtime.VISUAL_REPORT, visualReport);
         });
-        instance.runtime.on(Runtime.SPRITE_INFO_REPORT, spriteInfo => {
-            instance.emit(Runtime.SPRITE_INFO_REPORT, spriteInfo);
+        this.runtime.on(Runtime.TARGETS_UPDATE, () => {
+            this.emitTargetsUpdate();
         });
+        this.runtime.on(Runtime.MONITORS_UPDATE, monitorList => {
+            this.emit(Runtime.MONITORS_UPDATE, monitorList);
+        });
+        this.runtime.on(Runtime.EXTENSION_ADDED, blocksInfo => {
+            this.emit(Runtime.EXTENSION_ADDED, blocksInfo);
+        });
+
+        this.extensionManager = new ExtensionManager(this.runtime);
 
         this.blockListener = this.blockListener.bind(this);
         this.flyoutBlockListener = this.flyoutBlockListener.bind(this);
+        this.monitorBlockListener = this.monitorBlockListener.bind(this);
+        this.variableListener = this.variableListener.bind(this);
     }
 
     /**
@@ -144,22 +160,7 @@ class VirtualMachine extends EventEmitter {
      */
     loadProject (json) {
         // @todo: Handle other formats, e.g., Scratch 1.4, Scratch 3.0.
-        return sb2import(json, this.runtime).then(targets => {
-            this.clear();
-            for (let n = 0; n < targets.length; n++) {
-                if (targets[n] !== null) {
-                    this.runtime.targets.push(targets[n]);
-                    targets[n].updateAllDrawableProperties();
-                }
-            }
-        // Select the first target for editing, e.g., the first sprite.
-            this.editingTarget = this.runtime.targets[1];
-
-        // Update the VM user's knowledge of targets and blocks on the workspace.
-            this.emitTargetsUpdate();
-            this.emitWorkspaceUpdate();
-            this.runtime.setEditingTarget(this.editingTarget);
-        });
+        return this.fromJSON(json);
     }
 
     /**
@@ -180,20 +181,118 @@ class VirtualMachine extends EventEmitter {
     }
 
     /**
-     * Add a single sprite from the "Sprite2" (i.e., SB2 sprite) format.
-     * @param {string} json JSON string representing the sprite.
+     * @returns {string} Project in a Scratch 3.0 JSON representation.
      */
-    addSprite2 (json) {
-        sb2import(json, this.runtime, true).then(targets => {
-            this.runtime.targets.push(targets[0]);
-            this.editingTarget = targets[0];
-            this.editingTarget.updateAllDrawableProperties();
+    saveProjectSb3 () {
+        // @todo: Handle other formats, e.g., Scratch 1.4, Scratch 2.0.
+        return this.toJSON();
+    }
+
+    /**
+     * Export project as a Scratch 3.0 JSON representation.
+     * @return {string} Serialized state of the runtime.
+     */
+    toJSON () {
+        return JSON.stringify(sb3.serialize(this.runtime));
+    }
+
+    /**
+     * Load a project from a Scratch JSON representation.
+     * @param {string} json JSON string representing a project.
+     * @returns {Promise} Promise that resolves after the project has loaded
+     */
+    fromJSON (json) {
+        // Clear the current runtime
+        this.clear();
+
+        // Validate & parse
+        if (typeof json !== 'string') {
+            log.error('Failed to parse project. Non-string supplied to fromJSON.');
+            return;
+        }
+        json = JSON.parse(json);
+        if (typeof json !== 'object') {
+            log.error('Failed to parse project. JSON supplied to fromJSON is not an object.');
+            return;
+        }
+
+        // Establish version, deserialize, and load into runtime
+        // @todo Support Scratch 1.4
+        // @todo This is an extremely naïve / dangerous way of determining version.
+        //       See `scratch-parser` for a more sophisticated validation
+        //       methodology that should be adapted for use here
+        let deserializer;
+        if ((typeof json.meta !== 'undefined') && (typeof json.meta.semver !== 'undefined')) {
+            deserializer = sb3;
+        } else {
+            deserializer = sb2;
+        }
+
+        return deserializer.deserialize(json, this.runtime)
+            .then(({targets, extensions}) =>
+                this.installTargets(targets, extensions, true));
+    }
+
+    /**
+     * Install `deserialize` results: zero or more targets after the extensions (if any) used by those targets.
+     * @param {Array.<Target>} targets - the targets to be installed
+     * @param {ImportedExtensionsInfo} extensions - metadata about extensions used by these targets
+     * @param {boolean} wholeProject - set to true if installing a whole project, as opposed to a single sprite.
+     * @returns {Promise} resolved once targets have been installed
+     */
+    installTargets (targets, extensions, wholeProject) {
+        const extensionPromises = [];
+        extensions.extensionIDs.forEach(extensionID => {
+            if (!this.extensionManager.isExtensionLoaded(extensionID)) {
+                const extensionURL = extensions.extensionURLs.get(extensionID) || extensionID;
+                extensionPromises.push(this.extensionManager.loadExtensionURL(extensionURL));
+            }
+        });
+
+        targets = targets.filter(target => !!target);
+
+        return Promise.all(extensionPromises).then(() => {
+            if (wholeProject) {
+                this.clear();
+            }
+            targets.forEach(target => {
+                this.runtime.targets.push(target);
+                (/** @type RenderedTarget */ target).updateAllDrawableProperties();
+            });
+            // Select the first target for editing, e.g., the first sprite.
+            if (wholeProject && (targets.length > 1)) {
+                this.editingTarget = targets[1];
+            } else {
+                this.editingTarget = targets[0];
+            }
 
             // Update the VM user's knowledge of targets and blocks on the workspace.
             this.emitTargetsUpdate();
             this.emitWorkspaceUpdate();
             this.runtime.setEditingTarget(this.editingTarget);
         });
+    }
+
+    /**
+     * Add a single sprite from the "Sprite2" (i.e., SB2 sprite) format.
+     * @param {string} json JSON string representing the sprite.
+     * @returns {Promise} Promise that resolves after the sprite is added
+     */
+    addSprite2 (json) {
+        // Validate & parse
+        if (typeof json !== 'string') {
+            log.error('Failed to parse sprite. Non-string supplied to addSprite2.');
+            return;
+        }
+        json = JSON.parse(json);
+        if (typeof json !== 'object') {
+            log.error('Failed to parse sprite. JSON supplied to addSprite2 is not an object.');
+            return;
+        }
+
+        return sb2.deserialize(json, this.runtime, true)
+            .then(({targets, extensions}) =>
+                this.installTargets(targets, extensions, false));
     }
 
     /**
@@ -207,11 +306,29 @@ class VirtualMachine extends EventEmitter {
      */
     addCostume (md5ext, costumeObject) {
         loadCostume(md5ext, costumeObject, this.runtime).then(() => {
-            this.editingTarget.sprite.costumes.push(costumeObject);
+            this.editingTarget.addCostume(costumeObject);
             this.editingTarget.setCostume(
                 this.editingTarget.sprite.costumes.length - 1
             );
         });
+    }
+
+    /**
+     * Rename a costume on the current editing target.
+     * @param {int} costumeIndex - the index of the costume to be renamed.
+     * @param {string} newName - the desired new name of the costume (will be modified if already in use).
+     */
+    renameCostume (costumeIndex, newName) {
+        this.editingTarget.renameCostume(costumeIndex, newName);
+        this.emitTargetsUpdate();
+    }
+
+    /**
+     * Delete a costume from the current editing target.
+     * @param {int} costumeIndex - the index of the costume to be removed.
+     */
+    deleteCostume (costumeIndex) {
+        this.editingTarget.deleteCostume(costumeIndex);
     }
 
     /**
@@ -221,9 +338,90 @@ class VirtualMachine extends EventEmitter {
      */
     addSound (soundObject) {
         return loadSound(soundObject, this.runtime).then(() => {
-            this.editingTarget.sprite.sounds.push(soundObject);
+            this.editingTarget.addSound(soundObject);
             this.emitTargetsUpdate();
         });
+    }
+
+    /**
+     * Rename a sound on the current editing target.
+     * @param {int} soundIndex - the index of the sound to be renamed.
+     * @param {string} newName - the desired new name of the sound (will be modified if already in use).
+     */
+    renameSound (soundIndex, newName) {
+        this.editingTarget.renameSound(soundIndex, newName);
+        this.emitTargetsUpdate();
+    }
+
+    /**
+     * Get a sound buffer from the audio engine.
+     * @param {int} soundIndex - the index of the sound to be got.
+     * @return {AudioBuffer} the sound's audio buffer.
+     */
+    getSoundBuffer (soundIndex) {
+        const id = this.editingTarget.sprite.sounds[soundIndex].soundId;
+        if (id && this.runtime && this.runtime.audioEngine) {
+            return this.runtime.audioEngine.getSoundBuffer(id);
+        }
+        return null;
+    }
+
+    /**
+     * Update a sound buffer.
+     * @param {int} soundIndex - the index of the sound to be updated.
+     * @param {AudioBuffer} newBuffer - new audio buffer for the audio engine.
+     */
+    updateSoundBuffer (soundIndex, newBuffer) {
+        const id = this.editingTarget.sprite.sounds[soundIndex].soundId;
+        if (id && this.runtime && this.runtime.audioEngine) {
+            this.runtime.audioEngine.updateSoundBuffer(id, newBuffer);
+        }
+        this.emitTargetsUpdate();
+    }
+
+    /**
+     * Delete a sound from the current editing target.
+     * @param {int} soundIndex - the index of the sound to be removed.
+     */
+    deleteSound (soundIndex) {
+        this.editingTarget.deleteSound(soundIndex);
+    }
+
+    /**
+     * Get an SVG string from storage.
+     * @param {int} costumeIndex - the index of the costume to be got.
+     * @return {string} the costume's SVG string, or null if it's not an SVG costume.
+     */
+    getCostumeSvg (costumeIndex) {
+        const id = this.editingTarget.sprite.costumes[costumeIndex].assetId;
+        if (id && this.runtime && this.runtime.storage &&
+                this.runtime.storage.get(id).dataFormat === 'svg') {
+            return this.runtime.storage.get(id).decodeText();
+        }
+        return null;
+    }
+
+    /**
+     * Update a costume with the given SVG
+     * @param {int} costumeIndex - the index of the costume to be updated.
+     * @param {string} svg - new SVG for the renderer.
+     * @param {number} rotationCenterX x of point about which the costume rotates, relative to its upper left corner
+     * @param {number} rotationCenterY y of point about which the costume rotates, relative to its upper left corner
+     */
+    updateSvg (costumeIndex, svg, rotationCenterX, rotationCenterY) {
+        const costume = this.editingTarget.sprite.costumes[costumeIndex];
+        if (costume && this.runtime && this.runtime.renderer) {
+            costume.rotationCenterX = rotationCenterX;
+            costume.rotationCenterY = rotationCenterY;
+            this.runtime.renderer.updateSVGSkin(costume.skinId, svg, [rotationCenterX, rotationCenterY]);
+        }
+        const storage = this.runtime.storage;
+        costume.assetId = storage.builtinHelper.cache(
+            storage.AssetType.ImageVector,
+            storage.DataFormat.SVG,
+            (new TextEncoder()).encode(svg)
+        );
+        this.emitTargetsUpdate();
     }
 
     /**
@@ -260,9 +458,8 @@ class VirtualMachine extends EventEmitter {
             }
             if (newName && RESERVED_NAMES.indexOf(newName) === -1) {
                 const names = this.runtime.targets
-                    .filter(runtimeTarget => runtimeTarget.isSprite())
+                    .filter(runtimeTarget => runtimeTarget.isSprite() && runtimeTarget.id !== target.id)
                     .map(runtimeTarget => runtimeTarget.sprite.name);
-
                 sprite.name = StringUtil.unusedName(newName, names);
             }
             this.emitTargetsUpdate();
@@ -277,7 +474,9 @@ class VirtualMachine extends EventEmitter {
      */
     deleteSprite (targetId) {
         const target = this.runtime.getTargetById(targetId);
+
         if (target) {
+            const targetIndexBeforeDelete = this.runtime.targets.map(t => t.id).indexOf(target.id);
             if (!target.isSprite()) {
                 throw new Error('Cannot delete non-sprite targets.');
             }
@@ -292,7 +491,12 @@ class VirtualMachine extends EventEmitter {
                 this.runtime.disposeTarget(sprite.clones[i]);
                 // Ensure editing target is switched if we are deleting it.
                 if (clone === currentEditingTarget) {
-                    this.setEditingTarget(this.runtime.targets[0].id);
+                    const nextTargetIndex = Math.min(this.runtime.targets.length - 1, targetIndexBeforeDelete);
+                    if (this.runtime.targets.length > 0){
+                        this.setEditingTarget(this.runtime.targets[nextTargetIndex].id);
+                    } else {
+                        this.editingTarget = null;
+                    }
                 }
             }
             // Sprite object should be deleted by GC.
@@ -300,6 +504,27 @@ class VirtualMachine extends EventEmitter {
         } else {
             throw new Error('No target with the provided id.');
         }
+    }
+
+    /**
+     * Duplicate a sprite.
+     * @param {string} targetId ID of a target whose sprite to duplicate.
+     * @returns {Promise} Promise that resolves when duplicated target has
+     *     been added to the runtime.
+     */
+    duplicateSprite (targetId) {
+        const target = this.runtime.getTargetById(targetId);
+        if (!target) {
+            throw new Error('No target with the provided id.');
+        } else if (!target.isSprite()) {
+            throw new Error('Cannot duplicate non-sprite targets.');
+        } else if (!target.sprite) {
+            throw new Error('No sprite associated with this target.');
+        }
+        return target.duplicate().then(newTarget => {
+            this.runtime.targets.push(newTarget);
+            this.setEditingTarget(newTarget.id);
+        });
     }
 
     /**
@@ -345,6 +570,31 @@ class VirtualMachine extends EventEmitter {
     }
 
     /**
+     * Handle a Blockly event for the flyout to be passed to the monitor container.
+     * @param {!Blockly.Event} e Any Blockly event.
+     */
+    monitorBlockListener (e) {
+        // Filter events by type, since monitor blocks only need to listen to these events.
+        // Monitor blocks shouldn't be destroyed when flyout blocks are deleted.
+        if (['create', 'change'].indexOf(e.type) !== -1) {
+            this.runtime.monitorBlocks.blocklyListen(e, this.runtime);
+        }
+    }
+
+    /**
+     * Handle a Blockly event for the variable map.
+     * @param {!Blockly.Event} e Any Blockly event.
+     */
+    variableListener (e) {
+        // Filter events by type, since blocks only needs to listen to these
+        // var events.
+        if (['var_create', 'var_rename', 'var_delete'].indexOf(e.type) !== -1) {
+            this.runtime.getTargetForStage().blocks.blocklyListen(e,
+                this.runtime);
+        }
+    }
+
+    /**
      * Set an editing target. An editor UI can use this function to switch
      * between editing different targets, sprites, etc.
      * After switching the editing target, the VM may emit updates
@@ -364,6 +614,17 @@ class VirtualMachine extends EventEmitter {
             this.emitTargetsUpdate();
             this.emitWorkspaceUpdate();
             this.runtime.setEditingTarget(target);
+        }
+    }
+
+    /**
+     * Repopulate the workspace with the blocks of the current editingTarget. This
+     * allows us to get around bugs like gui#413.
+     */
+    refreshWorkspace () {
+        if (this.editingTarget) {
+            this.emitWorkspaceUpdate();
+            this.runtime.setEditingTarget(this.editingTarget);
         }
     }
 
@@ -392,9 +653,21 @@ class VirtualMachine extends EventEmitter {
      * of the current editing target's blocks.
      */
     emitWorkspaceUpdate () {
-        this.emit('workspaceUpdate', {
-            xml: this.editingTarget.blocks.toXML()
-        });
+        const variableMap = Object.assign({},
+            this.runtime.getTargetForStage().variables,
+            this.editingTarget.variables
+        );
+
+        const variables = Object.keys(variableMap).map(k => variableMap[k]);
+
+        const xmlString = `<xml xmlns="http://www.w3.org/1999/xhtml">
+                            <variables>
+                                ${variables.map(v => v.toXML()).join()}
+                            </variables>
+                            ${this.editingTarget.blocks.toXML()}
+                        </xml>`;
+
+        this.emit('workspaceUpdate', {xml: xmlString});
     }
 
     /**

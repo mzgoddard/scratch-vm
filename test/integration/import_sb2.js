@@ -1,14 +1,14 @@
 const path = require('path');
 const test = require('tap').test;
-const attachTestStorage = require('../fixtures/attach-test-storage');
+const makeTestStorage = require('../fixtures/make-test-storage');
 const extract = require('../fixtures/extract');
 
 const renderedTarget = require('../../src/sprites/rendered-target');
 const runtime = require('../../src/engine/runtime');
-const sb2 = require('../../src/import/sb2import');
+const sb2 = require('../../src/serialization/sb2');
 
 test('spec', t => {
-    t.type(sb2, 'function');
+    t.type(sb2.deserialize, 'function');
     t.end();
 });
 
@@ -16,13 +16,15 @@ test('default', t => {
     // Get SB2 JSON (string)
     const uri = path.resolve(__dirname, '../fixtures/default.sb2');
     const file = extract(uri);
+    const json = JSON.parse(file);
 
     // Create runtime instance & load SB2 into it
     const rt = new runtime();
-    attachTestStorage(rt);
-    sb2(file, rt).then(targets => {
+    rt.attachStorage(makeTestStorage());
+    sb2.deserialize(json, rt).then(({targets}) => {
         // Test
         t.type(file, 'string');
+        t.type(json, 'object');
         t.type(rt, 'object');
         t.type(targets, 'object');
 

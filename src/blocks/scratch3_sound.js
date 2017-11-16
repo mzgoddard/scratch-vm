@@ -29,11 +29,7 @@ class Scratch3SoundBlocks {
             currentInstrument: 0,
             effects: {
                 pitch: 0,
-                pan: 0,
-                echo: 0,
-                reverb: 0,
-                fuzz: 0,
-                robot: 0
+                pan: 0
             }
         };
     }
@@ -55,24 +51,20 @@ class Scratch3SoundBlocks {
         return {min: 0, max: 100};
     }
 
-     /** The minimum and maximum tempo values, in bpm.
+    /** The minimum and maximum tempo values, in bpm.
      * @type {{min: number, max: number}}
      */
     static get TEMPO_RANGE () {
         return {min: 20, max: 500};
     }
 
-     /** The minimum and maximum values for each sound effect.
+    /** The minimum and maximum values for each sound effect.
      * @type {{effect:{min: number, max: number}}}
      */
     static get EFFECT_RANGE () {
         return {
-            pitch: {min: -600, max: 600},       // -5 to 5 octaves
-            pan: {min: -100, max: 100},         // 100% left to 100% right
-            echo: {min: 0, max: 100},           // 0 to max (75%) feedback
-            reverb: {min: 0, max: 100},         // wet/dry: 0 to 100% wet
-            fuzz: {min: 0, max: 100},           // wed/dry: 0 to 100% wet
-            robot: {min: 0, max: 600}           // 0 to 5 octaves
+            pitch: {min: -600, max: 600}, // -5 to 5 octaves
+            pan: {min: -100, max: 100} // 100% left to 100% right
         };
     }
 
@@ -99,10 +91,6 @@ class Scratch3SoundBlocks {
             sound_play: this.playSound,
             sound_playuntildone: this.playSoundAndWait,
             sound_stopallsounds: this.stopAllSounds,
-            sound_playnoteforbeats: this.playNoteForBeats,
-            sound_playdrumforbeats: this.playDrumForBeats,
-            sound_restforbeats: this.restForBeats,
-            sound_setinstrumentto: this.setInstrument,
             sound_seteffectto: this.setEffect,
             sound_changeeffectby: this.changeEffect,
             sound_cleareffects: this.clearEffects,
@@ -111,28 +99,25 @@ class Scratch3SoundBlocks {
             sound_effects_menu: this.effectsMenu,
             sound_setvolumeto: this.setVolume,
             sound_changevolumeby: this.changeVolume,
-            sound_volume: this.getVolume,
-            sound_settempotobpm: this.setTempo,
-            sound_changetempoby: this.changeTempo,
-            sound_tempo: this.getTempo
+            sound_volume: this.getVolume
         };
     }
 
     playSound (args, util) {
         const index = this._getSoundIndex(args.SOUND_MENU, util);
         if (index >= 0) {
-            const md5 = util.target.sprite.sounds[index].md5;
+            const soundId = util.target.sprite.sounds[index].soundId;
             if (util.target.audioPlayer === null) return;
-            util.target.audioPlayer.playSound(md5);
+            util.target.audioPlayer.playSound(soundId);
         }
     }
 
     playSoundAndWait (args, util) {
         const index = this._getSoundIndex(args.SOUND_MENU, util);
         if (index >= 0) {
-            const md5 = util.target.sprite.sounds[index].md5;
+            const soundId = util.target.sprite.sounds[index].soundId;
             if (util.target.audioPlayer === null) return;
-            return util.target.audioPlayer.playSound(md5);
+            return util.target.audioPlayer.playSound(soundId);
         }
     }
 
@@ -143,18 +128,20 @@ class Scratch3SoundBlocks {
             return -1;
         }
 
-        let index;
-
-        // try to convert to a number and use that as an index
-        const num = parseInt(soundName, 10);
-        if (!isNaN(num)) {
-            index = MathUtil.wrapClamp(num, 0, len - 1);
+        // look up by name first
+        const index = this.getSoundIndexByName(soundName, util);
+        if (index !== -1) {
             return index;
         }
 
-        // return the index for the sound of that name
-        index = this.getSoundIndexByName(soundName, util);
-        return index;
+        // then try using the sound name as a 1-indexed index
+        const oneIndexedIndex = parseInt(soundName, 10);
+        if (!isNaN(oneIndexedIndex)) {
+            return MathUtil.wrapClamp(oneIndexedIndex - 1, 0, len - 1);
+        }
+
+        // could not be found as a name or converted to index, return -1
+        return -1;
     }
 
     getSoundIndexByName (soundName, util) {
@@ -171,50 +158,6 @@ class Scratch3SoundBlocks {
     stopAllSounds (args, util) {
         if (util.target.audioPlayer === null) return;
         util.target.audioPlayer.stopAllSounds();
-    }
-
-    playNoteForBeats (args, util) {
-        let note = Cast.toNumber(args.NOTE);
-        note = MathUtil.clamp(note, Scratch3SoundBlocks.MIDI_NOTE_RANGE.min, Scratch3SoundBlocks.MIDI_NOTE_RANGE.max);
-        let beats = Cast.toNumber(args.BEATS);
-        beats = this._clampBeats(beats);
-        const soundState = this._getSoundState(util.target);
-        const inst = soundState.currentInstrument;
-        const vol = soundState.volume;
-        if (typeof this.runtime.audioEngine === 'undefined') return;
-        return this.runtime.audioEngine.playNoteForBeatsWithInstAndVol(note, beats, inst, vol);
-    }
-
-    playDrumForBeats (args, util) {
-        let drum = Cast.toNumber(args.DRUM);
-        drum -= 1; // drums are one-indexed
-        if (typeof this.runtime.audioEngine === 'undefined') return;
-        drum = MathUtil.wrapClamp(drum, 0, this.runtime.audioEngine.numDrums);
-        let beats = Cast.toNumber(args.BEATS);
-        beats = this._clampBeats(beats);
-        if (util.target.audioPlayer === null) return;
-        return util.target.audioPlayer.playDrumForBeats(drum, beats);
-    }
-
-    restForBeats (args) {
-        let beats = Cast.toNumber(args.BEATS);
-        beats = this._clampBeats(beats);
-        if (typeof this.runtime.audioEngine === 'undefined') return;
-        return this.runtime.audioEngine.waitForBeats(beats);
-    }
-
-    _clampBeats (beats) {
-        return MathUtil.clamp(beats, Scratch3SoundBlocks.BEAT_RANGE.min, Scratch3SoundBlocks.BEAT_RANGE.max);
-    }
-
-    setInstrument (args, util) {
-        const soundState = this._getSoundState(util.target);
-        let instNum = Cast.toNumber(args.INSTRUMENT);
-        instNum -= 1; // instruments are one-indexed
-        if (typeof this.runtime.audioEngine === 'undefined') return;
-        instNum = MathUtil.wrapClamp(instNum, 0, this.runtime.audioEngine.numInstruments);
-        soundState.currentInstrument = instNum;
-        return this.runtime.audioEngine.instrumentPlayer.loadInstrument(soundState.currentInstrument);
     }
 
     setEffect (args, util) {
@@ -277,29 +220,6 @@ class Scratch3SoundBlocks {
     getVolume (args, util) {
         const soundState = this._getSoundState(util.target);
         return soundState.volume;
-    }
-
-    setTempo (args) {
-        const tempo = Cast.toNumber(args.TEMPO);
-        this._updateTempo(tempo);
-    }
-
-    changeTempo (args) {
-        const change = Cast.toNumber(args.TEMPO);
-        if (typeof this.runtime.audioEngine === 'undefined') return;
-        const tempo = change + this.runtime.audioEngine.currentTempo;
-        this._updateTempo(tempo);
-    }
-
-    _updateTempo (tempo) {
-        tempo = MathUtil.clamp(tempo, Scratch3SoundBlocks.TEMPO_RANGE.min, Scratch3SoundBlocks.TEMPO_RANGE.max);
-        if (typeof this.runtime.audioEngine === 'undefined') return;
-        this.runtime.audioEngine.setTempo(tempo);
-    }
-
-    getTempo () {
-        if (typeof this.runtime.audioEngine === 'undefined') return;
-        return this.runtime.audioEngine.currentTempo;
     }
 
     soundsMenu (args) {
