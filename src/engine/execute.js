@@ -182,18 +182,15 @@ const execute = function (sequencer, thread) {
     // Generate values for arguments (inputs).
     const argValues = {};
 
-    // Add all fields on this block to the argValues.
-    for (const fieldName in fields) {
-        if (!fields.hasOwnProperty(fieldName)) continue;
-        if (fieldName === 'VARIABLE' || fieldName === 'LIST' ||
-            fieldName === 'BROADCAST_OPTION') {
-            argValues[fieldName] = {
-                id: fields[fieldName].id,
-                name: fields[fieldName].value
-            };
-        } else {
+    const idNameField = blockContainer.getIdNameField(block);
+    if (idNameField === null) {
+        const fields = blockContainer.getFields(block);
+        // Add all fields on this block to the argValues.
+        for (const fieldName in fields) {
             argValues[fieldName] = fields[fieldName].value;
         }
+    } else {
+        argValues[idNameField.name] = idNameField.value;
     }
 
     // Recursively evaluate input blocks.
