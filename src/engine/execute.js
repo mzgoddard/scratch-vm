@@ -195,52 +195,59 @@ const execute = function (sequencer, thread) {
 
     // Recursively evaluate input blocks.
     for (const inputName in inputs) {
-        if (!inputs.hasOwnProperty(inputName)) continue;
-        // Do not evaluate the internal custom command block within definition
-        if (inputName === 'custom_block') continue;
-        const input = inputs[inputName];
-        const inputBlockId = input.block;
-        // Is there no value for this input waiting in the stack frame?
-        if (inputBlockId !== null && typeof currentStackFrame.reported[inputName] === 'undefined') {
-            // If there's not, we need to evaluate the block.
-            // Push to the stack to evaluate the reporter block.
-            thread.pushStack(inputBlockId);
-            // Save name of input for `Thread.pushReportedValue`.
-            currentStackFrame.waitingReporter = inputName;
-            // Actually execute the block.
-            execute(sequencer, thread);
-            if (thread.status === Thread.STATUS_PROMISE_WAIT) {
-                return;
+        if (
+            inputs.hasOwnProperty(inputName) &&
+            // Do not evaluate the internal custom command block within
+            // definition
+            inputName !== 'custom_block'
+        ) {
+            const input = inputs[inputName];
+            const inputBlockId = input.block;
+            // Is there no value for this input waiting in the stack frame?
+            if (
+                inputBlockId !== null &&
+                typeof currentStackFrame.reported[inputName] === 'undefined'
+            ) {
+                // If there's not, we need to evaluate the block.
+                // Push to the stack to evaluate the reporter block.
+                thread.pushStack(inputBlockId);
+                // Save name of input for `Thread.pushReportedValue`.
+                currentStackFrame.waitingReporter = inputName;
+                // Actually execute the block.
+                execute(sequencer, thread);
+                if (thread.status !== Thread.STATUS_PROMISE_WAIT) {
+                    // Execution returned immediately,
+                    // and presumably a value was reported, so pop the stack.
+                    currentStackFrame.waitingReporter = null;
+                    thread.popStack();
+                } else {
+                    return;
+                }
             }
-
-            // Execution returned immediately,
-            // and presumably a value was reported, so pop the stack.
-            currentStackFrame.waitingReporter = null;
-            thread.popStack();
-        }
-        const inputValue = currentStackFrame.reported[inputName];
-        if (inputName === 'BROADCAST_INPUT') {
-            const broadcastInput = inputs[inputName];
-            // Check if something is plugged into the broadcast block, or
-            // if the shadow dropdown menu is being used.
-            if (broadcastInput.block === broadcastInput.shadow) {
-                // Shadow dropdown menu is being used.
-                // Get the appropriate information out of it.
-                const shadow = blockContainer.getBlock(broadcastInput.shadow);
-                const broadcastField = shadow.fields.BROADCAST_OPTION;
-                argValues.BROADCAST_OPTION = {
-                    id: broadcastField.id,
-                    name: broadcastField.value
-                };
+            const inputValue = currentStackFrame.reported[inputName];
+            if (inputName !== 'BROADCAST_INPUT') {
+                argValues[inputName] = inputValue;
             } else {
-                // Something is plugged into the broadcast input.
-                // Cast it to a string. We don't need an id here.
-                argValues.BROADCAST_OPTION = {
-                    name: cast.toString(inputValue)
-                };
+                const broadcastInput = inputs[inputName];
+                // Check if something is plugged into the broadcast block, or
+                // if the shadow dropdown menu is being used.
+                if (broadcastInput.block === broadcastInput.shadow) {
+                    // Shadow dropdown menu is being used.
+                    // Get the appropriate information out of it.
+                    const shadow = blockContainer.getBlock(broadcastInput.shadow);
+                    const broadcastField = shadow.fields.BROADCAST_OPTION;
+                    argValues.BROADCAST_OPTION = {
+                        id: broadcastField.id,
+                        name: broadcastField.value
+                    };
+                } else {
+                    // Something is plugged into the broadcast input.
+                    // Cast it to a string. We don't need an id here.
+                    argValues.BROADCAST_OPTION = {
+                        name: cast.toString(inputValue)
+                    };
+                }
             }
-        } else {
-            argValues[inputName] = inputValue;
         }
     }
 
