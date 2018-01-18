@@ -46,7 +46,11 @@ class Blocks {
              * Cache procedure definitions by block id
              * @type {object.<string, ?string>}
              */
-            procedureDefinitions: {}
+            procedureDefinitions: {},
+
+            shadow: {},
+            shadowValue: {},
+            idNameField: {},
         };
 
     }
@@ -114,7 +118,7 @@ class Blocks {
      * @return {?string} the opcode corresponding to that block
      */
     getOpcode (block) {
-        return (typeof block === 'undefined') ? null : block.opcode;
+        return (typeof block !== 'undefined') ? block.opcode : null;
     }
 
     /**
@@ -123,7 +127,82 @@ class Blocks {
      * @return {?object} All fields and their values.
      */
     getFields (block) {
-        return (typeof block === 'undefined') ? null : block.fields;
+        return (typeof block !== 'undefined') ? block.fields : null;
+    }
+
+    isShadow (block) {
+        if (typeof block !== 'undefined') {
+            let shadow = this._cache.shadow[block.id];
+            if (typeof shadow !== 'undefined') {
+                return shadow;
+            }
+
+            shadow = (
+                Object.keys(this.getFields(block)).length === 1 &&
+                Object.keys(this.getInputs(block)).length === 0
+            );
+
+            this._cache.shadow[block.id] = shadow;
+            return shadow;
+        }
+    }
+
+    getShadowValue (block) {
+        if (typeof block !== 'undefined') {
+            let shadowValue = this._cache.shadowValue[block.id];
+            if (typeof shadowValue !== 'undefined') {
+                return shadowValue;
+            }
+
+            if (this.isShadow(block)) {
+                const fields = this.getFields(block);
+                const fieldKeys = Object.keys(fields);
+                shadowValue = fields[fieldKeys[0]].value;
+
+                this._cache.shadowValue[block.id] = shadowValue;
+                return shadowValue;
+            }
+        }
+    }
+
+    getIdNameField (block) {
+        if (typeof block !== 'undefined') {
+            let idNameField = this._cache.idNameField[block.id];
+            if (typeof idNameField !== 'undefined') {
+                return idNameField;
+            }
+
+            const fields = this.getFields(block);
+            idNameField = null;
+            if (fields.VARIABLE) {
+                idNameField = {
+                    name: 'VARIABLE',
+                    value: {
+                        id: fields.VARIABLE.id,
+                        name: fields.VARIABLE.value
+                    }
+                };
+            } else if (fields.LIST) {
+                idNameField = {
+                    name: 'LIST',
+                    value: {
+                        id: fields.LIST.id,
+                        name: fields.LIST.value
+                    }
+                };
+            } else if (fields.BROADCAST_OPTION) {
+                idNameField = {
+                    name: 'BROADCAST_OPTION',
+                    value: {
+                        id: fields.BROADCAST_OPTION.id,
+                        name: fields.BROADCAST_OPTION.value
+                    }
+                };
+            }
+
+            this._cache.idNameField[block.id] = idNameField;
+            return idNameField;
+        }
     }
 
     /**
@@ -132,23 +211,25 @@ class Blocks {
      * @return {?Array.<object>} All non-branch inputs and their associated blocks.
      */
     getInputs (block) {
-        if (typeof block === 'undefined') return null;
-        let inputs = this._cache.inputs[block.id];
-        if (typeof inputs !== 'undefined') {
+        if (typeof block !== 'undefined') {
+            let inputs = this._cache.inputs[block.id];
+            if (typeof inputs !== 'undefined') {
+                return inputs;
+            }
+
+            inputs = {};
+            for (const input in block.inputs) {
+                // Ignore blocks prefixed with branch prefix.
+                if (input.substring(0, Blocks.BRANCH_INPUT_PREFIX.length) !==
+                    Blocks.BRANCH_INPUT_PREFIX) {
+                    inputs[input] = block.inputs[input];
+                }
+            }
+
+            this._cache.inputs[block.id] = inputs;
             return inputs;
         }
-
-        inputs = {};
-        for (const input in block.inputs) {
-            // Ignore blocks prefixed with branch prefix.
-            if (input.substring(0, Blocks.BRANCH_INPUT_PREFIX.length) !==
-                Blocks.BRANCH_INPUT_PREFIX) {
-                inputs[input] = block.inputs[input];
-            }
-        }
-
-        this._cache.inputs[block.id] = inputs;
-        return inputs;
+        return;
     }
 
     /**
@@ -157,7 +238,7 @@ class Blocks {
      * @return {?object} Mutation for the block.
      */
     getMutation (block) {
-        return (typeof block === 'undefined') ? null : block.mutation;
+        return (typeof block !== 'undefined') ? block.mutation : null;
     }
 
     /**
@@ -334,6 +415,9 @@ class Blocks {
         this._cache.inputs = {};
         this._cache.procedureParamNames = {};
         this._cache.procedureDefinitions = {};
+        this._cache.shadow = {};
+        this._cache.shadowValue = {};
+        this._cache.idNameField = {};
     }
 
     /**
