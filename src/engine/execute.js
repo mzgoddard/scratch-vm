@@ -160,10 +160,18 @@ const execute = function (sequencer, thread) {
             // Skip through the block (hat with no predicate).
             return;
         }
-        const keys = Object.keys(fields);
-        if (keys.length === 1 && Object.keys(inputs).length === 0) {
+        if (blockContainer.isShadow(block)) {
             // One field and no inputs - treat as arg.
-            handleReport(fields[keys[0]].value, sequencer, thread, currentBlockId, opcode, isHat);
+            handleReport(blockContainer.getShadowValue(block), sequencer, thread, currentBlockId, opcode, isHat);
+        // }
+        // const keys = Object.keys(fields);
+        // if (
+        //     _info.singleFieldShadow ||
+        //     keys.length === 1 && Object.keys(inputs).length === 0
+        // ) {
+        //     _info.singleFieldShadow = true;
+        //     // One field and no inputs - treat as arg.
+        //     handleReport(fields[keys[0]].value, sequencer, thread, currentBlockId, opcode, isHat);
         } else {
             log.warn(`Could not get implementation for opcode: ${opcode}`);
         }
