@@ -106,6 +106,27 @@ const handleReport = function (
     }
 };
 
+const opcodeInfo = (function() {
+    const infoCache = {};
+
+    return function (opcode, runtime) {
+        if (typeof infoCache[opcode] === 'object') {
+            return infoCache[opcode];
+        }
+
+        const blockFunction = runtime.getOpcodeFunction(opcode);
+        infoCache[opcode] = {
+            opcode,
+            isHat: runtime.getIsHat(opcode),
+            blockFunction,
+            isEdgeActivated: runtime.getIsEdgeActivatedHat(opcode),
+            hasBlockFunction: typeof blockFunction !== 'undefined',
+            fieldKeys: null
+        };
+        return infoCache[opcode];
+    };
+})();
+
 /**
  * Execute a block.
  * @param {!Sequencer} sequencer Which sequencer is executing.
@@ -138,16 +159,18 @@ const execute = function (sequencer, thread) {
     }
 
     const opcode = blockContainer.getOpcode(block);
-    const fields = blockContainer.getFields(block);
-    const inputs = blockContainer.getInputs(block);
-    const blockFunction = runtime.getOpcodeFunction(opcode);
-    const isHat = runtime.getIsHat(opcode);
 
-
-    if (!opcode) {
+    if (typeof opcode !== 'string') {
         log.warn(`Could not get opcode for block: ${currentBlockId}`);
         return;
     }
+
+    const _info = opcodeInfo(opcode, runtime);
+    const {hasBlockFunction, blockFunction, isHat} = _info;
+    // const blockFunction = runtime.getOpcodeFunction(opcode);
+    // const isHat = runtime.getIsHat(opcode);
+
+    const inputs = blockContainer.getInputs(block);
 
     // Hats and single-field shadows are implemented slightly differently
     // from regular blocks.
@@ -155,7 +178,7 @@ const execute = function (sequencer, thread) {
     // it's treated as a predicate; if not, execution will proceed as a no-op.
     // For single-field shadows: If the block has a single field, and no inputs,
     // immediately return the value of the field.
-    if (typeof blockFunction === 'undefined') {
+    if (!hasBlockFunction) {
         if (isHat) {
             // Skip through the block (hat with no predicate).
             return;
