@@ -35,6 +35,10 @@ const isPromise = function (value) {
     );
 };
 
+const last = function (ary) {
+    return ary[ary.length - 1];
+};
+
 /**
  * Handle any reported value from the primitive, either directly returned
  * or after a promise resolves.
@@ -52,7 +56,33 @@ const isPromise = function (value) {
 const handleReport = function (
     resolvedValue, sequencer, thread, currentBlockId, opcode, isHat) {
     thread.pushReportedValue(resolvedValue);
-    if (isHat) {
+    if (isHat === false) {
+        // In a non-hat, report the value visually if necessary if
+        // at the top of the thread stack.
+        if (
+            typeof resolvedValue !== 'undefined' &&
+            thread.topBlock === last(thread.stack)
+        ) {
+            if (thread.stackClick) {
+                sequencer.runtime.visualReport(currentBlockId, resolvedValue);
+            }
+            if (thread.updateMonitor) {
+                const targetId = sequencer.runtime.monitorBlocks
+                    .getBlock(currentBlockId).targetId;
+                if (targetId && !sequencer.runtime.getTargetById(targetId)) {
+                    // Target no longer exists
+                    return;
+                }
+                sequencer.runtime.requestUpdateMonitor(Map({
+                    id: currentBlockId,
+                    spriteName: targetId ? sequencer.runtime.getTargetById(targetId).getName() : null,
+                    value: String(resolvedValue)
+                }));
+            }
+        }
+        // Finished any yields.
+        thread.status = Thread.STATUS_RUNNING;
+    } else {
         // Hat predicate was evaluated.
         if (sequencer.runtime.getIsEdgeActivatedHat(opcode)) {
             // If this is an edge-activated hat, only proceed if the value is
@@ -73,28 +103,6 @@ const handleReport = function (
             // if predicate was false.
             sequencer.retireThread(thread);
         }
-    } else {
-        // In a non-hat, report the value visually if necessary if
-        // at the top of the thread stack.
-        if (typeof resolvedValue !== 'undefined' && thread.atStackTop()) {
-            if (thread.stackClick) {
-                sequencer.runtime.visualReport(currentBlockId, resolvedValue);
-            }
-            if (thread.updateMonitor) {
-                const targetId = sequencer.runtime.monitorBlocks.getBlock(currentBlockId).targetId;
-                if (targetId && !sequencer.runtime.getTargetById(targetId)) {
-                    // Target no longer exists
-                    return;
-                }
-                sequencer.runtime.requestUpdateMonitor(Map({
-                    id: currentBlockId,
-                    spriteName: targetId ? sequencer.runtime.getTargetById(targetId).getName() : null,
-                    value: String(resolvedValue)
-                }));
-            }
-        }
-        // Finished any yields.
-        thread.status = Thread.STATUS_RUNNING;
     }
 };
 
