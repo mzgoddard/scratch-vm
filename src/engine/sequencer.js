@@ -200,7 +200,21 @@ class Sequencer {
             if (thread.target === null) {
                 this.retireThread(thread);
             } else {
-                execute(this, thread);
+                const blockContainer = thread.blockContainer;
+                const block = blockContainer.getBlock(currentBlockId);
+                if (block._hasFunction === true) {
+                    execute(this, thread);
+                } else if (
+                    block._hasFunction !== false &&
+                    typeof this.runtime.getOpcodeFunction(
+                        blockContainer.getOpcode(block)
+                    ) !== 'undefined'
+                ) {
+                    block._hasFunction = true;
+                    execute(this, thread);
+                } else {
+                    block._hasFunction = false;
+                }
             }
             if (this.runtime.profiler !== null) {
                 // this.runtime.profiler.stop();

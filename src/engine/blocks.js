@@ -130,6 +130,33 @@ class Blocks {
         return (typeof block !== 'undefined') ? block.fields : null;
     }
 
+    // isSafe (blockId) {
+    //     let isSafe = this._cache.safeBlock[blockId];
+    //     if (typeof isSafe === 'boolean') {
+    //         return isSafe;
+    //     }
+    //
+    //     let block = this.getBlock(blockId);
+    //     let inputs = this.getInputs(block);
+    //     const stack = [{
+    //         block: block,
+    //         inputs: inputs,
+    //         inputKeys: inputs ? Object.keys(inputs) : [],
+    //         inputIndex: -1,
+    //     }];
+    //     while (stack.length > 0) {
+    //         const stackItem = stack[stack.length - 1];
+    //         block = stackItem.block;
+    //         if (typeof block === 'undefined' || !block.opcode) {
+    //             isSafe = false;
+    //             break;
+    //         }
+    //     }
+    //
+    //     this._cache.safeBlock[blockId] = isSafe;
+    //     return isSafe;
+    // }
+
     isShadow (block) {
         if (typeof block !== 'undefined') {
             let shadow = this._cache.shadow[block.id];
