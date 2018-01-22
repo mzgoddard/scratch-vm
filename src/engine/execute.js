@@ -98,6 +98,15 @@ const handleReport = function (
     }
 };
 
+const assigners = {
+    built: 0,
+    fields: {},
+    inputsPrep: {},
+    inputs: {},
+    mutation: null,
+    functions: {},
+};
+
 /**
  * Execute a block.
  * @param {!Sequencer} sequencer Which sequencer is executing.
@@ -137,118 +146,187 @@ const execute = function (sequencer, thread) {
     }
 
     const opcode = blockContainer.getOpcode(block);
-    const fields = blockContainer.getFields(block);
-    const inputs = blockContainer.getInputs(block);
+    // const fields = blockContainer.getFields(block);
+    // const inputs = blockContainer.getInputs(block);
     const blockFunction = runtime.getOpcodeFunction(opcode);
     const isHat = runtime.getIsHat(opcode);
 
-
-    if (!opcode) {
-        log.warn(`Could not get opcode for block: ${currentBlockId}`);
-        return;
-    }
-
-    // Hats and single-field shadows are implemented slightly differently
-    // from regular blocks.
-    // For hats: if they have an associated block function,
-    // it's treated as a predicate; if not, execution will proceed as a no-op.
-    // For single-field shadows: If the block has a single field, and no inputs,
-    // immediately return the value of the field.
-    if (typeof blockFunction === 'undefined') {
-        if (isHat) {
-            // Skip through the block (hat with no predicate).
-            return;
-        }
-        const keys = Object.keys(fields);
-        if (keys.length === 1 && Object.keys(inputs).length === 0) {
-            // One field and no inputs - treat as arg.
-            handleReport(fields[keys[0]].value, sequencer, thread, currentBlockId, opcode, isHat);
-        } else {
-            log.warn(`Could not get implementation for opcode: ${opcode}`);
-        }
-        thread.requestScriptGlowInFrame = true;
-        return;
-    }
-
-    // Generate values for arguments (inputs).
-    const argValues = {};
-
-    // Add all fields on this block to the argValues.
-    for (const fieldName in fields) {
-        if (!fields.hasOwnProperty(fieldName)) continue;
-        if (fieldName === 'VARIABLE' || fieldName === 'LIST' ||
-            fieldName === 'BROADCAST_OPTION') {
-            argValues[fieldName] = {
-                id: fields[fieldName].id,
-                name: fields[fieldName].value
-            };
-        } else {
-            argValues[fieldName] = fields[fieldName].value;
-        }
-    }
-
-    // Recursively evaluate input blocks.
-    for (const inputName in inputs) {
-        if (!inputs.hasOwnProperty(inputName)) continue;
-        // Do not evaluate the internal custom command block within definition
-        if (inputName === 'custom_block') continue;
-        const input = inputs[inputName];
-        const inputBlockId = input.block;
-        // Is there no value for this input waiting in the stack frame?
-        if (inputBlockId !== null && typeof currentStackFrame.reported[inputName] === 'undefined') {
-            // If there's not, we need to evaluate the block.
-            // Push to the stack to evaluate the reporter block.
-            thread.pushStack(inputBlockId);
-            // Save name of input for `Thread.pushReportedValue`.
-            currentStackFrame.waitingReporter = inputName;
-            // Actually execute the block.
-            execute(sequencer, thread);
-            if (thread.status === Thread.STATUS_PROMISE_WAIT) {
+    let ArgValues = block._executeArgValues;
+    if (!ArgValues) {
+        let shadowValue = block._executeShadowValue;
+        if (!shadowValue) {
+            if (!opcode) {
+                log.warn(`Could not get opcode for block: ${currentBlockId}`);
                 return;
             }
 
-            // Execution returned immediately,
-            // and presumably a value was reported, so pop the stack.
-            currentStackFrame.waitingReporter = null;
-            thread.popStack();
-        }
-        const inputValue = currentStackFrame.reported[inputName];
-        if (inputName === 'BROADCAST_INPUT') {
-            const broadcastInput = inputs[inputName];
-            // Check if something is plugged into the broadcast block, or
-            // if the shadow dropdown menu is being used.
-            if (broadcastInput.block === broadcastInput.shadow) {
-                // Shadow dropdown menu is being used.
-                // Get the appropriate information out of it.
-                const shadow = blockContainer.getBlock(broadcastInput.shadow);
-                const broadcastField = shadow.fields.BROADCAST_OPTION;
-                argValues.BROADCAST_OPTION = {
-                    id: broadcastField.id,
-                    name: broadcastField.value
-                };
-            } else {
-                // Something is plugged into the broadcast input.
-                // Cast it to a string. We don't need an id here.
-                argValues.BROADCAST_OPTION = {
-                    name: cast.toString(inputValue)
-                };
+            // Hats and single-field shadows are implemented slightly differently
+            // from regular blocks.
+            // For hats: if they have an associated block function,
+            // it's treated as a predicate; if not, execution will proceed as a no-op.
+            // For single-field shadows: If the block has a single field, and no inputs,
+            // immediately return the value of the field.
+            if (typeof blockFunction === 'undefined') {
+                if (isHat) {
+                    // Skip through the block (hat with no predicate).
+                    return;
+                }
+
+                const fields = blockContainer.getFields(block);
+                const inputs = blockContainer.getInputs(block);
+                const keys = Object.keys(fields);
+                if (keys.length === 1 && Object.keys(inputs).length === 0) {
+                    // One field and no inputs - treat as arg.
+                    handleReport(fields[keys[0]].value, sequencer, thread, currentBlockId, opcode, isHat);
+                    shadowValue = block._executeShadowValue = new Function('Thread', `
+                        return function shadow_${keys[0]}(thread, blockContainer, block) {
+                            const fields = blockContainer.getFields(block);
+                            thread.pushReportedValue(fields.${keys[0]}.value);
+                            thread.status = Thread.STATUS_RUNNING;
+                            thread.requestScriptGlowInFrame = true;
+                        };
+                    `)(Thread);
+                    return shadowValue(thread, blockContainer, block);
+                } else {
+                    log.warn(`Could not get implementation for opcode: ${opcode}`);
+                }
+                thread.requestScriptGlowInFrame = true;
+                return;
             }
         } else {
-            argValues[inputName] = inputValue;
+            return shadowValue(thread, blockContainer, block);
         }
+
+
+        // console.log('building', currentBlockId);
+        const _preppers = block._executePreppers = [];
+        const _assigners = block._executeAssigners = [];
+
+        const fields = blockContainer.getFields(block);
+        const inputs = blockContainer.getInputs(block);
+
+        // Add all fields on this block to the argValues.
+        for (const fieldName in fields) {
+            if (!fields.hasOwnProperty(fieldName)) continue;
+            if (fieldName === 'VARIABLE' || fieldName === 'LIST' ||
+                fieldName === 'BROADCAST_OPTION') {
+                if (!assigners.fields[fieldName]) {
+                    assigners.fields[fieldName] = `
+                        _this.${fieldName} = {
+                            id: fields.${fieldName}.id,
+                            name: fields.${fieldName}.value
+                        };
+                    `;
+                }
+            } else {
+                if (!assigners.fields[fieldName]) {
+                    assigners.fields[fieldName] = `
+                        _this.${fieldName} = fields.${fieldName}.value;
+                    `;
+                }
+            }
+            _assigners.push(assigners.fields[fieldName]);
+        }
+
+        // Recursively evaluate input blocks.
+        for (const inputName in inputs) {
+            if (!inputs.hasOwnProperty(inputName)) continue;
+            // Do not evaluate the internal custom command block within definition
+            if (inputName === 'custom_block') continue;
+            const input = inputs[inputName];
+            const inputBlockId = input.block;
+            // Is there no value for this input waiting in the stack frame?
+            if (inputBlockId !== null) {
+                if (!assigners.inputsPrep[inputName]) {
+                    assigners.inputsPrep[inputName] = `
+                        if (typeof stackFrame.reported.${inputName} === 'undefined') {
+                            thread.pushStack(inputs.${inputName}.block);
+                            stackFrame.waitingReporter = '${inputName}';
+                            execute(sequencer, thread);
+                            if (thread.status === Thread.STATUS_PROMISE_WAIT) {
+                                return;
+                            }
+
+                            stackFrame.waitingReporter = null;
+                            thread.popStack();
+                        }
+                    `;
+                }
+                _preppers.push(assigners.inputsPrep[inputName]);
+            }
+            if (!assigners.inputs[inputName]) {
+                if (inputName === 'BROADCAST_INPUT') {
+                    assigners.inputs[inputName] = `{
+                        const broadcastInput = inputs.${inputName};
+                        if (broadcastInput.block === broadcastInput.shadow) {
+                            const shadow = blockContainer.getBlock(broadcastInput.shadow);
+                            const broadcastField = shadow.fields.BROADCAST_OPTION;
+                            _this.BROADCAST_OPTION = {
+                                id: broadcastField.id,
+                                name: broadcastField.value
+                            };
+                        } else {
+                            _this.BROADCAST_OPTION = {
+                                name: cast.toString(stackFrame.reported.${inputName})
+                            };
+                            stackFrame.reported.${inputName} = undefined;
+                        }
+                    }`;
+                } else {
+                    assigners.inputs[inputName] = `
+                        _this.${inputName} = stackFrame.reported.${inputName};
+                        stackFrame.reported.${inputName} = undefined;
+                    `;
+                }
+            }
+            _assigners.push(assigners.inputs[inputName]);
+        }
+
+        // Add any mutation to args (e.g., for procedures).
+        const mutation = blockContainer.getMutation(block);
+        if (mutation !== null) {
+            if (!assigners.mutation) {
+                assigners.mutation = `
+                    _this.mutation = blockContainer.getMutation(block);
+                `;
+            }
+            _assigners.push(assigners.mutation);
+        }
+
+        block._executeArgValueObject = {};
+        const body = `
+            return function ${opcode.replace(/\W/g, '_')}(sequencer, thread, stackFrame, blockContainer, block) {
+                var _this = block._executeArgValueObject;
+                var fields = blockContainer.getFields(block);
+                var inputs = blockContainer.getInputs(block);
+
+                ${_preppers.join('\n')}
+                ${_assigners.join('\n')}
+
+                return _this;
+            };
+        `;
+        if (!assigners.functions[body]) {
+            assigners.functions[body] = new Function('execute', 'Thread', body)(execute, Thread);
+            console.log(++assigners.built);
+        }
+        ArgValues = block._executeArgValues = assigners.functions[body];
+        // console.log(ArgValues.toString());
     }
 
-    // Add any mutation to args (e.g., for procedures).
-    const mutation = blockContainer.getMutation(block);
-    if (mutation !== null) {
-        argValues.mutation = mutation;
+    // Generate values for arguments (inputs).
+    const argValues = ArgValues(
+        sequencer, thread, currentStackFrame, blockContainer, block
+    );
+    if (!argValues) {
+        return;
     }
 
     // If we've gotten this far, all of the input blocks are evaluated,
     // and `argValues` is fully populated. So, execute the block primitive.
     // First, clear `currentStackFrame.reported`, so any subsequent execution
     // (e.g., on return from a branch) gets fresh inputs.
-    currentStackFrame.reported = {};
+    // currentStackFrame.reported = {};
 
     let primitiveReportedValue = null;
     blockUtility.sequencer = sequencer;
