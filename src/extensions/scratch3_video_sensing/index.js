@@ -53,11 +53,7 @@ class Scratch3VideoSensingBlocks {
 
         // Boot up the video, canvas to down/up sample the video stream, the
         // preview skin and drawable, and kick off looping the analysis logic.
-        this.runtime.ioDevices.video.requestVideo()
-            .then(({release}) => {
-                this.releaseVideo = release;
-                this._loop();
-            });
+        this._loop();
     }
 
     /**
@@ -211,6 +207,15 @@ class Scratch3VideoSensingBlocks {
         ];
     }
 
+
+    get VIDEO_STATE_INFO () {
+        return [
+            {name: 'off'},
+            {name: 'on'},
+            {name: 'on-flipped'}
+        ];
+    }
+
     /**
      * @returns {object} metadata for this extension and its blocks.
      */
@@ -250,11 +255,33 @@ class Scratch3VideoSensingBlocks {
                             defaultValue: 10
                         }
                     }
+                },
+                {
+                    opcode: 'videoToggle',
+                    text: 'turn video [VIDEO_STATE]',
+                    arguments: {
+                        VIDEO_STATE: {
+                            type: ArgumentType.NUMBER,
+                            menu: 'VIDEO_STATE',
+                            defaultValue: 1
+                        }
+                    }
+                },
+                {
+                    opcode: 'setVideoTransparency',
+                    text: 'set video transparency to [TRANSPARENCY]',
+                    arguments: {
+                        TRANSPARENCY: {
+                            type: ArgumentType.NUMBER,
+                            defaultValue: 0
+                        }
+                    }
                 }
             ],
             menus: {
                 MOTION_DIRECTION: this._buildMenu(this.MOTION_DIRECTION_INFO),
-                STAGE_SPRITE: this._buildMenu(this.STAGE_SPRITE_INFO)
+                STAGE_SPRITE: this._buildMenu(this.STAGE_SPRITE_INFO),
+                VIDEO_STATE: this._buildMenu(this.VIDEO_STATE_INFO)
             }
         };
     }
@@ -306,6 +333,20 @@ class Scratch3VideoSensingBlocks {
         this.detect.analyzeFrame();
         const state = this._analyzeLocalMotion(util.target);
         return state.motionAmount > Number(args.REFERENCE);
+    }
+
+    videoToggle (args) {
+        const state = Number(args.VIDEO_STATE);
+        // 1 == off, 2 & 3 are on (3 is flipped)
+        if (state > 1) {
+            this.runtime.ioDevices.video.requestVideo();
+        } else {
+            this.runtime.ioDevices.video.disableVideo();
+        }
+    }
+
+    setVideoTransparency (args) {
+        this.runtime.ioDevices.video.setPreviewGhost(Number(args.TRANSPARENCY));
     }
 }
 
