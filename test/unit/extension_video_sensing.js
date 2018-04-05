@@ -2,7 +2,7 @@ const {createReadStream} = require('fs');
 const {join} = require('path');
 
 const {PNG} = require('pngjs');
-const {test} = require('tap');
+const {skip, test} = require('tap');
 
 const VideoSensing = require('../../src/extensions/scratch3_video_sensing/index.js');
 const VideoMotion = require('../../src/extensions/scratch3_video_sensing/library.js');
@@ -403,6 +403,45 @@ test('whenMotionGreaterThan returns true if local motion meets target', t => {
                 `not enough motion in drawable bounds to reach reference of 80`
             );
 
+            t.end();
+        });
+});
+
+((process.env.NODE_ENV || '').toLowerCase() === 'production' ? skip : test)('benchmark', t => {
+    t.plan(1);
+
+    return readFrames()
+        .then(frames => {
+            const detect = new VideoMotion();
+
+            // eslint-disable-next-line global-require
+            const Benchmark = require('benchmark');
+            const suite = new Benchmark.Suite();
+
+            return new Promise((resolve, reject) => {
+                // add tests
+                suite
+                    .add('VideoMotion#analyzeFrame', () => {
+                        detect.addFrame(frames.center);
+                        detect.addFrame(frames.left);
+
+                        detect.analyzeFrame();
+                    })
+                    // add listeners
+                    .on('cycle', event => {
+                        t.comment(String(event.target));
+                    })
+                    .on('error', reject)
+                    .on('complete', resolve)
+                    // run async
+                    .run({
+                        async: true,
+                        maxTime: 0.1
+                    });
+            });
+        })
+        .then(() => {
+            t.pass('benchmark complete');
             t.end();
         });
 });
