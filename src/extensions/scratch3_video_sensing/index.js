@@ -169,7 +169,11 @@ class Scratch3VideoSensingBlocks {
                 height: {min: 360, ideal: 480}
             }
         }, stream => {
-            this._video.src = window.URL.createObjectURL(stream);
+            if (typeof this._video.srcObject !== 'undefined') {
+                this._video.srcObject = stream;
+            } else {
+                this._video.src = window.URL.createObjectURL(stream);
+            }
             // Hint to the stream that it should load. A standard way to do this
             // is add the video tag to the DOM. Since this extension wants to
             // hide the video tag and instead render a sample of the stream into
