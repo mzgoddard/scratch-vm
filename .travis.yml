@@ -5,7 +5,6 @@ node_js:
 env:
   - NPM_SCRIPT="tap:unit -- --jobs=4"
   - NPM_SCRIPT="tap:integration -- --jobs=4"
-  - NPM_SCRIPT="tap:execute -- --jobs=4"
   - NODE_ENV=production
 sudo: false
 cache:
