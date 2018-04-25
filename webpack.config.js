@@ -1,9 +1,10 @@
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 const defaultsDeep = require('lodash.defaultsdeep');
 const path = require('path');
-const webpack = require('webpack');
+const UglifyJsPlugin = require('uglifyjs-webpack-plugin');
 
 const base = {
+    mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
     devServer: {
         contentBase: false,
         host: '0.0.0.0',
@@ -20,7 +21,7 @@ const base = {
             loader: 'babel-loader',
             include: path.resolve(__dirname, 'src'),
             query: {
-                presets: ['es2015']
+                presets: ['env']
             }
         },
         {
@@ -28,10 +29,12 @@ const base = {
             loader: 'file-loader'
         }]
     },
+    optimization: {
+        minimize: false
+    },
     plugins: process.env.NODE_ENV === 'production' ? [
-        new webpack.optimize.UglifyJsPlugin({
-            include: /\.min\.js$/,
-            minimize: true
+        new UglifyJsPlugin({
+            include: /\.min\.js$/
         })
     ] : []
 };
