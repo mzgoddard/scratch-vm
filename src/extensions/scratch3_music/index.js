@@ -6,17 +6,6 @@ const MathUtil = require('../../util/math-util');
 const Timer = require('../../util/timer');
 
 /**
- * The instrument and drum sounds, loaded as static assets.
- * @type {object}
- */
-let assetData = {};
-try {
-    assetData = require('./manifest');
-} catch (e) {
-    // Non-webpack environment, don't worry about assets.
-}
-
-/**
  * Icon svg to be displayed at the left edge of each extension block, encoded as a data URI.
  * @type {string}
  */
@@ -102,6 +91,17 @@ class Scratch3MusicBlocks {
         });
     }
 
+    _fetchSounds () {
+        if (!this._assetData) {
+            this._assetData = new Promise(resolve => {
+                require.ensure([], () => {
+                    resolve(require('./manifest'));
+                }, 'vm-music-manifest');
+            });
+        }
+        return this._assetData;
+    }
+
     /**
      * Decode a sound and store the buffer in an array.
      * @param {string} filePath - the audio file name.
@@ -112,14 +112,19 @@ class Scratch3MusicBlocks {
     _storeSound (filePath, index, bufferArray) {
         const fullPath = `${filePath}.mp3`;
 
-        if (!assetData[fullPath]) return;
+        return this._fetchSounds()
+            .catch(() => ({}))
+            .then(assetData => {
+                if (!assetData[fullPath]) return;
 
-        // The sound buffer has already been downloaded via the manifest file required above.
-        const soundBuffer = assetData[fullPath];
+                // The sound buffer has already been downloaded via the manifest file required above.
+                const soundBuffer = assetData[fullPath];
 
-        return this._decodeSound(soundBuffer).then(buffer => {
-            bufferArray[index] = buffer;
-        });
+                return this._decodeSound(soundBuffer);
+            })
+            .then(buffer => {
+                bufferArray[index] = buffer;
+            });
     }
 
     /**
