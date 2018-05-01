@@ -122,24 +122,24 @@ module.exports = [
                     loader: 'script-loader'
                 },
                 {
-                    test: require.resolve('highlightjs/highlight.pack.min.js'),
-                    loader: 'script-loader'
-                },
-                {
                     test: require.resolve('scratch-blocks/dist/vertical.js'),
                     loader: 'expose-loader?Blockly'
                 },
                 {
-                    test: require.resolve('scratch-audio'),
+                    test: require.resolve('scratch-audio/src/index.js'),
                     loader: 'expose-loader?AudioEngine'
                 },
                 {
-                    test: require.resolve('scratch-storage'),
+                    test: require.resolve('scratch-storage/src/index.js'),
                     loader: 'expose-loader?ScratchStorage'
                 },
                 {
-                    test: require.resolve('scratch-render'),
+                    test: require.resolve('scratch-render/src/index.js'),
                     loader: 'expose-loader?ScratchRender'
+                },
+                {
+                    test: /node_modules[\\/](linebreak|grapheme-breaker)[\\/].*\.js$/,
+                    loader: 'ify-loader'
                 }
             ])
         },
