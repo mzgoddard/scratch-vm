@@ -92,8 +92,6 @@ module.exports = [
             'vendor': [
                 // FPS counter
                 'stats.js/build/stats.min.js',
-                // Syntax highlighter
-                'highlightjs/highlight.pack.min.js',
                 // Scratch Blocks
                 'scratch-blocks/dist/vertical.js',
                 // Audio
