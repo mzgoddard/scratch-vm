@@ -5,6 +5,7 @@ const Variable = require('../engine/variable');
 const uid = require('../util/uid');
 const {Map} = require('immutable');
 const log = require('../util/log');
+const properties = require('../util/properties');
 
 /**
  * @fileoverview
@@ -60,6 +61,8 @@ class Target extends EventEmitter {
          * @type {Object.<string,*>}
          */
         this._customState = {};
+
+        this._variablesCache = properties.createCache();
     }
 
     /**
@@ -148,9 +151,12 @@ class Target extends EventEmitter {
      */
     lookupVariableById (id) {
         // If we have a local copy, return it.
-        if (this.variables.hasOwnProperty(id)) {
-            return this.variables[id];
+        if (properties.has(this.variables, this._variablesCache, id)) {
+            return properties.get(this.variables, this._variablesCache, id);
         }
+        // if (this.variables.hasOwnProperty(id)) {
+        //     return this.variables[id];
+        // }
         // If the stage has a global copy, return it.
         if (this.runtime && !this.isStage) {
             const stage = this.runtime.getTargetForStage();
