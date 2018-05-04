@@ -1,3 +1,5 @@
+const properties = require('../util/properties');
+
 /**
  * A thread is a running stack context and all the metadata needed.
  * @param {?string} firstBlock First block to execute in the thread.
@@ -134,6 +136,7 @@ class Thread {
                 reported: {}, // Persists reported inputs during async block.
                 waitingReporter: null, // Name of waiting reporter.
                 params: {}, // Procedure parameters.
+                _paramsCache: properties.createCache(),
                 executionContext: {} // A context passed to block implementations.
             });
         }
@@ -152,6 +155,7 @@ class Thread {
         frame.reported = {};
         frame.waitingReporter = null;
         frame.params = {};
+        frame._paramsCache = properties.createCache();
         frame.executionContext = {};
     }
 
@@ -240,8 +244,8 @@ class Thread {
     getParam (paramName) {
         for (let i = this.stackFrames.length - 1; i >= 0; i--) {
             const frame = this.stackFrames[i];
-            if (frame.params.hasOwnProperty(paramName)) {
-                return frame.params[paramName];
+            if (properties.has(frame.params, frame._paramsCache, paramName)) {
+                return properties.get(frame.params, frame._paramsCache, paramName);
             }
         }
         return null;
