@@ -1,3 +1,54 @@
+const _stackFrameFreeList = [];
+
+class StackFrame {
+    constructor (warpMode) {
+        // Whether this level of the stack is a loop.
+        this.isLoop = false;
+        // Whether this level is in warp mode.
+        this.warpMode = warpMode;
+        // Reported value from just executed block.
+        this.justReported = null;
+        // Persists reported inputs during async block.
+        this.reported = null;
+        // Name of waiting reporter.
+        this.waitingReporter = null;
+        // Procedure parameters.
+        this.params = null;
+        // A context passed to block implementations.
+        this.executionContext = null;
+    }
+
+    reset () {
+        this.isLoop = false;
+        this.warpMode = false;
+        this.justReported = null;
+        this.reported = null;
+        this.waitingReporter = null;
+        this.params = null;
+        this.executionContext = null;
+        return this;
+    }
+
+    use (warpMode) {
+        this.reset();
+        this.warpMode = warpMode;
+        return this;
+    }
+
+    static create (warpMode) {
+        const stackFrame = _stackFrameFreeList.pop();
+        if (typeof stackFrame !== 'undefined') {
+            stackFrame.warpMode = warpMode;
+            return stackFrame;
+        }
+        return new StackFrame(warpMode);
+    }
+
+    static release (stackFrame) {
+        _stackFrameFreeList.push(stackFrame.reset());
+    }
+}
+
 /**
  * A thread is a running stack context and all the metadata needed.
  * @param {?string} firstBlock First block to execute in the thread.
@@ -127,15 +178,7 @@ class Thread {
             if (this.stackFrames.length > 0 && this.stackFrames[this.stackFrames.length - 1]) {
                 warpMode = this.stackFrames[this.stackFrames.length - 1].warpMode;
             }
-            this.stackFrames.push({
-                isLoop: false, // Whether this level of the stack is a loop.
-                warpMode: warpMode, // Whether this level is in warp mode.
-                justReported: null, // Reported value from just executed block.
-                reported: {}, // Persists reported inputs during async block.
-                waitingReporter: null, // Name of waiting reporter.
-                params: {}, // Procedure parameters.
-                executionContext: {} // A context passed to block implementations.
-            });
+            this.stackFrames.push(StackFrame.create(warpMode));
         }
     }
 
@@ -147,12 +190,8 @@ class Thread {
     reuseStackForNextBlock (blockId) {
         this.stack[this.stack.length - 1] = blockId;
         const frame = this.stackFrames[this.stackFrames.length - 1];
-        frame.isLoop = false;
-        // frame.warpMode = warpMode;   // warp mode stays the same when reusing the stack frame.
-        frame.reported = {};
-        frame.waitingReporter = null;
-        frame.params = {};
-        frame.executionContext = {};
+        // warp mode stays the same when reusing the stack frame.
+        frame.use(frame.warpMode);
     }
 
     /**
@@ -160,7 +199,7 @@ class Thread {
      * @return {string} Block ID popped from the stack.
      */
     popStack () {
-        this.stackFrames.pop();
+        StackFrame.release(this.stackFrames.pop());
         return this.stack.pop();
     }
 
@@ -229,6 +268,9 @@ class Thread {
      */
     pushParam (paramName, value) {
         const stackFrame = this.peekStackFrame();
+        if (stackFrame.params === null) {
+            stackFrame.params = {};
+        }
         stackFrame.params[paramName] = value;
     }
 
@@ -240,6 +282,9 @@ class Thread {
     getParam (paramName) {
         for (let i = this.stackFrames.length - 1; i >= 0; i--) {
             const frame = this.stackFrames[i];
+            if (frame.params === null) {
+                continue;
+            }
             if (frame.params.hasOwnProperty(paramName)) {
                 return frame.params[paramName];
             }
