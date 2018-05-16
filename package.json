@@ -11,6 +11,11 @@
   },
   "main": "./dist/node/scratch-vm.js",
   "browser": "./dist/web/scratch-vm.js",
+  "files": [
+    "TRADEMARK",
+    "dist",
+    "src"
+  ],
   "scripts": {
     "build": "webpack --progress --colors --bail",
     "coverage": "tap ./test/{unit,integration}/*.js --coverage --coverage-report=lcov",
