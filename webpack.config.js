@@ -32,7 +32,7 @@ const base = {
     optimization: {
         minimizer: [
             new UglifyJsPlugin({
-                include: /\.min\.js$/
+                include: /[\\/]web[\\/]/
             })
         ]
     },
@@ -44,8 +44,7 @@ module.exports = [
     defaultsDeep({}, base, {
         target: 'web',
         entry: {
-            'scratch-vm': './src/index.js',
-            'scratch-vm.min': './src/index.js'
+            'scratch-vm': './src/index.js'
         },
         output: {
             libraryTarget: 'umd',
