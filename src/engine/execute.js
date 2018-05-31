@@ -102,7 +102,7 @@ const handleReport = function (resolvedValue, sequencer, thread, blockCached) {
     }
 };
 
-const handlePrimise = (primitiveReportedValue, sequencer, thread, blockCached) => {
+const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached) => {
     const currentBlockId = blockCached.blockId;
     const opcode = blockCached.opcode;
     const isHat = blockCached._isHat;
@@ -146,6 +146,28 @@ const handlePrimise = (primitiveReportedValue, sequencer, thread, blockCached) =
         thread.popStack();
     });
 };
+
+const saveReported = (currentStackFrame, inputName, inputs, argValues) => {
+    // Save name of input for `Thread.pushReportedValue`.
+    currentStackFrame.waitingReporter = inputName;
+    // Create a reported value on the stack frame to store the
+    // already built values.
+    currentStackFrame.reported = {};
+    // Waiting for the block to resolve, store the current argValues
+    // onto a member of the currentStackFrame that can be used once
+    // the nested block resolves to rebuild argValues up to this
+    // point.
+    for (const _inputName in inputs) {
+        // We are waiting on the nested block at inputName so we
+        // don't need to store any more inputs.
+        if (_inputName === inputName) break;
+        if (_inputName === 'BROADCAST_INPUT') {
+            currentStackFrame.reported[_inputName] = argValues.BROADCAST_OPTION.name;
+        } else {
+            currentStackFrame.reported[_inputName] = argValues[_inputName];
+        }
+    }
+}
 
 /**
  * A convenience constant to help make use of the recursiveCall argument easier
@@ -390,34 +412,15 @@ const execute = function (sequencer, thread, recursiveCall) {
             // If there's not, we need to evaluate the block.
             // Push to the stack to evaluate the reporter block.
             thread.pushStack(inputBlockId);
-            // Save name of input for `Thread.pushReportedValue`.
-            currentStackFrame.waitingReporter = inputName;
             // Actually execute the block.
             execute(sequencer, thread, RECURSIVE);
             if (thread.status === Thread.STATUS_PROMISE_WAIT) {
-                // Create a reported value on the stack frame to store the
-                // already built values.
-                currentStackFrame.reported = {};
-                // Waiting for the block to resolve, store the current argValues
-                // onto a member of the currentStackFrame that can be used once
-                // the nested block resolves to rebuild argValues up to this
-                // point.
-                for (const _inputName in inputs) {
-                    // We are waiting on the nested block at inputName so we
-                    // don't need to store any more inputs.
-                    if (_inputName === inputName) break;
-                    if (_inputName === 'BROADCAST_INPUT') {
-                        currentStackFrame.reported[_inputName] = argValues.BROADCAST_OPTION.name;
-                    } else {
-                        currentStackFrame.reported[_inputName] = argValues[_inputName];
-                    }
-                }
+                saveReported(currentStackFrame, inputName, inputs, argValues);
                 return;
             }
 
             // Execution returned immediately,
             // and presumably a value was reported, so pop the stack.
-            currentStackFrame.waitingReporter = null;
             thread.popStack();
         }
 
