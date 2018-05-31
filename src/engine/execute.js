@@ -123,6 +123,8 @@ const RECURSIVE = true;
  */
 class BlockCached {
     constructor (blockContainer, cached) {
+        this.blockId = cached.blockId;
+
         /**
          * Block operation code for this block.
          * @type {string}
