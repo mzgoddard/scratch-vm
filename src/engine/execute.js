@@ -50,8 +50,11 @@ const isPromise = function (value) {
  */
 // @todo move this to callback attached to the thread when we have performance
 // metrics (dd)
-const handleReport = function (
-    resolvedValue, sequencer, thread, currentBlockId, opcode, isHat) {
+const handleReport = function (resolvedValue, sequencer, thread, blockCached) {
+    const currentBlockId = blockCached.blockId;
+    const opcode = blockCached.opcode;
+    const isHat = blockCached._isHat;
+
     thread.pushReportedValue(resolvedValue);
     if (isHat) {
         // Hat predicate was evaluated.
@@ -97,6 +100,51 @@ const handleReport = function (
         // Finished any yields.
         thread.status = Thread.STATUS_RUNNING;
     }
+};
+
+const handlePrimise = (primitiveReportedValue, sequencer, thread, blockCached) => {
+    const currentBlockId = blockCached.blockId;
+    const opcode = blockCached.opcode;
+    const isHat = blockCached._isHat;
+
+    if (thread.status === Thread.STATUS_RUNNING) {
+        // Primitive returned a promise; automatically yield thread.
+        thread.status = Thread.STATUS_PROMISE_WAIT;
+    }
+    // Promise handlers
+    primitiveReportedValue.then(resolvedValue => {
+        handleReport(resolvedValue, sequencer, thread, blockCached);
+        if (typeof resolvedValue === 'undefined') {
+            let stackFrame;
+            let nextBlockId;
+            do {
+                // In the case that the promise is the last block in the current thread stack
+                // We need to pop out repeatedly until we find the next block.
+                const popped = thread.popStack();
+                if (popped === null) {
+                    return;
+                }
+                nextBlockId = thread.target.blocks.getNextBlock(popped);
+                if (nextBlockId !== null) {
+                    // A next block exists so break out this loop
+                    break;
+                }
+                // Investigate the next block and if not in a loop,
+                // then repeat and pop the next item off the stack frame
+                stackFrame = thread.peekStackFrame();
+            } while (stackFrame !== null && !stackFrame.isLoop);
+
+            thread.pushStack(nextBlockId);
+        } else {
+            thread.popStack();
+        }
+    }, rejectionReason => {
+        // Promise rejected: the primitive had some error.
+        // Log it and proceed.
+        log.warn('Primitive rejected promise: ', rejectionReason);
+        thread.status = Thread.STATUS_RUNNING;
+        thread.popStack();
+    });
 };
 
 /**
@@ -433,51 +481,14 @@ const execute = function (sequencer, thread, recursiveCall) {
 
     // If it's a promise, wait until promise resolves.
     if (isPromise(primitiveReportedValue)) {
-        if (thread.status === Thread.STATUS_RUNNING) {
-            // Primitive returned a promise; automatically yield thread.
-            thread.status = Thread.STATUS_PROMISE_WAIT;
-        }
-        // Promise handlers
-        primitiveReportedValue.then(resolvedValue => {
-            handleReport(resolvedValue, sequencer, thread, currentBlockId, opcode, isHat);
-            if (typeof resolvedValue === 'undefined') {
-                let stackFrame;
-                let nextBlockId;
-                do {
-                    // In the case that the promise is the last block in the current thread stack
-                    // We need to pop out repeatedly until we find the next block.
-                    const popped = thread.popStack();
-                    if (popped === null) {
-                        return;
-                    }
-                    nextBlockId = thread.target.blocks.getNextBlock(popped);
-                    if (nextBlockId !== null) {
-                        // A next block exists so break out this loop
-                        break;
-                    }
-                    // Investigate the next block and if not in a loop,
-                    // then repeat and pop the next item off the stack frame
-                    stackFrame = thread.peekStackFrame();
-                } while (stackFrame !== null && !stackFrame.isLoop);
-
-                thread.pushStack(nextBlockId);
-            } else {
-                thread.popStack();
-            }
-        }, rejectionReason => {
-            // Promise rejected: the primitive had some error.
-            // Log it and proceed.
-            log.warn('Primitive rejected promise: ', rejectionReason);
-            thread.status = Thread.STATUS_RUNNING;
-            thread.popStack();
-        });
+        handlePromise(primitiveReportedValue, sequencer, thread, blockCached);
     } else if (thread.status === Thread.STATUS_RUNNING) {
         if (recursiveCall === RECURSIVE) {
             // In recursive calls (where execute calls execute) handleReport
             // simplifies to just calling thread.pushReportedValue.
             thread.pushReportedValue(primitiveReportedValue);
         } else {
-            handleReport(primitiveReportedValue, sequencer, thread, currentBlockId, opcode, isHat);
+            handleReport(primitiveReportedValue, sequencer, thread, blockCached);
         }
     }
 };
