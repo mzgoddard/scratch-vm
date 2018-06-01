@@ -200,6 +200,15 @@ class BlockCached {
          * @type {string}
          */
         this.opcode = cached.opcode;
+    }
+
+    execute () {
+        throw new Error('missing BlockCached execute implementation');
+    }
+}
+class StandardBlockCached extends BlockCached {
+    constructor (blockContainer, cached) {
+        super(blockContainer, cached);
 
         /**
          * Is the opcode a hat (event responder) block.
@@ -212,24 +221,6 @@ class BlockCached {
          * @type {?function}
          */
         this._blockFunction = null;
-
-        /**
-         * Is the block function defined for this opcode?
-         * @type {boolean}
-         */
-        this._definedBlockFunction = false;
-
-        /**
-         * Is this block a block with no function but a static value to return.
-         * @type {boolean}
-         */
-        this._isShadowBlock = false;
-
-        /**
-         * The static value of this block if it is a shadow block.
-         * @type {?any}
-         */
-        this._shadowValue = null;
 
         /**
          * An arguments object for block implementations. All executions of this
@@ -247,16 +238,6 @@ class BlockCached {
         // Assign opcode isHat and blockFunction data to avoid dynamic lookups.
         this._isHat = runtime.getIsHat(opcode);
         this._blockFunction = runtime.getOpcodeFunction(opcode);
-        this._definedBlockFunction = typeof this._blockFunction !== 'undefined';
-
-        // Store the current shadow value if there is a shadow value.
-        const fieldKeys = Object.keys(fields);
-        this._isShadowBlock = (
-            !this._definedBlockFunction &&
-            fieldKeys.length === 1 &&
-            Object.keys(inputs).length === 0
-        );
-        this._shadowValue = this._isShadowBlock && fields[fieldKeys[0]].value;
 
         // Store the static fields onto _argValues.
         for (const fieldName in fields) {
@@ -310,7 +291,7 @@ class BlockCached {
                     return;
                 }
 
-                this._cached[key] = BlocksExecuteCache.getCached(blockContainer, input.block, BlockCached);
+                this._cached[key] = BlocksExecuteCache.getCached(blockContainer, input.block, blockCachedFactory);
             }
         });
     }
@@ -334,33 +315,6 @@ class BlockCached {
         const opcode = blockCached.opcode;
         const inputs = blockCached._cached;
         const blockFunction = blockCached._blockFunction;
-        const isHat = blockCached._isHat;
-
-        // Hats and single-field shadows are implemented slightly differently
-        // from regular blocks.
-        // For hats: if they have an associated block function, it's treated as a
-        // predicate; if not, execution will proceed as a no-op. For single-field
-        // shadows: If the block has a single field, and no inputs, immediately
-        // return the value of the field.
-        if (!blockCached._definedBlockFunction) {
-            if (!opcode) {
-                log.warn(`Could not get opcode for block: ${currentBlockId}`);
-                return;
-            }
-
-            if (recursiveCall === RECURSIVE && blockCached._isShadowBlock) {
-                // One field and no inputs - treat as arg.
-                thread.pushReportedValue(blockCached._shadowValue);
-                thread.status = Thread.STATUS_RUNNING;
-            } else if (isHat) {
-                // Skip through the block (hat with no predicate).
-                return;
-            } else {
-                log.warn(`Could not get implementation for opcode: ${opcode}`);
-            }
-            thread.requestScriptGlowInFrame = true;
-            return;
-        }
 
         // Update values for arguments (inputs).
         const argValues = blockCached._argValues;
@@ -459,6 +413,92 @@ class BlockCached {
     }
 }
 
+class ShadowBlockCached extends BlockCached {
+    constructor (blockContainer, cached) {
+        super(blockContainer, cached);
+
+        /**
+         * The static value of this block if it is a shadow block.
+         * @type {?any}
+         */
+        this._shadowValue = null;
+
+        const {fields} = cached;
+
+        // Store the current shadow value. Shadow values only change in the editor.
+        const fieldKeys = Object.keys(fields);
+        this._shadowValue = fields[fieldKeys[0]].value;
+    }
+
+    execute (sequencer, thread, recursiveCall) {
+        const blockCached = this;
+
+        // One field and no inputs - treat as arg.
+        thread.pushReportedValue(blockCached._shadowValue);
+        thread.status = Thread.STATUS_RUNNING;
+        thread.requestScriptGlowInFrame = true;
+    }
+}
+
+class HatBlockCached extends BlockCached {
+    execute () {
+        // Do nothing
+    }
+}
+
+class NotImplementedBlockCached extends BlockCached {
+    execute (sequencer, thread, recursiveCall) {
+        const blockCached = this;
+        const opcode = blockCached.opcode;
+
+        if (!opcode) {
+            log.warn(`Could not get opcode for block: ${currentBlockId}`);
+            return;
+        }
+
+        log.warn(`Could not get implementation for opcode: ${opcode}`);
+        thread.requestScriptGlowInFrame = true;
+    }
+}
+
+const blockCachedFactory = (blockContainer, cached) => {
+    const {runtime} = blockUtility.sequencer;
+
+    const {opcode, fields, inputs} = cached;
+
+    // Assign opcode isHat and blockFunction data to avoid dynamic lookups.
+    const _blockFunction = runtime.getOpcodeFunction(opcode);
+    const _definedBlockFunction = typeof _blockFunction !== 'undefined';
+
+    // Hats and single-field shadows are implemented slightly differently
+    // from regular blocks.
+    // For hats: if they have an associated block function, it's treated as a
+    //     predicate; if not, execution will proceed as a no-op.
+    // For single-field shadows: If the block has a single field, and no inputs,
+    //     immediately return the value of the field.
+    if (!_definedBlockFunction) {
+        // Store the current shadow value if there is a shadow value.
+        const fieldKeys = Object.keys(fields);
+        const _isShadowBlock = (
+            !_definedBlockFunction &&
+            fieldKeys.length === 1 &&
+            Object.keys(inputs).length === 0
+        );
+
+        const _isHat = runtime.getIsHat(opcode);
+
+        if (_isShadowBlock) {
+            return new ShadowBlockCached(blockContainer, cached);
+        } else if (_isHat) {
+            return new HatBlockCached(blockContainer, cached);
+        } else {
+            return new NotImplementedBlockCached(blockContainer, cached);
+        }
+    }
+
+    return new StandardBlockCached(blockContainer, cached);
+};
+
 /**
  * Execute a block.
  * @param {!Sequencer} sequencer Which sequencer is executing.
@@ -478,10 +518,10 @@ const execute = function (sequencer, thread, recursiveCall) {
     const currentStackFrame = thread.peekStackFrame();
 
     let blockContainer = thread.blockContainer;
-    let blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
+    let blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, blockCachedFactory);
     if (blockCached === null) {
         blockContainer = runtime.flyoutBlocks;
-        blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
+        blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, blockCachedFactory);
         // Stop if block or target no longer exists.
         if (blockCached === null) {
             // No block found: stop the thread; script no longer exists.
