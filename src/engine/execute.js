@@ -202,24 +202,6 @@ class BlockCached {
         this.opcode = cached.opcode;
 
         /**
-         * Original block object containing argument values for static fields.
-         * @type {object}
-         */
-        this.fields = cached.fields;
-
-        /**
-         * Original block object containing argument values for executable inputs.
-         * @type {object}
-         */
-        this.inputs = cached.inputs;
-
-        /**
-         * Procedure mutation.
-         * @type {?object}
-         */
-        this.mutation = cached.mutation;
-
-        /**
          * Is the opcode a hat (event responder) block.
          * @type {boolean}
          */
@@ -250,29 +232,17 @@ class BlockCached {
         this._shadowValue = null;
 
         /**
-         * A copy of the block's fields that may be modified.
-         * @type {object}
-         */
-        this._fields = Object.assign({}, this.fields);
-
-        /**
-         * A copy of the block's inputs that may be modified.
-         * @type {object}
-         */
-        this._inputs = Object.assign({}, this.inputs);
-
-        /**
          * An arguments object for block implementations. All executions of this
          * specific block will use this objecct.
          * @type {object}
          */
         this._argValues = {
-            mutation: this.mutation
+            mutation: cached.mutation
         };
 
         const {runtime} = blockUtility.sequencer;
 
-        const {opcode, fields, inputs} = this;
+        const {opcode, fields, inputs} = cached;
 
         // Assign opcode isHat and blockFunction data to avoid dynamic lookups.
         this._isHat = runtime.getIsHat(opcode);
@@ -304,10 +274,7 @@ class BlockCached {
             }
         }
 
-        // Remove custom_block. It is not part of block execution.
-        delete this._inputs.custom_block;
-
-        if ('BROADCAST_INPUT' in this._inputs) {
+        if ('BROADCAST_INPUT' in inputs) {
             // BROADCAST_INPUT is called BROADCAST_OPTION in the args and is an
             // object with an unchanging shape.
             this._argValues.BROADCAST_OPTION = {
@@ -317,7 +284,7 @@ class BlockCached {
 
             // We can go ahead and compute BROADCAST_INPUT if it is a shadow
             // value.
-            const broadcastInput = this._inputs.BROADCAST_INPUT;
+            const broadcastInput = inputs.BROADCAST_INPUT;
             if (broadcastInput.block === broadcastInput.shadow) {
                 // Shadow dropdown menu is being used.
                 // Get the appropriate information out of it.
@@ -326,16 +293,23 @@ class BlockCached {
                 this._argValues.BROADCAST_OPTION.id = broadcastField.id;
                 this._argValues.BROADCAST_OPTION.name = broadcastField.value;
 
-                // Evaluating BROADCAST_INPUT here we do not need to do so
-                // later.
-                delete this._inputs.BROADCAST_INPUT;
             }
         }
 
         this._cached = {};
-        Object.keys(this._inputs).forEach(key => {
-            const input = this._inputs[key];
+        Object.keys(inputs).forEach(key => {
+            // Remove custom_block. It is not part of block execution.
+            if (key === 'custom_block') {
+                return;
+            }
+            const input = inputs[key];
             if (input.block) {
+                // Evaluating BROADCAST_INPUT above we do not need to do so
+                // later.
+                if (key === 'BROADCAST_INPUT' && input.block === input.shadow) {
+                    return;
+                }
+
                 this._cached[key] = BlocksExecuteCache.getCached(blockContainer, input.block, BlockCached);
             }
         });
