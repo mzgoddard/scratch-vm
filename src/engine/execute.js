@@ -331,6 +331,157 @@ class BlockCached {
                 delete this._inputs.BROADCAST_INPUT;
             }
         }
+
+        this._cached = {};
+        Object.keys(this._inputs).forEach(key => {
+            const input = this._inputs[key];
+            if (input.block) {
+                this._cached[key] = BlocksExecuteCache.getCached(blockContainer, input.block, BlockCached);
+            }
+        });
+    }
+
+
+    /**
+     * Execute a block.
+     * @param {!Sequencer} sequencer Which sequencer is executing.
+     * @param {!Thread} thread Thread which to read and execute.
+     * @param {boolean} recursiveCall is execute called from another execute call?
+     */
+    execute (sequencer, thread, recursiveCall) {
+        const runtime = sequencer.runtime;
+
+        const blockCached = this;
+
+        // Current block to execute is the one on the top of the stack.
+        const currentBlockId = blockCached.blockId;
+        const currentStackFrame = thread.peekStackFrame();
+
+        const opcode = blockCached.opcode;
+        const inputs = blockCached._cached;
+        const blockFunction = blockCached._blockFunction;
+        const isHat = blockCached._isHat;
+
+        // Hats and single-field shadows are implemented slightly differently
+        // from regular blocks.
+        // For hats: if they have an associated block function, it's treated as a
+        // predicate; if not, execution will proceed as a no-op. For single-field
+        // shadows: If the block has a single field, and no inputs, immediately
+        // return the value of the field.
+        if (!blockCached._definedBlockFunction) {
+            if (!opcode) {
+                log.warn(`Could not get opcode for block: ${currentBlockId}`);
+                return;
+            }
+
+            if (recursiveCall === RECURSIVE && blockCached._isShadowBlock) {
+                // One field and no inputs - treat as arg.
+                thread.pushReportedValue(blockCached._shadowValue);
+                thread.status = Thread.STATUS_RUNNING;
+            } else if (isHat) {
+                // Skip through the block (hat with no predicate).
+                return;
+            } else {
+                log.warn(`Could not get implementation for opcode: ${opcode}`);
+            }
+            thread.requestScriptGlowInFrame = true;
+            return;
+        }
+
+        // Update values for arguments (inputs).
+        const argValues = blockCached._argValues;
+
+        // Fields are set during blockCached initialization.
+
+        // Recursively evaluate input blocks.
+        for (const inputName in inputs) {
+            const inputCached = inputs[inputName];
+
+            // Is there no value for this input waiting in the stack frame?
+            if (inputCached !== null && currentStackFrame.waitingReporter === null) {
+                // If there's not, we need to evaluate the block.
+                // Push to the stack to evaluate the reporter block.
+                thread.pushStack(inputCached.blockId);
+                // Actually execute the block.
+                inputCached.execute(sequencer, thread, RECURSIVE);
+                if (thread.status === Thread.STATUS_PROMISE_WAIT) {
+                    saveReported(currentStackFrame, inputName, inputs, argValues);
+                    return;
+                }
+
+                // Execution returned immediately,
+                // and presumably a value was reported, so pop the stack.
+                thread.popStack();
+            }
+
+            let inputValue;
+            if (currentStackFrame.waitingReporter === null) {
+                inputValue = currentStackFrame.justReported;
+                currentStackFrame.justReported = null;
+            } else if (currentStackFrame.waitingReporter === inputName) {
+                inputValue = currentStackFrame.justReported;
+                currentStackFrame.waitingReporter = null;
+                currentStackFrame.justReported = null;
+                // We have rebuilt argValues with all the stored values in the
+                // currentStackFrame from the nested block's promise resolving.
+                // Using the reported value from the block we waited on, unset the
+                // value. The next execute needing to store reported values will
+                // creates its own temporary storage.
+                currentStackFrame.reported = null;
+            } else if (typeof currentStackFrame.reported[inputName] !== 'undefined') {
+                inputValue = currentStackFrame.reported[inputName];
+            }
+
+            if (inputName === 'BROADCAST_INPUT') {
+                const broadcastInput = inputs[inputName];
+                // Check if something is plugged into the broadcast block, or
+                // if the shadow dropdown menu is being used.
+                if (broadcastInput.block !== broadcastInput.shadow) {
+                    // Something is plugged into the broadcast input.
+                    // Cast it to a string. We don't need an id here.
+                    argValues.BROADCAST_OPTION.id = null;
+                    argValues.BROADCAST_OPTION.name = cast.toString(inputValue);
+                }
+            } else {
+                argValues[inputName] = inputValue;
+            }
+        }
+
+        let primitiveReportedValue = null;
+        if (runtime.profiler === null) {
+            primitiveReportedValue = blockFunction(argValues, blockUtility);
+        } else {
+            if (blockFunctionProfilerId === -1) {
+                blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
+            }
+            // The method commented below has its code inlined underneath to reduce
+            // the bias recorded for the profiler's calls in this time sensitive
+            // execute function.
+            //
+            // runtime.profiler.start(blockFunctionProfilerId, opcode);
+            runtime.profiler.records.push(
+                runtime.profiler.START, blockFunctionProfilerId, opcode, performance.now());
+
+            primitiveReportedValue = blockFunction(argValues, blockUtility);
+
+            // runtime.profiler.stop(blockFunctionProfilerId);
+            runtime.profiler.records.push(runtime.profiler.STOP, performance.now());
+        }
+
+        // If it's a promise, wait until promise resolves.
+        if (isPromise(primitiveReportedValue)) {
+            handlePromise(primitiveReportedValue, sequencer, thread, blockCached);
+        } else if (thread.status === Thread.STATUS_RUNNING) {
+            if (recursiveCall === RECURSIVE) {
+                // In recursive calls (where execute calls execute) handleReport
+                // simplifies to just calling thread.pushReportedValue.
+                thread.pushReportedValue(primitiveReportedValue);
+            } else {
+                handleReport(primitiveReportedValue, sequencer, thread, blockCached);
+            }
+        }
+
+        return primitiveReportedValue;
     }
 }
 
@@ -345,10 +496,8 @@ const execute = function (sequencer, thread, recursiveCall) {
 
     // sequencer and thread are the same objects during a recursive set of
     // execute operations.
-    if (recursiveCall !== RECURSIVE) {
-        blockUtility.sequencer = sequencer;
-        blockUtility.thread = thread;
-    }
+    blockUtility.sequencer = sequencer;
+    blockUtility.thread = thread;
 
     // Current block to execute is the one on the top of the stack.
     const currentBlockId = thread.peekStack();
@@ -367,132 +516,10 @@ const execute = function (sequencer, thread, recursiveCall) {
         }
     }
 
-    const opcode = blockCached.opcode;
-    const inputs = blockCached._inputs;
-    const blockFunction = blockCached._blockFunction;
-    const isHat = blockCached._isHat;
-
-    // Hats and single-field shadows are implemented slightly differently
-    // from regular blocks.
-    // For hats: if they have an associated block function, it's treated as a
-    // predicate; if not, execution will proceed as a no-op. For single-field
-    // shadows: If the block has a single field, and no inputs, immediately
-    // return the value of the field.
-    if (!blockCached._definedBlockFunction) {
-        if (!opcode) {
-            log.warn(`Could not get opcode for block: ${currentBlockId}`);
-            return;
-        }
-
-        if (recursiveCall === RECURSIVE && blockCached._isShadowBlock) {
-            // One field and no inputs - treat as arg.
-            thread.pushReportedValue(blockCached._shadowValue);
-            thread.status = Thread.STATUS_RUNNING;
-        } else if (isHat) {
-            // Skip through the block (hat with no predicate).
-            return;
-        } else {
-            log.warn(`Could not get implementation for opcode: ${opcode}`);
-        }
-        thread.requestScriptGlowInFrame = true;
-        return;
-    }
-
-    // Update values for arguments (inputs).
-    const argValues = blockCached._argValues;
-
-    // Fields are set during blockCached initialization.
-
-    // Recursively evaluate input blocks.
-    for (const inputName in inputs) {
-        const input = inputs[inputName];
-        const inputBlockId = input.block;
-        // Is there no value for this input waiting in the stack frame?
-        if (inputBlockId !== null && currentStackFrame.waitingReporter === null) {
-            // If there's not, we need to evaluate the block.
-            // Push to the stack to evaluate the reporter block.
-            thread.pushStack(inputBlockId);
-            // Actually execute the block.
-            execute(sequencer, thread, RECURSIVE);
-            if (thread.status === Thread.STATUS_PROMISE_WAIT) {
-                saveReported(currentStackFrame, inputName, inputs, argValues);
-                return;
-            }
-
-            // Execution returned immediately,
-            // and presumably a value was reported, so pop the stack.
-            thread.popStack();
-        }
-
-        let inputValue;
-        if (currentStackFrame.waitingReporter === null) {
-            inputValue = currentStackFrame.justReported;
-            currentStackFrame.justReported = null;
-        } else if (currentStackFrame.waitingReporter === inputName) {
-            inputValue = currentStackFrame.justReported;
-            currentStackFrame.waitingReporter = null;
-            currentStackFrame.justReported = null;
-            // We have rebuilt argValues with all the stored values in the
-            // currentStackFrame from the nested block's promise resolving.
-            // Using the reported value from the block we waited on, unset the
-            // value. The next execute needing to store reported values will
-            // creates its own temporary storage.
-            currentStackFrame.reported = null;
-        } else if (typeof currentStackFrame.reported[inputName] !== 'undefined') {
-            inputValue = currentStackFrame.reported[inputName];
-        }
-
-        if (inputName === 'BROADCAST_INPUT') {
-            const broadcastInput = inputs[inputName];
-            // Check if something is plugged into the broadcast block, or
-            // if the shadow dropdown menu is being used.
-            if (broadcastInput.block !== broadcastInput.shadow) {
-                // Something is plugged into the broadcast input.
-                // Cast it to a string. We don't need an id here.
-                argValues.BROADCAST_OPTION.id = null;
-                argValues.BROADCAST_OPTION.name = cast.toString(inputValue);
-            }
-        } else {
-            argValues[inputName] = inputValue;
-        }
-    }
-
-    let primitiveReportedValue = null;
-    if (runtime.profiler !== null) {
-        if (blockFunctionProfilerId === -1) {
-            blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
-        }
-        // The method commented below has its code inlined underneath to reduce
-        // the bias recorded for the profiler's calls in this time sensitive
-        // execute function.
-        //
-        // runtime.profiler.start(blockFunctionProfilerId, opcode);
-        runtime.profiler.records.push(
-            runtime.profiler.START, blockFunctionProfilerId, opcode, performance.now());
-    }
-    primitiveReportedValue = blockFunction(argValues, blockUtility);
-    if (runtime.profiler !== null) {
-        // runtime.profiler.stop(blockFunctionProfilerId);
-        runtime.profiler.records.push(runtime.profiler.STOP, performance.now());
-    }
-
-    if (recursiveCall !== RECURSIVE && typeof primitiveReportedValue === 'undefined') {
+    if (typeof blockCached.execute(sequencer, thread) === 'undefined') {
         // No value reported - potentially a command block.
         // Edge-activated hats don't request a glow; all commands do.
         thread.requestScriptGlowInFrame = true;
-    }
-
-    // If it's a promise, wait until promise resolves.
-    if (isPromise(primitiveReportedValue)) {
-        handlePromise(primitiveReportedValue, sequencer, thread, blockCached);
-    } else if (thread.status === Thread.STATUS_RUNNING) {
-        if (recursiveCall === RECURSIVE) {
-            // In recursive calls (where execute calls execute) handleReport
-            // simplifies to just calling thread.pushReportedValue.
-            thread.pushReportedValue(primitiveReportedValue);
-        } else {
-            handleReport(primitiveReportedValue, sequencer, thread, blockCached);
-        }
     }
 };
 
