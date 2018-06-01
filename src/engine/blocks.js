@@ -5,6 +5,7 @@ const MonitorRecord = require('./monitor-record');
 const Clone = require('../util/clone');
 const {Map} = require('immutable');
 const BlocksExecuteCache = require('./blocks-execute-cache');
+const ThreadTreeCache = require('./blocks-thread-tree-cache');
 
 /**
  * @fileoverview
@@ -368,6 +369,15 @@ class Blocks {
         this._cache.procedureParamNames = {};
         this._cache.procedureDefinitions = {};
         this._cache._executeCached = {};
+
+        for (let key in this._cache._threadTree) {
+            const tree = this._cache._threadTree[key];
+            if (tree) {
+                tree.invalid = true;
+            }
+        }
+
+        this._cache._threadTree = {};
     }
 
     /**
@@ -917,6 +927,45 @@ BlocksExecuteCache.getCached = function (blocks, blockId, cacheTypeFactory) {
     }
 
     blocks._cache._executeCached[blockId] = cached;
+    return cached;
+};
+
+ThreadTreeCache.getCached = function (blocks, blockId) {
+    let cached = blocks._cache._threadTree[blockId];
+
+    if (typeof cached !== 'undefined') {
+        return cached;
+    }
+
+    const block = blocks.getBlock(blockId);
+    if (typeof block === 'undefined') return null;
+
+    const procedureCode = block.mutation && block.mutation.proccode || null;
+    const procedure = ThreadTreeCache.getCached(blocks, blocks.getProcedureDefinition(procedureCode));
+
+    cached = {
+        id: block.id,
+        opcode: block.opcode,
+        parent: null,
+        fromHere: {},
+        branches: [
+            ThreadTreeCache.getCached(blocks, blocks.getBranch(block.id, 1)),
+            ThreadTreeCache.getCached(blocks, blocks.getBranch(block.id, 2)),
+            ThreadTreeCache.getCached(blocks, blocks.getBranch(block.id, 3)),
+            ThreadTreeCache.getCached(blocks, blocks.getBranch(block.id, 4))
+        ],
+        procedure,
+        procedureCode,
+        procedureInner: procedure !== null ?
+            ThreadTreeCache.getCached(blocks, procedure.inputs && procedure.inputs.custom_block.block) :
+            null,
+        next: null
+    };
+    blocks._cache._threadTree[blockId] = cached;
+
+    cached.parent = ThreadTreeCache.getCached(blocks, block.parent);
+    cached.next = ThreadTreeCache.getCached(blocks, block.next);
+
     return cached;
 };
 

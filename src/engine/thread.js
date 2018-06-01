@@ -1,3 +1,5 @@
+const ThreadTreeCache = require('./blocks-thread-tree-cache');
+
 /**
  * Recycle bin for empty stackFrame objects
  * @type Array<_StackFrame>
@@ -117,7 +119,7 @@ class _StackFrame {
  * @constructor
  */
 class Thread {
-    constructor (firstBlock) {
+    constructor (blockContainer, firstBlock) {
         /**
          * ID of top block of the thread
          * @type {!string}
@@ -136,6 +138,9 @@ class Thread {
          * @type {Array.<_StackFrame>}
          */
         this.stackFrames = [];
+
+        this.stackPointer = ThreadTreeCache.getCached(blockContainer, firstBlock);
+        console.log(this.stackPointer);
 
         /**
          * Status of the thread, one of three states (below)
@@ -159,7 +164,7 @@ class Thread {
          * The Blocks this thread will execute.
          * @type {Blocks}
          */
-        this.blockContainer = null;
+        this.blockContainer = blockContainer;
 
         /**
          * Whether the thread requests its script to glow during this frame.
@@ -232,6 +237,12 @@ class Thread {
      */
     pushStack (blockId) {
         this.stack.push(blockId);
+
+        // this.stackPointer = this.stackPointer.fromHere[blockId];
+        // if (this.stackPointer === null) {
+        //    this.stackPointer = ThreadTreeCache.getCached(this.blockContainer, nextBlockId);
+        // }
+
         // Push an empty stack frame, if we need one.
         // Might not, if we just popped the stack.
         if (this.stack.length > this.stackFrames.length) {
@@ -255,6 +266,8 @@ class Thread {
      * @return {string} Block ID popped from the stack.
      */
     popStack () {
+        // this.stackPointer = ThreadTreeCache.getCached(this.blockContainer, nextBlockId);
+
         _StackFrame.release(this.stackFrames.pop());
         return this.stack.pop();
     }
@@ -265,7 +278,7 @@ class Thread {
     stopThisScript () {
         let blockID = this.peekStack();
         while (blockID !== null) {
-            const block = this.target.blocks.getBlock(blockID);
+            const block = this.blockContainer.getBlock(blockID);
             if (typeof block !== 'undefined' && block.opcode === 'procedures_call') {
                 break;
             }
@@ -363,8 +376,81 @@ class Thread {
      * where execution proceeds from one block to the next.
      */
     goToNextBlock () {
-        const nextBlockId = this.target.blocks.getNextBlock(this.peekStack());
+        const nextBlockId = this.blockContainer.getNextBlock(this.peekStack());
         this.reuseStackForNextBlock(nextBlockId);
+
+        // this.stackPointer = this.stackPointer.next;
+    }
+
+    /**
+     * Step a thread into a block's branch.
+     * @param {!Thread} thread Thread object to step to branch.
+     * @param {number} branchNum Which branch to step to (i.e., 1, 2).
+     * @param {boolean} isLoop Whether this block is a loop.
+     */
+    stepToBranch (branchNum, isLoop) {
+        if (!branchNum) {
+            branchNum = 1;
+        }
+        const currentBlockId = this.peekStack();
+        const branchId = this.blockContainer.getBranch(
+            currentBlockId,
+            branchNum
+        );
+        this.peekStackFrame().isLoop = isLoop;
+        if (branchId) {
+            // Push branch ID to the this's stack.
+            this.pushStack(branchId);
+        } else {
+            this.pushStack(null);
+        }
+    }
+
+    /**
+     * Step a procedure.
+     * @param {!Thread} thread Thread object to step to procedure.
+     * @param {!string} procedureCode Procedure code of procedure to step to.
+     */
+    stepToProcedure (procedureCode) {
+        const definition = this.blockContainer.getProcedureDefinition(procedureCode);
+        if (!definition) {
+            return;
+        }
+        // Check if the call is recursive.
+        // If so, set the this to yield after pushing.
+        const isRecursive = this.isRecursiveCall(procedureCode);
+        // To step to a procedure, we put its definition on the stack.
+        // Execution for the this will proceed through the definition hat
+        // and on to the main definition of the procedure.
+        // When that set of blocks finishes executing, it will be popped
+        // from the stack by the sequencer, returning control to the caller.
+        this.pushStack(definition);
+        // In known warp-mode thiss, only yield when time is up.
+        if (this.peekStackFrame().warpMode &&
+            this.warpTimer.timeElapsed() > Sequencer.WARP_TIME) {
+            this.status = Thread.STATUS_YIELD;
+        } else {
+            // Look for warp-mode flag on definition, and set the this
+            // to warp-mode if needed.
+            const definitionBlock = this.blockContainer.getBlock(definition);
+            const innerBlock = this.blockContainer.getBlock(
+                definitionBlock.inputs.custom_block.block);
+            let doWarp = false;
+            if (innerBlock && innerBlock.mutation) {
+                const warp = innerBlock.mutation.warp;
+                if (typeof warp === 'boolean') {
+                    doWarp = warp;
+                } else if (typeof warp === 'string') {
+                    doWarp = JSON.parse(warp);
+                }
+            }
+            if (doWarp) {
+                this.peekStackFrame().warpMode = true;
+            } else if (isRecursive) {
+                // In normal-mode thiss, yield any time we have a recursive call.
+                this.status = Thread.STATUS_YIELD;
+            }
+        }
     }
 
     /**
@@ -377,7 +463,7 @@ class Thread {
         let callCount = 5; // Max number of enclosing procedure calls to examine.
         const sp = this.stack.length - 1;
         for (let i = sp - 1; i >= 0; i--) {
-            const block = this.target.blocks.getBlock(this.stack[i]);
+            const block = this.blockContainer.getBlock(this.stack[i]);
             if (block.opcode === 'procedures_call' &&
                 block.mutation.proccode === procedureCode) {
                 return true;

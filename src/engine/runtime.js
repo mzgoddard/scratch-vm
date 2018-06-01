@@ -957,13 +957,16 @@ class Runtime extends EventEmitter {
             updateMonitor: false
         }, opts);
 
-        const thread = new Thread(id);
+        const thread = new Thread(opts.updateMonitor ?
+            this.monitorBlocks :
+            target.blocks,
+            id);
         thread.target = target;
         thread.stackClick = opts.stackClick;
         thread.updateMonitor = opts.updateMonitor;
-        thread.blockContainer = opts.updateMonitor ?
-            this.monitorBlocks :
-            target.blocks;
+        // thread.blockContainer = opts.updateMonitor ?
+        //     this.monitorBlocks :
+        //     target.blocks;
 
         thread.pushStack(id);
         this.threads.push(thread);
@@ -989,11 +992,11 @@ class Runtime extends EventEmitter {
      * @return {Thread} The restarted thread.
      */
     _restartThread (thread) {
-        const newThread = new Thread(thread.topBlock);
+        const newThread = new Thread(thread.blockContainer, thread.topBlock);
         newThread.target = thread.target;
         newThread.stackClick = thread.stackClick;
         newThread.updateMonitor = thread.updateMonitor;
-        newThread.blockContainer = thread.blockContainer;
+        // newThread.blockContainer = thread.blockContainer;
         newThread.pushStack(thread.topBlock);
         const i = this.threads.indexOf(thread);
         if (i > -1) {
