@@ -30,8 +30,8 @@ let blockFunctionProfilerId = -1;
  */
 const isPromise = function (value) {
     return (
-        value !== null &&
         typeof value === 'object' &&
+        value !== null &&
         typeof value.then === 'function'
     );
 };
@@ -50,8 +50,11 @@ const isPromise = function (value) {
  */
 // @todo move this to callback attached to the thread when we have performance
 // metrics (dd)
-const handleReport = function (
-    resolvedValue, sequencer, thread, currentBlockId, opcode, isHat) {
+const handleReport = function (resolvedValue, sequencer, thread, blockCached) {
+    const currentBlockId = blockCached.id;
+    const opcode = blockCached.opcode;
+    const isHat = blockCached.isHat;
+
     thread.pushReportedValue(resolvedValue);
     if (isHat) {
         // Hat predicate was evaluated.
@@ -123,6 +126,8 @@ const RECURSIVE = true;
  */
 class BlockCached {
     constructor (blockContainer, cached) {
+        this.id = cached.id;
+
         /**
          * Block operation code for this block.
          * @type {string}
@@ -259,6 +264,17 @@ class BlockCached {
                 delete this._inputs.BROADCAST_INPUT;
             }
         }
+
+        this._cached = {};
+        for (const key in this._inputs) {
+            const input = this._inputs[key];
+            if (input.block !== null) {
+                const inputCached = BlocksExecuteCache.getCached(blockContainer, input.block, BlockCached);
+                if (inputCached) {
+                    this._cached[key] = inputCached;
+                }
+            }
+        }
     }
 }
 
@@ -268,63 +284,43 @@ class BlockCached {
  * @param {!Thread} thread Thread which to read and execute.
  * @param {boolean} recursiveCall is execute called from another execute call?
  */
-const execute = function (sequencer, thread, recursiveCall) {
+const executeInner = function (blockCached, sequencer, thread, recursiveCall) {
     const runtime = sequencer.runtime;
 
-    // sequencer and thread are the same objects during a recursive set of
-    // execute operations.
-    if (recursiveCall !== RECURSIVE) {
-        blockUtility.sequencer = sequencer;
-        blockUtility.thread = thread;
-    }
-
     // Current block to execute is the one on the top of the stack.
-    const currentBlockId = thread.peekStack();
-    const currentStackFrame = thread.peekStackFrame();
-
-    let blockContainer = thread.blockContainer;
-    let blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
-    if (blockCached === null) {
-        blockContainer = runtime.flyoutBlocks;
-        blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
-        // Stop if block or target no longer exists.
-        if (blockCached === null) {
-            // No block found: stop the thread; script no longer exists.
-            sequencer.retireThread(thread);
-            return;
-        }
-    }
+    const currentBlockId = blockCached.id;
+    // const currentStackFrame = thread.peekStackFrame();
 
     const opcode = blockCached.opcode;
-    const inputs = blockCached._inputs;
+    const inputs = blockCached._cached;
     const blockFunction = blockCached._blockFunction;
-    const isHat = blockCached._isHat;
+    // const isHat = blockCached._isHat;
 
-    // Hats and single-field shadows are implemented slightly differently
-    // from regular blocks.
-    // For hats: if they have an associated block function, it's treated as a
-    // predicate; if not, execution will proceed as a no-op. For single-field
-    // shadows: If the block has a single field, and no inputs, immediately
-    // return the value of the field.
-    if (!blockCached._definedBlockFunction) {
-        if (!opcode) {
-            log.warn(`Could not get opcode for block: ${currentBlockId}`);
-            return;
-        }
-
-        if (recursiveCall === RECURSIVE && blockCached._isShadowBlock) {
-            // One field and no inputs - treat as arg.
-            thread.pushReportedValue(blockCached._shadowValue);
-            thread.status = Thread.STATUS_RUNNING;
-        } else if (isHat) {
-            // Skip through the block (hat with no predicate).
-            return;
-        } else {
-            log.warn(`Could not get implementation for opcode: ${opcode}`);
-        }
-        thread.requestScriptGlowInFrame = true;
-        return;
-    }
+    // // Hats and single-field shadows are implemented slightly differently
+    // // from regular blocks.
+    // // For hats: if they have an associated block function, it's treated as a
+    // // predicate; if not, execution will proceed as a no-op. For single-field
+    // // shadows: If the block has a single field, and no inputs, immediately
+    // // return the value of the field.
+    // if (!blockCached._definedBlockFunction) {
+    //     if (!opcode) {
+    //         log.warn(`Could not get opcode for block: ${currentBlockId}`);
+    //         return null;
+    //     }
+    //
+    //     if (recursiveCall === RECURSIVE && blockCached._isShadowBlock) {
+    //         // One field and no inputs - treat as arg.
+    //         thread.pushReportedValue(blockCached._shadowValue);
+    //         thread.status = Thread.STATUS_RUNNING;
+    //     } else if (isHat) {
+    //         // Skip through the block (hat with no predicate).
+    //         return null;
+    //     } else {
+    //         log.warn(`Could not get implementation for opcode: ${opcode}`);
+    //     }
+    //     thread.requestScriptGlowInFrame = true;
+    //     return null;
+    // }
 
     // Update values for arguments (inputs).
     const argValues = blockCached._argValues;
@@ -333,61 +329,81 @@ const execute = function (sequencer, thread, recursiveCall) {
 
     // Recursively evaluate input blocks.
     for (const inputName in inputs) {
-        const input = inputs[inputName];
-        const inputBlockId = input.block;
+        const inputCached = inputs[inputName];
+
+        let inputValue;
         // Is there no value for this input waiting in the stack frame?
-        if (inputBlockId !== null && currentStackFrame.waitingReporter === null) {
+        // if ((thread.inputStack === null || thread.inputStack.waitingReporter === null)) {
             // If there's not, we need to evaluate the block.
             // Push to the stack to evaluate the reporter block.
-            thread.pushStack(inputBlockId);
+            // thread.pushStack(inputCached.id);
             // Save name of input for `Thread.pushReportedValue`.
-            currentStackFrame.waitingReporter = inputName;
+            // currentStackFrame.waitingReporter = inputName;
             // Actually execute the block.
-            execute(sequencer, thread, RECURSIVE);
-            if (thread.status === Thread.STATUS_PROMISE_WAIT) {
-                // Create a reported value on the stack frame to store the
-                // already built values.
-                currentStackFrame.reported = {};
-                // Waiting for the block to resolve, store the current argValues
-                // onto a member of the currentStackFrame that can be used once
-                // the nested block resolves to rebuild argValues up to this
-                // point.
-                for (const _inputName in inputs) {
-                    // We are waiting on the nested block at inputName so we
-                    // don't need to store any more inputs.
-                    if (_inputName === inputName) break;
-                    if (_inputName === 'BROADCAST_INPUT') {
-                        currentStackFrame.reported[_inputName] = argValues.BROADCAST_OPTION.name;
-                    } else {
-                        currentStackFrame.reported[_inputName] = argValues[_inputName];
+            if (inputCached._definedBlockFunction) {
+                const inputWaiting = executeInner(inputCached, sequencer, thread, RECURSIVE);
+                if (thread.status === Thread.STATUS_PROMISE_WAIT) {
+                    console.log('save');
+                    const waiting = {
+                        next: null,
+                        inputCached: inputCached,
+                        waitingReporter: inputName,
+                        reported: {},
+                    };
+                    // Create a reported value on the stack frame to store the
+                    // already built values.
+                    // currentStackFrame.reported = {};
+
+                    // Waiting for the block to resolve, store the current argValues
+                    // onto a member of the currentStackFrame that can be used once
+                    // the nested block resolves to rebuild argValues up to this
+                    // point.
+                    for (const _inputName in inputs) {
+                        // We are waiting on the nested block at inputName so we
+                        // don't need to store any more inputs.
+                        if (_inputName === inputName) break;
+                        if (_inputName === 'BROADCAST_INPUT') {
+                            waiting.reported[_inputName] = argValues.BROADCAST_OPTION.name;
+                        } else {
+                            waiting.reported[_inputName] = argValues[_inputName];
+                        }
                     }
+
+                    if (inputWaiting !== null) {
+                        inputWaiting.next = waiting;
+                        return inputWaiting;
+                    }
+                    return waiting;
                 }
-                return;
+                inputValue = thread.justReported;
+            } else {
+                inputValue = inputCached._shadowValue;
             }
 
             // Execution returned immediately,
             // and presumably a value was reported, so pop the stack.
-            currentStackFrame.waitingReporter = null;
-            thread.popStack();
-        }
+            // currentStackFrame.waitingReporter = null;
+            // thread.popStack();
+        //         // if ((thread.inputStack === null || thread.inputStack.waitingReporter === null)) {
+        // }
 
-        let inputValue;
-        if (currentStackFrame.waitingReporter === null) {
-            inputValue = currentStackFrame.justReported;
-            currentStackFrame.justReported = null;
-        } else if (currentStackFrame.waitingReporter === inputName) {
-            inputValue = currentStackFrame.justReported;
-            currentStackFrame.waitingReporter = null;
-            currentStackFrame.justReported = null;
-            // We have rebuilt argValues with all the stored values in the
-            // currentStackFrame from the nested block's promise resolving.
-            // Using the reported value from the block we waited on, unset the
-            // value. The next execute needing to store reported values will
-            // creates its own temporary storage.
-            currentStackFrame.reported = null;
-        } else if (typeof currentStackFrame.reported[inputName] !== 'undefined') {
-            inputValue = currentStackFrame.reported[inputName];
-        }
+        // thread.justReported = null;
+        // if (thread.inputStack === null || thread.inputStack.waitingReporter === null) {
+        //     inputValue = thread.justReported;
+        //     thread.justReported = null;
+        // } else if (thread.inputStack.waitingReporter === inputName) {
+        //     inputValue = thread.justReported;
+        //     thread.inputStack.waitingReporter = null;
+        //     thread.justReported = null;
+        //     // We have rebuilt argValues with all the stored values in the
+        //     // currentStackFrame from the nested block's promise resolving.
+        //     // Using the reported value from the block we waited on, unset the
+        //     // value. The next execute needing to store reported values will
+        //     // creates its own temporary storage.
+        //     thread.inputStack.reported = null;
+        // } else if (typeof thread.inputStack.reported[inputName] !== 'undefined') {
+        //     inputValue = thread.inputStack.reported[inputName];
+        // }
 
         if (inputName === 'BROADCAST_INPUT') {
             const broadcastInput = inputs[inputName];
@@ -405,7 +421,9 @@ const execute = function (sequencer, thread, recursiveCall) {
     }
 
     let primitiveReportedValue = null;
-    if (runtime.profiler !== null) {
+    if (runtime.profiler === null) {
+        primitiveReportedValue = blockFunction(argValues, blockUtility);
+    } else {
         if (blockFunctionProfilerId === -1) {
             blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
         }
@@ -416,18 +434,18 @@ const execute = function (sequencer, thread, recursiveCall) {
         // runtime.profiler.start(blockFunctionProfilerId, opcode);
         runtime.profiler.records.push(
             runtime.profiler.START, blockFunctionProfilerId, opcode, performance.now());
-    }
-    primitiveReportedValue = blockFunction(argValues, blockUtility);
-    if (runtime.profiler !== null) {
+
+        primitiveReportedValue = blockFunction(argValues, blockUtility);
+
         // runtime.profiler.stop(blockFunctionProfilerId);
         runtime.profiler.records.push(runtime.profiler.STOP, performance.now());
     }
 
-    if (recursiveCall !== RECURSIVE && typeof primitiveReportedValue === 'undefined') {
-        // No value reported - potentially a command block.
-        // Edge-activated hats don't request a glow; all commands do.
-        thread.requestScriptGlowInFrame = true;
-    }
+    // if (recursiveCall !== RECURSIVE && typeof primitiveReportedValue === 'undefined') {
+    //     // No value reported - potentially a command block.
+    //     // Edge-activated hats don't request a glow; all commands do.
+    //     thread.requestScriptGlowInFrame = true;
+    // }
 
     // If it's a promise, wait until promise resolves.
     if (isPromise(primitiveReportedValue)) {
@@ -437,7 +455,7 @@ const execute = function (sequencer, thread, recursiveCall) {
         }
         // Promise handlers
         primitiveReportedValue.then(resolvedValue => {
-            handleReport(resolvedValue, sequencer, thread, currentBlockId, opcode, isHat);
+            handleReport(resolvedValue, sequencer, thread, blockCached);
             if (typeof resolvedValue === 'undefined') {
                 let stackFrame;
                 let nextBlockId;
@@ -460,7 +478,7 @@ const execute = function (sequencer, thread, recursiveCall) {
 
                 thread.pushStack(nextBlockId);
             } else {
-                thread.popStack();
+                // thread.popStack();
             }
         }, rejectionReason => {
             // Promise rejected: the primitive had some error.
@@ -470,14 +488,78 @@ const execute = function (sequencer, thread, recursiveCall) {
             thread.popStack();
         });
     } else if (thread.status === Thread.STATUS_RUNNING) {
-        if (recursiveCall === RECURSIVE) {
-            // In recursive calls (where execute calls execute) handleReport
-            // simplifies to just calling thread.pushReportedValue.
-            thread.pushReportedValue(primitiveReportedValue);
-        } else {
-            handleReport(primitiveReportedValue, sequencer, thread, currentBlockId, opcode, isHat);
+        thread.pushReportedValue(primitiveReportedValue);
+        // if (recursiveCall === RECURSIVE) {
+        //     // In recursive calls (where execute calls execute) handleReport
+        //     // simplifies to just calling thread.pushReportedValue.
+        //     thread.pushReportedValue(primitiveReportedValue);
+        // } else {
+        //     handleReport(primitiveReportedValue, sequencer, thread, blockCached);
+        // }
+    }
+
+    return null;
+};
+
+/**
+ * Execute a block.
+ * @param {!Sequencer} sequencer Which sequencer is executing.
+ * @param {!Thread} thread Thread which to read and execute.
+ * @param {boolean} recursiveCall is execute called from another execute call?
+ */
+const execute = function (sequencer, thread) {
+    // sequencer and thread are the same objects during a recursive set of
+    // execute operations.
+    if (blockUtility.thread !== thread) {
+        blockUtility.sequencer = sequencer;
+        blockUtility.thread = thread;
+    }
+
+    // Current block to execute is the one on the top of the stack.
+    const currentBlockId = thread.peekStack();
+
+    let blockContainer = thread.blockContainer;
+    let blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
+    if (blockCached === null) {
+        const runtime = sequencer.runtime;
+
+        blockContainer = runtime.flyoutBlocks;
+        blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
+        // Stop if block or target no longer exists.
+        if (blockCached === null) {
+            // No block found: stop the thread; script no longer exists.
+            sequencer.retireThread(thread);
+            return;
         }
     }
+
+    if (!blockCached._definedBlockFunction && blockCached._isHat) {
+        return;
+    }
+
+    // if (thread.inputStack !== null) {
+    //     console.log('restore');
+    //     while (thread.inputStack !== null) {
+    //         const inputStack = executeInner(thread.inputStack.inputCached, sequencer, thread, !RECURSIVE);
+    //         if (inputStack === null) {
+    //             thread.inputStack = thread.inputStack.next;
+    //         } else {
+    //             let inputPointer = inputStack;
+    //             while (inputPointer.next !== null) {
+    //                 inputPointer = inputPointer.next;
+    //             }
+    //             inputPointer = thread.inputStack;
+    //             thread.inputStack = inputStack;
+    //         }
+    //     }
+    // } else {
+    thread.inputStack = executeInner(blockCached, sequencer, thread, !RECURSIVE);
+    if (thread.status === Thread.STATUS_RUNNING) {
+        handleReport(thread.justReported, sequencer, thread, blockCached);
+    }
+    // }
+
+    thread.requestScriptGlowInFrame = true;
 };
 
 module.exports = execute;

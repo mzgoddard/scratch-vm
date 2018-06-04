@@ -915,6 +915,7 @@ BlocksExecuteCache.getCached = function (blocks, blockId, CacheType) {
 
     if (typeof CacheType === 'undefined') {
         cached = {
+            id: blockId,
             opcode: blocks.getOpcode(block),
             fields: blocks.getFields(block),
             inputs: blocks.getInputs(block),
@@ -922,6 +923,7 @@ BlocksExecuteCache.getCached = function (blocks, blockId, CacheType) {
         };
     } else {
         cached = new CacheType(blocks, {
+            id: blockId,
             opcode: blocks.getOpcode(block),
             fields: blocks.getFields(block),
             inputs: blocks.getInputs(block),

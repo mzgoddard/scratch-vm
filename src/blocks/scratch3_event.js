@@ -92,9 +92,11 @@ class Scratch3EventBlocks {
                     }
                 );
                 if (util.stackFrame.startedThreads.length === 0) {
+                    console.log('nothing was started');
                     // Nothing was started.
                     return;
                 }
+                // console.log(util.stackFrame.startedThreads.length);
             }
             // We've run before; check if the wait is still going on.
             const instance = this;
