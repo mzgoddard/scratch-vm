@@ -1,3 +1,5 @@
+const cloneDeep = require('lodash.clonedeep');
+
 const log = require('../util/log');
 const MathUtil = require('../util/math-util');
 const StringUtil = require('../util/string-util');
@@ -1002,8 +1004,8 @@ class RenderedTarget extends Target {
         newClone.size = this.size;
         newClone.currentCostume = this.currentCostume;
         newClone.rotationStyle = this.rotationStyle;
-        newClone.effects = JSON.parse(JSON.stringify(this.effects));
-        newClone.variables = JSON.parse(JSON.stringify(this.variables));
+        newClone.effects = cloneDeep(this.effects);
+        newClone.variables = cloneDeep(this.variables);
         newClone.initDrawable(StageLayering.SPRITE_LAYER);
         newClone.updateAllDrawableProperties();
         // Place behind the current target.
