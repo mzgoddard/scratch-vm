@@ -4,6 +4,7 @@ const log = require('../util/log');
 const Thread = require('./thread');
 const {Map} = require('immutable');
 const cast = require('../util/cast');
+const BlockDefinition = require('./block-definition');
 
 /**
  * Single BlockUtility instance reused by execute for every pritimive ran.
@@ -142,6 +143,43 @@ const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached, l
     });
 };
 
+class VariableValues {
+    constructor ({mutation, VARIABLE}) {
+        this.mutation = mutation;
+        this.VARIABLE = VARIABLE;
+    }
+}
+
+class Num2Values {
+    constructor ({mutation, NUM1, NUM2}) {
+        this.mutation = mutation;
+        this.NUM1 = cast.toNumber(NUM1);
+        this.NUM2 = cast.toNumber(NUM2);
+    }
+}
+
+class NumValues {
+    constructor ({mutation, NUM}) {
+        this.mutation = mutation;
+        this.NUM = cast.toNumber(NUM);
+    }
+}
+
+class Operand2Values {
+    constructor ({mutation, OPERAND1, OPERAND2}) {
+        this.mutation = mutation;
+        this.OPERAND1 = OPERAND1;
+        this.OPERAND2 = OPERAND2;
+    }
+}
+
+class ConditionValues {
+    constructor ({mutation, CONDITION}) {
+        this.mutation = mutation;
+        this.CONDITION = CONDITION;
+    }
+}
+
 /**
  * A execute.js internal representation of a block to reduce the time spent in
  * execute as the same blocks are called the most.
@@ -270,6 +308,11 @@ class BlockCached {
          */
         this._ops = [];
 
+        this._lastOperation = true;
+
+        this.call = this.callGeneral;
+        this.callProfile = this.callGeneralProfile;
+
         const {runtime} = blockUtility.sequencer;
 
         const {opcode, fields, inputs} = this;
@@ -332,10 +375,24 @@ class BlockCached {
             }
         }
 
+        const valueKeys = Object.keys(this._argValues).concat(Object.keys(this._inputs));
+        if (valueKeys.every(key => ['mutation', 'VARIABLE'].includes(key))) {
+            this._argValues = new VariableValues(this._argValues);
+        } else if (valueKeys.every(key => ['mutation', 'NUM1', 'NUM2'].includes(key))) {
+            this._argValues = new Num2Values(this._argValues);
+        } else if (valueKeys.every(key => ['mutation', 'NUM'].includes(key))) {
+            this._argValues = new NumValues(this._argValues);
+        } else if (valueKeys.every(key => ['mutation', 'OPERAND1', 'OPERAND2'].includes(key))) {
+            this._argValues = new Operand2Values(this._argValues);
+        } else if (valueKeys.every(key => ['mutation', 'CONDITION'].includes(key))) {
+            this._argValues = new ConditionValues(this._argValues);
+        }
+
         // Cache all input children blocks in the operation lists. The
         // operations can later be run in the order they appear in correctly
         // executing the operations quickly in a flat loop instead of needing to
         // recursivly iterate them.
+        const childrenDefinitions = {};
         for (const inputName in this._inputs) {
             const input = this._inputs[inputName];
             if (input.block) {
@@ -349,11 +406,59 @@ class BlockCached {
                 this._ops.push(...inputCached._ops);
                 inputCached._parentKey = inputName;
                 inputCached._parentValues = this._argValues;
+                inputCached._lastOperation = false;
 
                 // Shadow values are static and do not change, go ahead and
                 // store their value on args.
                 if (inputCached._isShadowBlock) {
-                    this._argValues[inputName] = inputCached._shadowValue;
+                    if (this._blockFunction && this._blockFunction.defintion) {
+                        if (this._blockFunction.defintion.defintion.arguments[inputName] instanceof BlockDefinition.Type.Number) {
+                            this._argValues[inputName] = Cast.toNumber(inputCached._shadowValue);
+                        } else {
+                            this._argValues[inputName] = inputCached._shadowValue;
+                        }
+                    } else {
+                        this._argValues[inputName] = inputCached._shadowValue;
+                    }
+                }
+
+                childrenDefinitions[inputName] = inputCached._blockFunctionDefinition;
+
+
+                if (inputCached._blockFunctionDefinition) {
+                    if (inputCached._blockFunctionDefinition.threading.isSync()) {
+                        if (inputName === 'BROADCAST_INPUT') {
+                            inputCached.call = this.callSyncBROADCAST_INPUT;
+                        } else {
+                            inputCached.call = inputCached.genCallSync(inputCached._blockFunction);
+                            inputCached.callProfile = inputCached.genCallSyncProfile(inputCached._blockFunction);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (this._blockFunction && this._blockFunction.definition) {
+            this._blockFunctionDefinition = this._blockFunction.definition(childrenDefinitions);
+
+            for (const inputName in this._inputs) {
+                const input = this._inputs[inputName];
+                if (input.block) {
+                    const inputCached = BlocksExecuteCache.getCached(blockContainer, input.block, BlockCached);
+
+                    if (inputCached._blockFunctionDefinition) {
+                        if (inputCached._blockFunctionDefinition.threading.isSync() && this._blockFunctionDefinition.arguments[inputName]) {
+                            if (this._blockFunctionDefinition.arguments[inputName].mustCast()) {
+                                if (this._blockFunctionDefinition.arguments[inputName].castNumber()) {
+                                    inputCached.call = this.callSyncCastNumber;
+                                    inputCached.callProfile = this.callSyncCastNumberProfile;
+                                } else if (this._blockFunctionDefinition.arguments[inputName].castNan()) {
+                                    inputCached.call = this.callSyncCastNan;
+                                    inputCached.callProfile = this.callSyncCastNanProfile;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -366,7 +471,511 @@ class BlockCached {
             this._ops.push(this);
         }
     }
+
+    callGeneral (sequencer, thread) {
+        const blockFunction = this._blockFunction;
+
+        // Update values for arguments (inputs).
+        const argValues = this._argValues;
+
+        const lastOperation = this._lastOperation;
+
+        // Fields are set during this initialization.
+
+        // Inputs are set during previous steps in the loop.
+
+        const primitiveReportedValue = blockFunction(argValues, blockUtility);
+
+        // If it's a promise, wait until promise resolves.
+        if (isPromise(primitiveReportedValue)) {
+            handlePromise(primitiveReportedValue, sequencer, thread, this, lastOperation);
+
+            // We are waiting for a promise. Stop running this set of operations
+            // and continue them later after thawing the reported values.
+        } else if (thread.status === Thread.STATUS_RUNNING) {
+            if (lastOperation) {
+                handleReport(primitiveReportedValue, sequencer, thread, this, lastOperation);
+            } else {
+                // By definition a block that is not last in the list has a
+                // parent.
+                const inputName = this._parentKey;
+                const parentValues = this._parentValues;
+
+                if (inputName === 'BROADCAST_INPUT') {
+                    // Something is plugged into the broadcast input.
+                    // Cast it to a string. We don't need an id here.
+                    parentValues.BROADCAST_OPTION.id = null;
+                    parentValues.BROADCAST_OPTION.name = cast.toString(primitiveReportedValue);
+                } else {
+                    parentValues[inputName] = primitiveReportedValue;
+                }
+            }
+        }
+    }
+
+    callGeneralProfile (sequencer, thread) {
+        const blockFunction = this._blockFunction;
+
+        // Update values for arguments (inputs).
+        const argValues = this._argValues;
+
+        const lastOperation = this._lastOperation;
+
+        // Fields are set during this initialization.
+
+        // Inputs are set during previous steps in the loop.
+
+        const runtime = sequencer.runtime;
+        // The method commented below has its code inlined
+        // underneath to reduce the bias recorded for the profiler's
+        // calls in this time sensitive execute function.
+        //
+        // runtime.profiler.start(blockFunctionProfilerId, opcode);
+        runtime.profiler.records.push(
+            runtime.profiler.START, blockFunctionProfilerId, this.opcode, performance.now());
+
+        const primitiveReportedValue = blockFunction(argValues, blockUtility);
+
+        // runtime.profiler.stop(blockFunctionProfilerId);
+        runtime.profiler.records.push(runtime.profiler.STOP, performance.now());
+
+        // If it's a promise, wait until promise resolves.
+        if (isPromise(primitiveReportedValue)) {
+            handlePromise(primitiveReportedValue, sequencer, thread, this, lastOperation);
+
+            // We are waiting for a promise. Stop running this set of operations
+            // and continue them later after thawing the reported values.
+        } else if (thread.status === Thread.STATUS_RUNNING) {
+            if (lastOperation) {
+                handleReport(primitiveReportedValue, sequencer, thread, this, lastOperation);
+            } else {
+                // By definition a block that is not last in the list has a
+                // parent.
+                const inputName = this._parentKey;
+                const parentValues = this._parentValues;
+
+                if (inputName === 'BROADCAST_INPUT') {
+                    // Something is plugged into the broadcast input.
+                    // Cast it to a string. We don't need an id here.
+                    parentValues.BROADCAST_OPTION.id = null;
+                    parentValues.BROADCAST_OPTION.name = cast.toString(primitiveReportedValue);
+                } else {
+                    parentValues[inputName] = primitiveReportedValue;
+                }
+            }
+        }
+    }
+
+    callPromise () {
+        const blockFunction = this._blockFunction;
+
+        // Update values for arguments (inputs).
+        const argValues = this._argValues;
+
+        const lastOperation = this._lastOperation;
+
+        // Fields are set during this initialization.
+
+        // Inputs are set during previous steps in the loop.
+
+        const primitiveReportedValue = blockFunction(argValues, blockUtility);
+
+        // If it's a promise, wait until promise resolves.
+        handlePromise(primitiveReportedValue, sequencer, thread, this, lastOperation);
+
+        // We are waiting for a promise. Stop running this set of operations
+        // and continue them later after thawing the reported values.
+    }
+
+    callSyncLast () {
+        const blockFunction = this._blockFunction;
+
+        // Update values for arguments (inputs).
+        const argValues = this._argValues;
+
+        // Fields are set during this initialization.
+
+        // Inputs are set during previous steps in the loop.
+
+        const primitiveReportedValue = blockFunction(argValues, blockUtility);
+
+        handleReport(primitiveReportedValue, sequencer, thread, this, lastOperation);
+    }
+
+    callSyncBROADCAST_INPUT () {
+        const blockFunction = this._blockFunction;
+
+        // Update values for arguments (inputs).
+        const argValues = this._argValues;
+
+        const lastOperation = this._lastOperation;
+
+        // Fields are set during this initialization.
+
+        // Inputs are set during previous steps in the loop.
+
+        const primitiveReportedValue = blockFunction(argValues, blockUtility);
+
+        // By definition a block that is not last in the list has a
+        // parent.
+        const parentValues = this._parentValues;
+
+        // Something is plugged into the broadcast input.
+        // Cast it to a string. We don't need an id here.
+        parentValues.BROADCAST_OPTION.id = null;
+        parentValues.BROADCAST_OPTION.name = cast.toString(primitiveReportedValue);
+    }
+
+    callSync () {
+        // Fields are set during this initialization.
+
+        // Inputs are set during previous steps in the loop.
+
+        const primitiveReportedValue = this._blockFunction(this._argValues, blockUtility);
+
+        // By definition a block that is not last in the list has a
+        // parent.
+        this._parentValues[this._parentKey] = primitiveReportedValue;
+    }
+
+    callSyncCastNumber () {
+        // Fields are set during this initialization.
+
+        // Inputs are set during previous steps in the loop.
+
+        const primitiveReportedValue = this._blockFunction(this._argValues, blockUtility);
+
+        // By definition a block that is not last in the list has a
+        // parent.
+        this._parentValues[this._parentKey] = cast.toNumber(primitiveReportedValue);
+    }
+
+    callSyncCastNan () {
+        // Fields are set during this initialization.
+
+        // Inputs are set during previous steps in the loop.
+
+        const primitiveReportedValue = this._blockFunction(this._argValues, blockUtility);
+
+        // By definition a block that is not last in the list has a
+        // parent.
+        this._parentValues[this._parentKey] = isNaN(primitiveReportedValue) ? 0 : primitiveReportedValue;
+    }
+
+    genCallSync (blockFunction) {
+        if (!BlockCached.callByOpcode.has(blockFunction)) {
+            BlockCached.callByOpcode.set(blockFunction, function () {
+                // Fields are set during this initialization.
+
+                // Inputs are set during previous steps in the loop.
+
+                const primitiveReportedValue = blockFunction(this._argValues, blockUtility);
+
+                // By definition a block that is not last in the list has a
+                // parent.
+                this._parentValues[this._parentKey] = primitiveReportedValue;
+            });
+        }
+
+        return BlockCached.callByOpcode.get(blockFunction);
+    }
+
+    callSyncProfile (sequencer, thread) {
+        // Fields are set during this initialization.
+
+        // Inputs are set during previous steps in the loop.
+
+        const runtime = sequencer.runtime;
+        // The method commented below has its code inlined
+        // underneath to reduce the bias recorded for the profiler's
+        // calls in this time sensitive execute function.
+        //
+        // runtime.profiler.start(blockFunctionProfilerId, opcode);
+        runtime.profiler.records.push(
+            runtime.profiler.START, blockFunctionProfilerId, this.opcode, performance.now());
+
+        const primitiveReportedValue = this._blockFunction(this._argValues, blockUtility);
+
+        // runtime.profiler.stop(blockFunctionProfilerId);
+        runtime.profiler.records.push(runtime.profiler.STOP, performance.now());
+
+        // By definition a block that is not last in the list has a
+        // parent.
+        this._parentValues[this._parentKey] = primitiveReportedValue;
+    }
+
+    callSyncCastNumberProfile (sequencer, thread) {
+        // Fields are set during this initialization.
+
+        // Inputs are set during previous steps in the loop.
+
+        const runtime = sequencer.runtime;
+        // The method commented below has its code inlined
+        // underneath to reduce the bias recorded for the profiler's
+        // calls in this time sensitive execute function.
+        //
+        // runtime.profiler.start(blockFunctionProfilerId, opcode);
+        runtime.profiler.records.push(
+            runtime.profiler.START, blockFunctionProfilerId, this.opcode, performance.now());
+
+        const primitiveReportedValue = this._blockFunction(this._argValues, blockUtility);
+
+        // runtime.profiler.stop(blockFunctionProfilerId);
+        runtime.profiler.records.push(runtime.profiler.STOP, performance.now());
+
+        // By definition a block that is not last in the list has a
+        // parent.
+        this._parentValues[this._parentKey] = cast.toNumber(primitiveReportedValue);
+    }
+
+    callSyncCastNanProfile (sequencer, thread) {
+        // Fields are set during this initialization.
+
+        // Inputs are set during previous steps in the loop.
+
+        const runtime = sequencer.runtime;
+        // The method commented below has its code inlined
+        // underneath to reduce the bias recorded for the profiler's
+        // calls in this time sensitive execute function.
+        //
+        // runtime.profiler.start(blockFunctionProfilerId, opcode);
+        runtime.profiler.records.push(
+            runtime.profiler.START, blockFunctionProfilerId, this.opcode, performance.now());
+
+        const primitiveReportedValue = this._blockFunction(this._argValues, blockUtility);
+
+        // runtime.profiler.stop(blockFunctionProfilerId);
+        runtime.profiler.records.push(runtime.profiler.STOP, performance.now());
+
+        // By definition a block that is not last in the list has a
+        // parent.
+        this._parentValues[this._parentKey] = isNaN(primitiveReportedValue) ? 0 : primitiveReportedValue;
+    }
+
+    genCallSyncProfile (blockFunction) {
+        if (!BlockCached.callProfileByOpcode.has(blockFunction)) {
+            BlockCached.callProfileByOpcode.set(blockFunction, function (sequencer, thread) {
+                // Fields are set during this initialization.
+
+                // Inputs are set during previous steps in the loop.
+
+                const runtime = sequencer.runtime;
+                if (blockFunctionProfilerId === -1) {
+                    blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
+                }
+                // The method commented below has its code inlined
+                // underneath to reduce the bias recorded for the profiler's
+                // calls in this time sensitive execute function.
+                //
+                // runtime.profiler.start(blockFunctionProfilerId, opcode);
+                runtime.profiler.records.push(
+                    runtime.profiler.START, blockFunctionProfilerId, this.opcode, performance.now());
+
+                const primitiveReportedValue = blockFunction(this._argValues, blockUtility);
+
+                // runtime.profiler.stop(blockFunctionProfilerId);
+                runtime.profiler.records.push(runtime.profiler.STOP, performance.now());
+
+                // By definition a block that is not last in the list has a
+                // parent.
+                this._parentValues[this._parentKey] = primitiveReportedValue;
+            });
+        }
+
+        return BlockCached.callProfileByOpcode.get(blockFunction);
+    }
+
+    genCallSyncSetter (blockFunction, inputName) {
+        if (!BlockCached.callByOpcodeAndSetter.has(blockFunction)) {
+            BlockCached.callByOpcodeAndSetter.set(blockFunction, new window.Map());
+        }
+        if (!BlockCached.callByOpcodeAndSetter.get(blockFunction).has(inputName)) {
+            const built = new Function('blockFunction', 'blockUtility', `return function () {
+                // Update values for arguments (inputs).
+                const argValues = this._argValues;
+
+                // Fields are set during this initialization.
+
+                // Inputs are set during previous steps in the loop.
+
+                const primitiveReportedValue = blockFunction(argValues, blockUtility);
+
+                // By definition a block that is not last in the list has a
+                // parent.
+                const parentValues = this._parentValues;
+
+                parentValues.${inputName} = primitiveReportedValue;
+            }`)(blockFunction, blockUtility);
+            BlockCached.callByOpcodeAndSetter.get(blockFunction).set(inputName, built);
+        }
+
+        return BlockCached.callByOpcodeAndSetter.get(blockFunction).get(inputName);
+    }
+
+    genCallSyncSetterProfile (blockFunction, inputName) {
+        if (!BlockCached.callProfileByOpcodeAndSetter.has(blockFunction)) {
+            BlockCached.callProfileByOpcodeAndSetter.set(blockFunction, new window.Map());
+        }
+        if (!BlockCached.callProfileByOpcodeAndSetter.get(blockFunction).has(inputName)) {
+            BlockCached.callProfileByOpcodeAndSetter.get(blockFunction).set(inputName, new Function('blockFunction', 'blockUtility', 'blockFunctionProfilerFrame', `let blockFunctionProfilerId = -1;
+            return function (sequencer, thread) {
+                // Update values for arguments (inputs).
+                const argValues = this._argValues;
+
+                // Fields are set during this initialization.
+
+                // Inputs are set during previous steps in the loop.
+
+                const runtime = sequencer.runtime;
+                const opcode = this.opcode;
+                if (blockFunctionProfilerId === -1) {
+                    blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
+                }
+                // The method commented below has its code inlined
+                // underneath to reduce the bias recorded for the profiler's
+                // calls in this time sensitive execute function.
+                //
+                // runtime.profiler.start(blockFunctionProfilerId, opcode);
+                runtime.profiler.records.push(
+                    runtime.profiler.START, blockFunctionProfilerId, opcode, performance.now());
+
+                const primitiveReportedValue = blockFunction(argValues, blockUtility);
+
+                // runtime.profiler.stop(blockFunctionProfilerId);
+                runtime.profiler.records.push(runtime.profiler.STOP, performance.now());
+
+                // By definition a block that is not last in the list has a
+                // parent.
+                const parentValues = this._parentValues;
+
+                parentValues.${inputName} = primitiveReportedValue;
+            }`)(blockFunction, blockUtility, blockFunctionProfilerFrame));
+        }
+
+        return BlockCached.callProfileByOpcodeAndSetter.get(blockFunction).get(inputName);
+    }
 }
+
+BlockCached.callByOpcode = new window.Map();
+BlockCached.callProfileByOpcode = new window.Map();
+BlockCached.callByOpcodeAndSetter = new window.Map();
+BlockCached.callProfileByOpcodeAndSetter = new window.Map();
+
+BlockCached.callByOpcode.set('NUM1', function () {
+    const blockFunction = this._blockFunction;
+
+    // Update values for arguments (inputs).
+    const argValues = this._argValues;
+
+    const lastOperation = this._lastOperation;
+
+    // Fields are set during this initialization.
+
+    // Inputs are set during previous steps in the loop.
+
+    const primitiveReportedValue = blockFunction(argValues, blockUtility);
+
+    // By definition a block that is not last in the list has a
+    // parent.
+    const parentValues = this._parentValues;
+
+    parentValues.NUM1 = primitiveReportedValue;
+});
+
+BlockCached.callProfileByOpcode.set('NUM1', function (sequencer) {
+    const blockFunction = this._blockFunction;
+
+    // Update values for arguments (inputs).
+    const argValues = this._argValues;
+
+    const lastOperation = this._lastOperation;
+
+    // Fields are set during this initialization.
+
+    // Inputs are set during previous steps in the loop.
+
+    const runtime = sequencer.runtime;
+    const opcode = this.opcode;
+    if (blockFunctionProfilerId === -1) {
+        blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
+    }
+    // The method commented below has its code inlined
+    // underneath to reduce the bias recorded for the profiler's
+    // calls in this time sensitive execute function.
+    //
+    // runtime.profiler.start(blockFunctionProfilerId, opcode);
+    runtime.profiler.records.push(
+        runtime.profiler.START, blockFunctionProfilerId, opcode, performance.now());
+
+    const primitiveReportedValue = blockFunction(argValues, blockUtility);
+
+    // runtime.profiler.stop(blockFunctionProfilerId);
+    runtime.profiler.records.push(runtime.profiler.STOP, performance.now());
+
+    // By definition a block that is not last in the list has a
+    // parent.
+    const parentValues = this._parentValues;
+
+    parentValues.NUM1 = primitiveReportedValue;
+});
+
+BlockCached.callByOpcode.set('NUM2', function () {
+    const blockFunction = this._blockFunction;
+
+    // Update values for arguments (inputs).
+    const argValues = this._argValues;
+
+    const lastOperation = this._lastOperation;
+
+    // Fields are set during this initialization.
+
+    // Inputs are set during previous steps in the loop.
+
+    const primitiveReportedValue = blockFunction(argValues, blockUtility);
+
+    // By definition a block that is not last in the list has a
+    // parent.
+    const parentValues = this._parentValues;
+
+    parentValues.NUM2 = primitiveReportedValue;
+});
+
+BlockCached.callProfileByOpcode.set('NUM2', function (sequencer) {
+    const blockFunction = this._blockFunction;
+
+    // Update values for arguments (inputs).
+    const argValues = this._argValues;
+
+    const lastOperation = this._lastOperation;
+
+    // Fields are set during this initialization.
+
+    // Inputs are set during previous steps in the loop.
+
+    const runtime = sequencer.runtime;
+    const opcode = this.opcode;
+    if (blockFunctionProfilerId === -1) {
+        blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
+    }
+    // The method commented below has its code inlined
+    // underneath to reduce the bias recorded for the profiler's
+    // calls in this time sensitive execute function.
+    //
+    // runtime.profiler.start(blockFunctionProfilerId, opcode);
+    runtime.profiler.records.push(
+        runtime.profiler.START, blockFunctionProfilerId, opcode, performance.now());
+
+    const primitiveReportedValue = blockFunction(argValues, blockUtility);
+
+    // runtime.profiler.stop(blockFunctionProfilerId);
+    runtime.profiler.records.push(runtime.profiler.STOP, performance.now());
+
+    // By definition a block that is not last in the list has a
+    // parent.
+    const parentValues = this._parentValues;
+
+    parentValues.NUM2 = primitiveReportedValue;
+});
 
 /**
  * Execute a block.
@@ -464,97 +1073,137 @@ const execute = function (sequencer, thread) {
         currentStackFrame.reported = null;
     }
 
-    for (; i < length; i++) {
-        const lastOperation = i === length - 1;
-        const opCached = ops[i];
+    // for (; i < length; i++) {
+    //     const lastOperation = i === length - 1;
+    //     const opCached = ops[i];
+    //
+    //     const blockFunction = opCached._blockFunction;
+    //
+    //     // Update values for arguments (inputs).
+    //     const argValues = opCached._argValues;
+    //
+    //     // Fields are set during opCached initialization.
+    //
+    //     // Blocks should glow when a script is starting,
+    //     // not after it has finished (see #1404).
+    //     // Only blocks in blockContainers that don't forceNoGlow
+    //     // should request a glow.
+    //     if (!blockContainer.forceNoGlow) {
+    //         thread.requestScriptGlowInFrame = true;
+    //     }
+    //
+    //     // Inputs are set during previous steps in the loop.
+    //
+    //     let primitiveReportedValue = null;
+    //     if (runtime.profiler === null) {
+    //         primitiveReportedValue = blockFunction(argValues, blockUtility);
+    //     } else {
+    //         const opcode = opCached.opcode;
+    //         if (blockFunctionProfilerId === -1) {
+    //             blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
+    //         }
+    //         // The method commented below has its code inlined
+    //         // underneath to reduce the bias recorded for the profiler's
+    //         // calls in this time sensitive execute function.
+    //         //
+    //         // runtime.profiler.start(blockFunctionProfilerId, opcode);
+    //         runtime.profiler.records.push(
+    //             runtime.profiler.START, blockFunctionProfilerId, opcode, 0);
+    //
+    //         primitiveReportedValue = blockFunction(argValues, blockUtility);
+    //
+    //         // runtime.profiler.stop(blockFunctionProfilerId);
+    //         runtime.profiler.records.push(runtime.profiler.STOP, 0);
+    //     }
+    //
+    //     // If it's a promise, wait until promise resolves.
+    //     if (isPromise(primitiveReportedValue)) {
+    //         handlePromise(primitiveReportedValue, sequencer, thread, opCached, lastOperation);
+    //
+    //         // Store the already reported values. They will be thawed into the
+    //         // future versions of the same operations by block id. The reporting
+    //         // operation if it is promise waiting will set its parent value at
+    //         // that time.
+    //         thread.justReported = null;
+    //         currentStackFrame.reporting = ops[i].id;
+    //         currentStackFrame.reported = ops.slice(0, i).map(reportedCached => {
+    //             const inputName = reportedCached._parentKey;
+    //             const reportedValues = reportedCached._parentValues;
+    //
+    //             if (inputName === 'BROADCAST_INPUT') {
+    //                 return {
+    //                     opCached: reportedCached.id,
+    //                     inputValue: reportedValues[inputName].BROADCAST_OPTION.name
+    //                 };
+    //             }
+    //             return {
+    //                 opCached: reportedCached.id,
+    //                 inputValue: reportedValues[inputName]
+    //             };
+    //         });
+    //
+    //         // We are waiting for a promise. Stop running this set of operations
+    //         // and continue them later after thawing the reported values.
+    //         break;
+    //     } else if (thread.status === Thread.STATUS_RUNNING) {
+    //         if (lastOperation) {
+    //             handleReport(primitiveReportedValue, sequencer, thread, opCached, lastOperation);
+    //         } else {
+    //             // By definition a block that is not last in the list has a
+    //             // parent.
+    //             const inputName = opCached._parentKey;
+    //             const parentValues = opCached._parentValues;
+    //
+    //             if (inputName === 'BROADCAST_INPUT') {
+    //                 // Something is plugged into the broadcast input.
+    //                 // Cast it to a string. We don't need an id here.
+    //                 parentValues.BROADCAST_OPTION.id = null;
+    //                 parentValues.BROADCAST_OPTION.name = cast.toString(primitiveReportedValue);
+    //             } else {
+    //                 parentValues[inputName] = primitiveReportedValue;
+    //             }
+    //         }
+    //     }
+    // }
 
-        const blockFunction = opCached._blockFunction;
-
-        // Update values for arguments (inputs).
-        const argValues = opCached._argValues;
-
-        // Fields are set during opCached initialization.
-
-        // Blocks should glow when a script is starting,
-        // not after it has finished (see #1404).
-        // Only blocks in blockContainers that don't forceNoGlow
-        // should request a glow.
-        if (!blockContainer.forceNoGlow) {
-            thread.requestScriptGlowInFrame = true;
+    if (runtime.profiler === null) {
+        for (; i < length && thread.status === Thread.STATUS_RUNNING; i++) {
+            ops[i].call(sequencer, thread);
+        }
+    } else {
+        if (blockFunctionProfilerId === -1) {
+            blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
         }
 
-        // Inputs are set during previous steps in the loop.
-
-        let primitiveReportedValue = null;
-        if (runtime.profiler === null) {
-            primitiveReportedValue = blockFunction(argValues, blockUtility);
-        } else {
-            const opcode = opCached.opcode;
-            if (blockFunctionProfilerId === -1) {
-                blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
-            }
-            // The method commented below has its code inlined
-            // underneath to reduce the bias recorded for the profiler's
-            // calls in this time sensitive execute function.
-            //
-            // runtime.profiler.start(blockFunctionProfilerId, opcode);
-            runtime.profiler.records.push(
-                runtime.profiler.START, blockFunctionProfilerId, opcode, 0);
-
-            primitiveReportedValue = blockFunction(argValues, blockUtility);
-
-            // runtime.profiler.stop(blockFunctionProfilerId);
-            runtime.profiler.records.push(runtime.profiler.STOP, 0);
+        for (; i < length && thread.status === Thread.STATUS_RUNNING; i++) {
+            ops[i].callProfile(sequencer, thread);
         }
+    }
 
-        // If it's a promise, wait until promise resolves.
-        if (isPromise(primitiveReportedValue)) {
-            handlePromise(primitiveReportedValue, sequencer, thread, opCached, lastOperation);
+    if (thread.status === Thread.STATUS_PROMISE_WAIT) {
+        i -= 1;
 
-            // Store the already reported values. They will be thawed into the
-            // future versions of the same operations by block id. The reporting
-            // operation if it is promise waiting will set its parent value at
-            // that time.
-            thread.justReported = null;
-            currentStackFrame.reporting = ops[i].id;
-            currentStackFrame.reported = ops.slice(0, i).map(reportedCached => {
-                const inputName = reportedCached._parentKey;
-                const reportedValues = reportedCached._parentValues;
+        // Store the already reported values. They will be thawed into the
+        // future versions of the same operations by block id. The reporting
+        // operation if it is promise waiting will set its parent value at
+        // that time.
+        thread.justReported = null;
+        currentStackFrame.reporting = ops[i].id;
+        currentStackFrame.reported = ops.slice(0, i).map(reportedCached => {
+            const inputName = reportedCached._parentKey;
+            const reportedValues = reportedCached._parentValues;
 
-                if (inputName === 'BROADCAST_INPUT') {
-                    return {
-                        opCached: reportedCached.id,
-                        inputValue: reportedValues[inputName].BROADCAST_OPTION.name
-                    };
-                }
+            if (inputName === 'BROADCAST_INPUT') {
                 return {
                     opCached: reportedCached.id,
-                    inputValue: reportedValues[inputName]
+                    inputValue: reportedValues[inputName].BROADCAST_OPTION.name
                 };
-            });
-
-            // We are waiting for a promise. Stop running this set of operations
-            // and continue them later after thawing the reported values.
-            break;
-        } else if (thread.status === Thread.STATUS_RUNNING) {
-            if (lastOperation) {
-                handleReport(primitiveReportedValue, sequencer, thread, opCached, lastOperation);
-            } else {
-                // By definition a block that is not last in the list has a
-                // parent.
-                const inputName = opCached._parentKey;
-                const parentValues = opCached._parentValues;
-
-                if (inputName === 'BROADCAST_INPUT') {
-                    // Something is plugged into the broadcast input.
-                    // Cast it to a string. We don't need an id here.
-                    parentValues.BROADCAST_OPTION.id = null;
-                    parentValues.BROADCAST_OPTION.name = cast.toString(primitiveReportedValue);
-                } else {
-                    parentValues[inputName] = primitiveReportedValue;
-                }
             }
-        }
+            return {
+                opCached: reportedCached.id,
+                inputValue: reportedValues[inputName]
+            };
+        });
     }
 };
 

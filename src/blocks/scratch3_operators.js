@@ -1,5 +1,6 @@
 const Cast = require('../util/cast.js');
 const MathUtil = require('../util/math-util.js');
+const BlockDefinition = require('../engine/block-definition');
 
 class Scratch3OperatorsBlocks {
     constructor (runtime) {
@@ -37,49 +38,170 @@ class Scratch3OperatorsBlocks {
         };
     }
 
+    static get add_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                NUM1: BlockDefinition.Type.Number,
+                NUM2: BlockDefinition.Type.Number
+            },
+            return: BlockDefinition.Type.NanSafe
+        };
+    }
+
     add (args) {
-        return Cast.toNumber(args.NUM1) + Cast.toNumber(args.NUM2);
+        return args.NUM1 + args.NUM2;
+    }
+
+    static get subtract_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                NUM1: BlockDefinition.Type.Number,
+                NUM2: BlockDefinition.Type.Number
+            },
+            return: BlockDefinition.Type.NanSafe
+        };
     }
 
     subtract (args) {
-        return Cast.toNumber(args.NUM1) - Cast.toNumber(args.NUM2);
+        return args.NUM1 - args.NUM2;
+    }
+
+    static get multiply_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                NUM1: BlockDefinition.Type.Number,
+                NUM2: BlockDefinition.Type.Number
+            },
+            return: BlockDefinition.Type.NanSafe
+        };
     }
 
     multiply (args) {
-        return Cast.toNumber(args.NUM1) * Cast.toNumber(args.NUM2);
+        return args.NUM1 * args.NUM2;
+    }
+
+    static get divide_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                NUM1: BlockDefinition.Type.Number,
+                NUM2: BlockDefinition.Type.Number
+            },
+            return: BlockDefinition.Type.Number
+        };
     }
 
     divide (args) {
-        return Cast.toNumber(args.NUM1) / Cast.toNumber(args.NUM2);
+        return args.NUM1 / args.NUM2;
+    }
+
+    static get lt_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                OPERAND1: BlockDefinition.Type,
+                OPERAND2: BlockDefinition.Type
+            },
+            return: BlockDefinition.Type.Boolean
+        };
     }
 
     lt (args) {
+        // console.log('lt', args.OPERAND1, args.OPERAND2, Cast.compare(args.OPERAND1, args.OPERAND2) < 0);
         return Cast.compare(args.OPERAND1, args.OPERAND2) < 0;
+    }
+
+    static get equals_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                OPERAND1: BlockDefinition.Type,
+                OPERAND2: BlockDefinition.Type
+            },
+            return: BlockDefinition.Type.Boolean
+        };
     }
 
     equals (args) {
         return Cast.compare(args.OPERAND1, args.OPERAND2) === 0;
     }
 
+    static get gt_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                OPERAND1: BlockDefinition.Type,
+                OPERAND2: BlockDefinition.Type
+            },
+            return: BlockDefinition.Type.Boolean
+        };
+    }
+
     gt (args) {
         return Cast.compare(args.OPERAND1, args.OPERAND2) > 0;
+    }
+
+    static get and_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                OPERAND1: BlockDefinition.Type.Boolean,
+                OPERAND2: BlockDefinition.Type.Boolean
+            },
+            return: BlockDefinition.Type.Boolean
+        };
     }
 
     and (args) {
         return Cast.toBoolean(args.OPERAND1) && Cast.toBoolean(args.OPERAND2);
     }
 
+    static get or_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                OPERAND1: BlockDefinition.Type.Boolean,
+                OPERAND2: BlockDefinition.Type.Boolean
+            },
+            return: BlockDefinition.Type.Boolean
+        };
+    }
+
     or (args) {
         return Cast.toBoolean(args.OPERAND1) || Cast.toBoolean(args.OPERAND2);
+    }
+
+    static get not_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                OPERAND: BlockDefinition.Type.Boolean
+            },
+            return: BlockDefinition.Type.Boolean
+        };
     }
 
     not (args) {
         return !Cast.toBoolean(args.OPERAND);
     }
 
+    static get random_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                FROM: BlockDefinition.Type.Number,
+                TO: BlockDefinition.Type.Number
+            },
+            return: BlockDefinition.Type.NanSafe
+        };
+    }
+
     random (args) {
-        const nFrom = Cast.toNumber(args.FROM);
-        const nTo = Cast.toNumber(args.TO);
+        const nFrom = args.FROM;
+        const nTo = args.TO;
         const low = nFrom <= nTo ? nFrom : nTo;
         const high = nFrom <= nTo ? nTo : nFrom;
         if (low === high) return low;
@@ -115,22 +237,54 @@ class Scratch3OperatorsBlocks {
         return format(args.STRING1).includes(format(args.STRING2));
     }
 
+    static get mod_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                NUM1: BlockDefinition.Type.Number,
+                NUM2: BlockDefinition.Type.Number
+            },
+            return: BlockDefinition.Type.Number
+        };
+    }
+
     mod (args) {
-        const n = Cast.toNumber(args.NUM1);
-        const modulus = Cast.toNumber(args.NUM2);
+        const n = args.NUM1;
+        const modulus = args.NUM2;
         let result = n % modulus;
         // Scratch mod is kept positive.
         if (result / modulus < 0) result += modulus;
         return result;
     }
 
+    static get round_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                NUM: BlockDefinition.Type.Number
+            },
+            return: BlockDefinition.Type.Number
+        };
+    }
+
     round (args) {
-        return Math.round(Cast.toNumber(args.NUM));
+        return Math.round(args.NUM);
+    }
+
+    static get mathop_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                NUM: BlockDefinition.Type.Number,
+                OPERATOR: BlockDefinition.Type.String
+            },
+            return: BlockDefinition.Type.Number
+        };
     }
 
     mathop (args) {
         const operator = Cast.toString(args.OPERATOR).toLowerCase();
-        const n = Cast.toNumber(args.NUM);
+        const n = args.NUM;
         switch (operator) {
         case 'abs': return Math.abs(n);
         case 'floor': return Math.floor(n);
@@ -150,5 +304,7 @@ class Scratch3OperatorsBlocks {
         return 0;
     }
 }
+
+BlockDefinition.decorateBlockFunctions(Scratch3OperatorsBlocks);
 
 module.exports = Scratch3OperatorsBlocks;

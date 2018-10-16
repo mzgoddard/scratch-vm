@@ -1,4 +1,5 @@
 const Cast = require('../util/cast');
+const BlockDefinition = require('../engine/block-definition');
 
 class Scratch3DataBlocks {
     constructor (runtime) {
@@ -32,6 +33,12 @@ class Scratch3DataBlocks {
             data_listcontainsitem: this.listContainsItem,
             data_hidelist: this.hideList,
             data_showlist: this.showList
+        };
+    }
+
+    static get getVariable_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous
         };
     }
 
@@ -244,5 +251,7 @@ class Scratch3DataBlocks {
         return 200000;
     }
 }
+
+BlockDefinition.decorateBlockFunctions(Scratch3DataBlocks);
 
 module.exports = Scratch3DataBlocks;

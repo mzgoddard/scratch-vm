@@ -1,3 +1,5 @@
+const BlockDefinition = require('../engine/block-definition');
+
 class Scratch3ProcedureBlocks {
     constructor (runtime) {
         /**
@@ -22,6 +24,13 @@ class Scratch3ProcedureBlocks {
 
     definition () {
         // No-op: execute the blocks.
+    }
+
+    static get call_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            return: BlockDefinition.Type.None
+        };
     }
 
     call (args, util) {
@@ -51,12 +60,32 @@ class Scratch3ProcedureBlocks {
         }
     }
 
+    static get argumentReporterStringNumber_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                VALUE: BlockDefinition.Type.String
+            },
+            return: BlockDefinition.Type.StringNumber
+        };
+    }
+
     argumentReporterStringNumber (args, util) {
         const value = util.getParam(args.VALUE);
         if (value === null) {
             return '';
         }
         return value;
+    }
+
+    static get argumentReporterBoolean_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                VALUE: BlockDefinition.Type.String
+            },
+            return: BlockDefinition.Type.Boolean
+        };
     }
 
     argumentReporterBoolean (args, util) {
@@ -67,5 +96,7 @@ class Scratch3ProcedureBlocks {
         return value;
     }
 }
+
+BlockDefinition.decorateBlockFunctions(Scratch3ProcedureBlocks);
 
 module.exports = Scratch3ProcedureBlocks;

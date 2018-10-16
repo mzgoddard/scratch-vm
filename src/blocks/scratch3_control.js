@@ -1,4 +1,5 @@
 const Cast = require('../util/cast');
+const BlockDefinition = require('../engine/block-definition');
 
 class Scratch3ControlBlocks {
     constructor (runtime) {
@@ -98,6 +99,7 @@ class Scratch3ControlBlocks {
 
     waitUntil (args, util) {
         const condition = Cast.toBoolean(args.CONDITION);
+        // console.log('waitUntil', args.CONDITION);
         if (!condition) {
             util.yield();
         }
@@ -116,11 +118,31 @@ class Scratch3ControlBlocks {
         });
     }
 
+    static get if_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                CONDITION: BlockDefinition.Type.Boolean
+            },
+            return: BlockDefinition.Type.None
+        };
+    }
+
     if (args, util) {
         const condition = Cast.toBoolean(args.CONDITION);
         if (condition) {
             util.startBranch(1, false);
         }
+    }
+
+    static get ifElse_definition () {
+        return {
+            threading: BlockDefinition.Threading.Synchronous,
+            arguments: {
+                CONDITION: BlockDefinition.Type.Boolean
+            },
+            return: BlockDefinition.Type.None
+        };
     }
 
     ifElse (args, util) {
@@ -194,5 +216,7 @@ class Scratch3ControlBlocks {
         util.startBranch(1, false);
     }
 }
+
+BlockDefinition.decorateBlockFunctions(Scratch3ControlBlocks);
 
 module.exports = Scratch3ControlBlocks;
