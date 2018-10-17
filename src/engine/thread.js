@@ -1,3 +1,5 @@
+const BlocksThreadCache = require('./blocks-thread-cache');
+
 /**
  * Recycle bin for empty stackFrame objects
  * @type Array<_StackFrame>
@@ -118,6 +120,10 @@ class Thread {
          */
         this.stackFrames = [];
 
+        this.stackPointers = [];
+
+        this.lastStackPointer = null;
+
         /**
          * Status of the thread, one of three states (below)
          * @type {number}
@@ -178,6 +184,8 @@ class Thread {
          * @type {Any}
          */
         this.justReported = null;
+
+        this._blockHelperCache = [];
     }
 
     /**
@@ -229,17 +237,15 @@ class Thread {
      * Push stack and update stack frames appropriately.
      * @param {string} blockId Block ID to push to stack.
      */
-    pushStack (blockId) {
-        this.stack.push(blockId);
+    pushStack (blockId, blockPointer = BlocksThreadCache.getCached(this.blockContainer, blockId)) {
+        // this.stack.push(blockId);
+        this.stackPointers.push(blockPointer);
+        this.lastStackPointer = blockPointer;
         // Push an empty stack frame, if we need one.
         // Might not, if we just popped the stack.
-        if (this.stack.length > this.stackFrames.length) {
-            // if (blockId === null) {
-            //     this.stackFrames.push(null);
-            // } else {
-                const parent = this.stackFrames[this.stackFrames.length - 1];
-                this.stackFrames.push(_StackFrame.create(typeof parent !== 'undefined' && parent.warpMode));
-            // }
+        if (this.stackPointers.length > this.stackFrames.length) {
+            const parent = this.stackFrames[this.stackFrames.length - 1];
+            this.stackFrames.push(_StackFrame.create(typeof parent !== 'undefined' && parent.warpMode));
         }
     }
 
@@ -248,23 +254,13 @@ class Thread {
      * (avoids popping and re-pushing a new stack frame - keeps the warpmode the same
      * @param {string} blockId Block ID to push to stack.
      */
-    reuseStackForNextBlock (blockId) {
-        this.stack[this.stack.length - 1] = blockId;
 
-        // const lastFrame = this.stackFrames[this.stackFrames.length - 1];
-        // if (blockId === null) {
-        //     this.stackFrames[this.stackFrames.length - 1] = null;
-        // } else {
-        //     this.stackFrames[this.stackFrames.length - 1] = _StackFrame.create(lastFrame.warpMode);
-        // }
-        // _StackFrame.release(lastFrame);
-        if (blockId === null) {
-            _StackFrame.release(this.stackFrames[this.stackFrames.length - 1]);
-            this.stackFrames[this.stackFrames.length - 1] = null;
-        } else {
-            this.stackFrames[this.stackFrames.length - 1].reuse();
-        }
-        // this.stackFrames[this.stackFrames.length - 1].reuse();
+    reuseStackForNextBlock () {
+        // this.stack[this.stack.length - 1] = blockId;
+        this.stackFrames[this.stackFrames.length - 1].reuse();
+        const blockPointer = this.lastStackPointer.getNext();
+        this.stackPointers[this.stackPointers.length - 1] = blockPointer;
+        this.lastStackPointer = blockPointer;
     }
 
     /**
@@ -272,25 +268,28 @@ class Thread {
      * @return {string} Block ID popped from the stack.
      */
     popStack () {
+        const pointer = this.stackPointers.pop();
+        this.lastStackPointer = this.stackPointers.length > 0 ? this.stackPointers[this.stackPointers.length - 1] : null;
         _StackFrame.release(this.stackFrames.pop());
-        return this.stack.pop();
+        return pointer && pointer.blockId;
+        // return this.stack.pop();
     }
 
     /**
      * Pop back down the stack frame until we hit a procedure call or the stack frame is emptied
      */
     stopThisScript () {
-        let blockID = this.peekStack();
-        while (blockID !== null) {
-            const block = this.target.blocks.getBlock(blockID);
+        let blockPointer = this.lastStackPointer;
+        while (blockPointer !== null) {
+            const block = blockPointer.getBlock();
             if (typeof block !== 'undefined' && block.opcode === 'procedures_call') {
                 break;
             }
             this.popStack();
-            blockID = this.peekStack();
+            blockPointer = this.lastStackPointer;
         }
 
-        if (this.stack.length === 0) {
+        if (this.stackPointers.length === 0) {
             // Clean up!
             this.requestScriptGlowInFrame = false;
             this.status = Thread.STATUS_DONE;
@@ -312,6 +311,11 @@ class Thread {
      */
     peekStackFrame () {
         return this.stackFrames.length > 0 ? this.stackFrames[this.stackFrames.length - 1] : null;
+    }
+
+    peekStackPointer () {
+        return this.lastStackPointer;
+        // this.stackPointers.length > 0 ? this.stackPointers[this.stackPointers.length - 1] : null;
     }
 
     /**
@@ -368,7 +372,8 @@ class Thread {
      * @return {boolean} True if execution is at top of the stack.
      */
     atStackTop () {
-        return this.peekStack() === this.topBlock;
+        const stackPointer = this.lastStackPointer;
+        return stackPointer && stackPointer.blockId === this.topBlock;
     }
 
 
@@ -378,8 +383,9 @@ class Thread {
      * where execution proceeds from one block to the next.
      */
     goToNextBlock () {
-        const nextBlockId = this.target.blocks.getNextBlock(this.peekStack());
-        this.reuseStackForNextBlock(nextBlockId);
+        // const nextPointer = this.lastStackPointer.getNext();
+        // const nextBlockId = nextPointer !== null ? nextPointer.blockId : null;
+        this.reuseStackForNextBlock();
     }
 
     /**
@@ -390,9 +396,9 @@ class Thread {
      */
     isRecursiveCall (procedureCode) {
         let callCount = 5; // Max number of enclosing procedure calls to examine.
-        const sp = this.stack.length - 1;
+        const sp = this.stackPointers.length - 1;
         for (let i = sp - 1; i >= 0; i--) {
-            const block = this.target.blocks.getBlock(this.stack[i]);
+            const block = this.stackPointers[i].getBlock();
             if (block.opcode === 'procedures_call' &&
                 block.mutation.proccode === procedureCode) {
                 return true;
@@ -402,5 +408,7 @@ class Thread {
         return false;
     }
 }
+
+Thread.prototype.goToNextBlock = Thread.prototype.reuseStackForNextBlock;
 
 module.exports = Thread;

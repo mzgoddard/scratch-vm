@@ -706,8 +706,11 @@ class Runtime extends EventEmitter {
                     const packagePrimitives = packageObject.getPrimitives();
                     for (const op in packagePrimitives) {
                         if (packagePrimitives.hasOwnProperty(op)) {
+                            // this._primitives[op] = ((func, context) => function () {return func.apply(context, arguments);})(packagePrimitives[op], packageObject);
                             this._primitives[op] =
                                 packagePrimitives[op].bind(packageObject);
+                            this._primitives[op].primitive = packagePrimitives[op];
+                            this._primitives[op].context = packageObject;
                         }
                     }
                 }
@@ -1364,7 +1367,7 @@ class Runtime extends EventEmitter {
     isActiveThread (thread) {
         return (
             (
-                thread.stack.length > 0 &&
+                thread.stackPointers.length > 0 &&
                 thread.status !== Thread.STATUS_DONE) &&
             this.threads.indexOf(thread) > -1);
     }

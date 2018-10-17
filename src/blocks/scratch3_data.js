@@ -36,9 +36,16 @@ class Scratch3DataBlocks {
     }
 
     getVariable (args, util) {
-        const variable = util.target.lookupOrCreateVariable(
-            args.VARIABLE.id, args.VARIABLE.name);
-        return variable.value;
+        let cache = util.thread._blockHelperCache[util.thread.lastStackPointer.index];
+        console.log(util.thread.target.id, util.thread.lastStackPointer.blockId, args.VARIABLE.id, util.thread.lastStackPointer.index, !!cache);
+        if (!cache) {
+            cache = util.target.lookupOrCreateVariable(
+                args.VARIABLE.id, args.VARIABLE.name);
+            util.thread._blockHelperCache[util.thread.lastStackPointer.index] = cache;
+        }
+        // const variable = util.target.lookupOrCreateVariable(
+        //     args.VARIABLE.id, args.VARIABLE.name);
+        return cache.value;
     }
 
     setVariableTo (args, util) {
