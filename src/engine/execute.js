@@ -113,16 +113,17 @@ const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached, l
         // If its a command block.
         if (lastOperation && typeof resolvedValue === 'undefined') {
             let stackFrame;
-            let nextBlockId;
+            let nextBlockPointer;
             do {
                 // In the case that the promise is the last block in the current thread stack
                 // We need to pop out repeatedly until we find the next block.
-                const popped = thread.popStack();
+                const popped = thread.lastStackPointer;
+                thread.popStack();
                 if (popped === null) {
                     return;
                 }
-                nextBlockId = thread.target.blocks.getNextBlock(popped);
-                if (nextBlockId !== null) {
+                nextBlockPointer = popped.getNext();
+                if (nextBlockPointer !== null) {
                     // A next block exists so break out this loop
                     break;
                 }
@@ -131,7 +132,7 @@ const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached, l
                 stackFrame = thread.peekStackFrame();
             } while (stackFrame !== null && !stackFrame.isLoop);
 
-            thread.pushStack(nextBlockId);
+            thread.pushStack(null, nextBlockPointer);
         }
     }, rejectionReason => {
         // Promise rejected: the primitive had some error.
@@ -158,7 +159,7 @@ const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached, l
  * @param {object} cached default set of cached values
  */
 class BlockCached {
-    constructor (blockContainer, cached) {
+    constructor (runtime, blockContainer, cached) {
         /**
          * Block id in its parent set of blocks.
          * @type {string}
@@ -270,13 +271,13 @@ class BlockCached {
          */
         this._ops = [];
 
-        const {runtime} = blockUtility.sequencer;
-
         const {opcode, fields, inputs} = this;
 
         // Assign opcode isHat and blockFunction data to avoid dynamic lookups.
         this._isHat = runtime.getIsHat(opcode);
         this._blockFunction = runtime.getOpcodeFunction(opcode);
+        this._blockFunctionContext = this._blockFunction && this._blockFunction.context;
+        this._blockFunction = this._blockFunction && this._blockFunction.primitive || this._blockFunction;
         this._definedBlockFunction = typeof this._blockFunction !== 'undefined';
 
         // Store the current shadow value if there is a shadow value.
@@ -339,7 +340,7 @@ class BlockCached {
         for (const inputName in this._inputs) {
             const input = this._inputs[inputName];
             if (input.block) {
-                const inputCached = BlocksExecuteCache.getCached(blockContainer, input.block, BlockCached);
+                const inputCached = BlocksExecuteCache.getCached(runtime, blockContainer, input.block, BlockCached);
 
                 if (inputCached._isHat) {
                     continue;
@@ -382,14 +383,13 @@ const execute = function (sequencer, thread) {
     blockUtility.thread = thread;
 
     // Current block to execute is the one on the top of the stack.
-    const currentBlockId = thread.peekStack();
     const currentStackFrame = thread.peekStackFrame();
 
-    let blockContainer = thread.blockContainer;
-    let blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
+    let blockCached = thread.lastStackPointer.getExecuteCached(runtime, BlockCached);
     if (blockCached === null) {
-        blockContainer = runtime.flyoutBlocks;
-        blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
+        const currentBlockId = thread.lastStackPointer.blockId;
+        const blockContainer = runtime.flyoutBlocks;
+        blockCached = BlocksExecuteCache.getCached(runtime, blockContainer, currentBlockId, BlockCached);
         // Stop if block or target no longer exists.
         if (blockCached === null) {
             // No block found: stop the thread; script no longer exists.
@@ -469,6 +469,7 @@ const execute = function (sequencer, thread) {
         const opCached = ops[i];
 
         const blockFunction = opCached._blockFunction;
+        const blockFunctionContext = opCached._blockFunctionContext;
 
         // Update values for arguments (inputs).
         const argValues = opCached._argValues;
@@ -479,7 +480,7 @@ const execute = function (sequencer, thread) {
         // not after it has finished (see #1404).
         // Only blocks in blockContainers that don't forceNoGlow
         // should request a glow.
-        if (!blockContainer.forceNoGlow) {
+        if (!thread.blockContainer.forceNoGlow) {
             thread.requestScriptGlowInFrame = true;
         }
 
@@ -487,7 +488,7 @@ const execute = function (sequencer, thread) {
 
         let primitiveReportedValue = null;
         if (runtime.profiler === null) {
-            primitiveReportedValue = blockFunction(argValues, blockUtility);
+            primitiveReportedValue = blockFunction.call(blockFunctionContext, argValues, blockUtility);
         } else {
             const opcode = opCached.opcode;
             if (blockFunctionProfilerId === -1) {
@@ -499,12 +500,12 @@ const execute = function (sequencer, thread) {
             //
             // runtime.profiler.start(blockFunctionProfilerId, opcode);
             runtime.profiler.records.push(
-                runtime.profiler.START, blockFunctionProfilerId, opcode, 0);
+                runtime.profiler.START, blockFunctionProfilerId, opcode, performance.now());
 
-            primitiveReportedValue = blockFunction(argValues, blockUtility);
+            primitiveReportedValue = blockFunction.call(blockFunctionContext, argValues, blockUtility);
 
             // runtime.profiler.stop(blockFunctionProfilerId);
-            runtime.profiler.records.push(runtime.profiler.STOP, 0);
+            runtime.profiler.records.push(runtime.profiler.STOP, performance.now());
         }
 
         // If it's a promise, wait until promise resolves.

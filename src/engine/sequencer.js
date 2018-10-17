@@ -94,7 +94,7 @@ class Sequencer {
             // Attempt to run each thread one time.
             for (let i = 0; i < this.runtime.threads.length; i++) {
                 const activeThread = this.runtime.threads[i];
-                if (activeThread.stack.length === 0 ||
+                if (activeThread.stackPointers.length === 0 ||
                     activeThread.status === Thread.STATUS_DONE) {
                     // Finished with this thread.
                     doneThreads[i] = activeThread;
@@ -169,13 +169,13 @@ class Sequencer {
      * @param {!Thread} thread Thread object to step.
      */
     stepThread (thread) {
-        let currentBlockId = thread.peekStack();
-        if (!currentBlockId) {
+        let currentBlockPointer = thread.lastStackPointer;
+        if (!currentBlockPointer) {
             // A "null block" - empty branch.
             thread.popStack();
         }
         // Save the current block ID to notice if we did control flow.
-        while ((currentBlockId = thread.peekStack())) {
+        while ((currentBlockPointer = thread.lastStackPointer)) {
             let isWarpMode = thread.peekStackFrame().warpMode;
             if (isWarpMode && !thread.warpTimer) {
                 // Initialize warp-mode timer if it hasn't been already.
@@ -205,7 +205,7 @@ class Sequencer {
                 // this.runtime.profiler.stop();
                 this.runtime.profiler.records.push(this.runtime.profiler.STOP, 0);
             }
-            thread.blockGlowInFrame = currentBlockId;
+            thread.blockGlowInFrame = currentBlockPointer.blockId;
             // If the thread has yielded or is waiting, yield to other threads.
             if (thread.status === Thread.STATUS_YIELD) {
                 // Mark as running for next iteration.
@@ -226,14 +226,14 @@ class Sequencer {
                 return;
             }
             // If no control flow has happened, switch to next block.
-            if (thread.peekStack() === currentBlockId) {
+            if (thread.lastStackPointer === currentBlockPointer) {
                 thread.goToNextBlock();
             }
             // If no next block has been found at this point, look on the stack.
-            while (!thread.peekStack()) {
+            while (!thread.lastStackPointer) {
                 thread.popStack();
 
-                if (thread.stack.length === 0) {
+                if (thread.stackPointers.length === 0) {
                     // No more stack to run!
                     thread.status = Thread.STATUS_DONE;
                     return;
@@ -279,17 +279,14 @@ class Sequencer {
         if (!branchNum) {
             branchNum = 1;
         }
-        const currentBlockId = thread.peekStack();
-        const branchId = thread.target.blocks.getBranch(
-            currentBlockId,
-            branchNum
-        );
+        const currentBlockPointer = thread.lastStackPointer;
+        const branchPointer = currentBlockPointer.getBranch(branchNum);
         thread.peekStackFrame().isLoop = isLoop;
-        if (branchId) {
+        if (branchPointer) {
             // Push branch ID to the thread's stack.
-            thread.pushStack(branchId);
+            thread.pushStack(null, branchPointer);
         } else {
-            thread.pushStack(null);
+            thread.pushStack(null, null);
         }
     }
 
@@ -299,8 +296,10 @@ class Sequencer {
      * @param {!string} procedureCode Procedure code of procedure to step to.
      */
     stepToProcedure (thread, procedureCode) {
-        const definition = thread.target.blocks.getProcedureDefinition(procedureCode);
-        if (!definition) {
+        const blockPointer = thread.lastStackPointer;
+        const definitionPointer = blockPointer.getProcedureDefinition();
+        // const definition = thread.target.blocks.getProcedureDefinition(procedureCode);
+        if (!definitionPointer) {
             return;
         }
         // Check if the call is recursive.
@@ -311,7 +310,7 @@ class Sequencer {
         // and on to the main definition of the procedure.
         // When that set of blocks finishes executing, it will be popped
         // from the stack by the sequencer, returning control to the caller.
-        thread.pushStack(definition);
+        thread.pushStack(null, definitionPointer);
         // In known warp-mode threads, only yield when time is up.
         if (thread.peekStackFrame().warpMode &&
             thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME) {
@@ -319,9 +318,8 @@ class Sequencer {
         } else {
             // Look for warp-mode flag on definition, and set the thread
             // to warp-mode if needed.
-            const definitionBlock = thread.target.blocks.getBlock(definition);
-            const innerBlock = thread.target.blocks.getBlock(
-                definitionBlock.inputs.custom_block.block);
+            // const definitionBlock = thread.target.blocks.getBlock(definition);
+            const innerBlock = blockPointer.getProcedureInnerBlock();
             let doWarp = false;
             if (innerBlock && innerBlock.mutation) {
                 const warp = innerBlock.mutation.warp;
