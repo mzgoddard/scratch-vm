@@ -538,6 +538,8 @@ class Runtime extends EventEmitter {
                         if (packagePrimitives.hasOwnProperty(op)) {
                             this._primitives[op] =
                                 packagePrimitives[op].bind(packageObject);
+                            this._primitives[op].function = packagePrimitives[op];
+                            this._primitives[op].context = packageObject;
                         }
                     }
                 }
