@@ -49,11 +49,21 @@ const loadBitmap_ = function (costume, costumeAsset, runtime, rotationCenter) {
         };
         imageElement.addEventListener('error', onError);
         imageElement.addEventListener('load', onLoad);
-        const src = costumeAsset.encodeDataURI();
+        // const src = costumeAsset.encodeDataURI();
+        // window.costumeAsset = costumeAsset;
+        // window.costumeDataURI = costumeAsset.encodeDataURI();
+        const src = new Blob([costumeAsset.data], {
+            type: costumeAsset.assetType.contentType
+        });
+        // const src = URL.createObjectURL(window.blob = new Blob([costumeAsset.data], {
+        //     type: costumeAsset.assetType.contentType
+        // }));
+        // console.log('src', src);
         if (costume.bitmapResolution === 1 && !runtime.v2BitmapAdapter) {
             log.error('No V2 bitmap adapter present; bitmaps may not render correctly.');
         } else if (costume.bitmapResolution === 1) {
-            runtime.v2BitmapAdapter.convertResolution1Bitmap(src, (error, dataURI) => {
+            runtime.v2BitmapAdapter.convertResolution1Bitmap(src, (error, dataURI, bitmap) => {
+                // console.log(error, dataURI);
                 if (error) {
                     log.error(error);
                 } else if (dataURI) {
@@ -62,7 +72,8 @@ const loadBitmap_ = function (costume, costumeAsset, runtime, rotationCenter) {
                     costume.asset = storage.createAsset(
                         storage.AssetType.ImageBitmap,
                         storage.DataFormat.PNG,
-                        runtime.v2BitmapAdapter.convertDataURIToBinary(dataURI),
+                        dataURI,
+                        // runtime.v2BitmapAdapter.convertDataURIToBinary(dataURI),
                         null,
                         true // generate md5
                     );
@@ -80,10 +91,15 @@ const loadBitmap_ = function (costume, costumeAsset, runtime, rotationCenter) {
                 costume.bitmapResolution = 2;
                 // Use original src if conversion fails.
                 // The image will appear half-sized.
-                imageElement.src = dataURI ? dataURI : src;
+                // imageElement.src = dataURI ? URL.createObjectURL(new Blob([dataURI])) : src;
+                bitmap ? resolve(bitmap) : createImageBitmap(dataURI ? new Blob([dataURI], {
+                    type: costumeAsset.assetType.contentType
+                }) : src).then(resolve, reject);
             });
         } else {
-            imageElement.src = src;
+            // console.log(src);
+            // imageElement.src = src;
+            createImageBitmap(src).then(resolve, reject);
         }
     }).then(imageElement => {
         // createBitmapSkin does the right thing if costume.bitmapResolution or rotationCenter are undefined...

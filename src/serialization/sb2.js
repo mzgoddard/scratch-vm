@@ -412,12 +412,16 @@ const parseScratchObject = function (object, runtime, extensions, topLevel, zip)
             // for some reason, and we are doing a local .sb2 import, (e.g. zip is provided)
             // the file name of the costume should be the baseLayerID followed by the file ext
             const assetFileName = `${costumeSource.baseLayerID}.${ext}`;
-            costumePromises.push(deserializeCostume(costume, runtime, zip, assetFileName)
-                .then(asset => {
-                    costume.asset = asset;
-                    return loadCostume(costume.md5, costume, runtime, 2 /* optVersion */);
-                })
-            );
+            if (!zip) {
+                costumePromises.push(loadCostume(costume.md5, costume, runtime, 2 /* optVersion */));
+            } else {
+                costumePromises.push(deserializeCostume(costume, runtime, zip, assetFileName)
+                    .then(asset => {
+                        costume.asset = asset;
+                        return loadCostume(costume.md5, costume, runtime, 2 /* optVersion */);
+                    })
+                );
+            }
         }
     }
     // Sounds from JSON
@@ -638,9 +642,14 @@ const parseScratchObject = function (object, runtime, extensions, topLevel, zip)
     // The stage will have child objects; recursively process them.
     const childrenPromises = [];
     if (object.children) {
+        performance.mark('assets-start');
         for (let m = 0; m < object.children.length; m++) {
             childrenPromises.push(parseScratchObject(object.children[m], runtime, extensions, false, zip));
         }
+        Promise.all(childrenPromises.concat(costumePromises, soundPromises)).then(() => {
+            performance.mark('assets-end');
+            performance.measure('assets', 'assets-start', 'assets-end');
+        })
     }
 
     return Promise.all(
