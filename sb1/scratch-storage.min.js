@@ -2438,7 +2438,7 @@ module.exports = Array.isArray || function (arr) {
     root = self;
   }
   var COMMON_JS = !root.JS_MD5_NO_COMMON_JS && typeof module === 'object' && module.exports;
-  var AMD = true && __webpack_require__(/*! !webpack amd options */ "./node_modules/webpack/buildin/amd-options.js");
+  var AMD =  true && __webpack_require__(/*! !webpack amd options */ "./node_modules/webpack/buildin/amd-options.js");
   var ARRAY_BUFFER = !root.JS_MD5_NO_ARRAY_BUFFER && typeof ArrayBuffer !== 'undefined';
   var HEX_CHARS = '0123456789abcdef'.split('');
   var EXTRA = [128, 32768, 8388608, -2147483648];
@@ -3998,7 +3998,7 @@ module.exports = {
 (function(global) {
   'use strict';
 
-  if (true && module.exports) {
+  if ( true && module.exports) {
     module.exports = global;
   }
 
@@ -4063,7 +4063,7 @@ module.exports = {
   'use strict';
 
   // If we're in node require encoding-indexes and attach it to the global.
-  if (true && module.exports &&
+  if ( true && module.exports &&
     !global["encoding-indexes"]) {
     global["encoding-indexes"] =
       __webpack_require__(/*! ./encoding-indexes.js */ "./node_modules/text-encoding/lib/encoding-indexes.js")["encoding-indexes"];
@@ -7354,7 +7354,7 @@ module.exports = {
   if (!global['TextDecoder'])
     global['TextDecoder'] = TextDecoder;
 
-  if (true && module.exports) {
+  if ( true && module.exports) {
     module.exports = {
       TextEncoder: global['TextEncoder'],
       TextDecoder: global['TextDecoder'],
@@ -8234,6 +8234,13 @@ function () {
     this.builtinHelper = new BuiltinHelper(this);
     this.webHelper = new WebHelper(this);
     this.builtinHelper.registerDefaultAssets(this);
+    this._helpers = [{
+      helper: this.builtinHelper,
+      priority: 100
+    }, {
+      helper: this.webHelper,
+      priority: -100
+    }];
   }
   /**
    * @return {Asset} - the `Asset` class constructor.
@@ -8242,13 +8249,35 @@ function () {
 
 
   _createClass(ScratchStorage, [{
-    key: "get",
+    key: "addHelper",
 
+    /**
+     * Add a storage helper to this manager. Helpers with a higher priority number will be checked first when loading
+     * or storing assets. For comparison, the helper for built-in assets has `priority=100` and the default web helper
+     * has `priority=-100`. The relative order of helpers with equal priorities is undefined.
+     * @param {Helper} helper - the helper to be added.
+     * @param {number} [priority] - the priority for this new helper (default: 0).
+     */
+    value: function addHelper(helper) {
+      var priority = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 0;
+
+      this._helpers.push({
+        helper: helper,
+        priority: priority
+      });
+
+      this._helpers.sort(function (a, b) {
+        return b.priority - a.priority;
+      });
+    }
     /**
      * Synchronously fetch a cached asset from built-in storage. Assets are cached when they are loaded.
      * @param {string} assetId - The id of the asset to fetch.
      * @returns {?Asset} The asset, if it exists.
      */
+
+  }, {
+    key: "get",
     value: function get(assetId) {
       return this.builtinHelper.get(assetId);
     }
@@ -8354,7 +8383,10 @@ function () {
       var _this = this;
 
       /** @type {Helper[]} */
-      var helpers = [this.builtinHelper, this.webHelper];
+      var helpers = this._helpers.map(function (x) {
+        return x.helper;
+      });
+
       var errors = [];
       var helperIndex = 0;
       dataFormat = dataFormat || assetType.runtimeFormat;
