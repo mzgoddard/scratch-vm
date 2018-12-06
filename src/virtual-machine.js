@@ -8,7 +8,7 @@ const ExtensionManager = require('./extension-support/extension-manager');
 const log = require('./util/log');
 const MathUtil = require('./util/math-util');
 const Runtime = require('./engine/runtime');
-const SB1File = require('./serialization/sb1');
+const {SB1File} = require('scratch-sb1-converter');
 const sb2 = require('./serialization/sb2');
 const sb3 = require('./serialization/sb3');
 const StringUtil = require('./util/string-util');
@@ -275,6 +275,16 @@ class VirtualMachine extends EventEmitter {
         }
 
         const validationPromise = new Promise((resolve, reject) => {
+            try {
+                const sb1 = new SB1File(input);
+                const json = sb1.json;
+                json.projectVersion = 2;
+                console.log(json);
+                return resolve([json, sb1.zip]);
+            } catch (e) {
+                console.error(e);
+            }
+
             // The second argument of false below indicates to the validator that the
             // input should be parsed/validated as an entire project (and not a single sprite)
             validate(input, false, (error, res) => {
@@ -407,13 +417,6 @@ class VirtualMachine extends EventEmitter {
         const runtime = this.runtime;
         const deserializePromise = function () {
             let projectVersion = projectJSON.projectVersion;
-            console.log(projectVersion);
-            if (projectVersion === 1) {
-                const sb1File = new SB1File(projectJSON.buffer);
-                projectJSON = sb1File.json;
-                zip = sb1File.zip;
-                projectVersion = 2;
-            }
             if (projectVersion === 2) {
                 return sb2.deserialize(projectJSON, runtime, false, zip);
             }
