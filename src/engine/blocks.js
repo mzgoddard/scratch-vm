@@ -72,7 +72,7 @@ class Blocks {
              * actively monitored.
              * @type {Array<{blockId: string, target: Target}>}
              */
-            _monitored: null
+            _monitored: null,
 
             _threadCached: {},
 
@@ -1194,7 +1194,7 @@ BlocksThreadCache.getCached = function (blocks, blockId) {
     const blockIndex = blocks._cache._threadIndices.length;
     blocks._cache._threadIndices.push(null);
     cached = new BlocksThreadCache.Pointer(blocks, blockId, blockIndex);
-    console.log(blockId, blockIndex);
+    // console.log(blockId, blockIndex);
 
     blocks._cache._threadIndices[blockIndex] = cached;
     blocks._cache._threadCached[blockId] = cached;
