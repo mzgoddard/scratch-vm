@@ -111,7 +111,7 @@ class _StackFrame {
      * @param {_StackFrame} stackFrame The frame to reset and recycle.
      */
     static release (stackFrame) {
-        if (typeof stackFrame !== 'undefined') {
+        if (typeof stackFrame !== 'undefined' && stackFrame !== null) {
             _stackFrameFreeList.push(stackFrame.reset());
         }
     }
@@ -243,8 +243,12 @@ class Thread {
         // Push an empty stack frame, if we need one.
         // Might not, if we just popped the stack.
         if (this.stack.length > this.stackFrames.length) {
-            const parent = this.stackFrames[this.stackFrames.length - 1];
-            this.stackFrames.push(_StackFrame.create(typeof parent !== 'undefined' && parent.warpMode));
+            // if (blockId === null) {
+            //     this.stackFrames.push(null);
+            // } else {
+                const parent = this.stackFrames[this.stackFrames.length - 1];
+                this.stackFrames.push(_StackFrame.create(typeof parent !== 'undefined' && parent.warpMode));
+            // }
         }
     }
 
@@ -255,7 +259,21 @@ class Thread {
      */
     reuseStackForNextBlock (blockId) {
         this.stack[this.stack.length - 1] = blockId;
-        this.stackFrames[this.stackFrames.length - 1].reuse();
+
+        // const lastFrame = this.stackFrames[this.stackFrames.length - 1];
+        // if (blockId === null) {
+        //     this.stackFrames[this.stackFrames.length - 1] = null;
+        // } else {
+        //     this.stackFrames[this.stackFrames.length - 1] = _StackFrame.create(lastFrame.warpMode);
+        // }
+        // _StackFrame.release(lastFrame);
+        if (blockId === null) {
+            _StackFrame.release(this.stackFrames[this.stackFrames.length - 1]);
+            this.stackFrames[this.stackFrames.length - 1] = null;
+        } else {
+            this.stackFrames[this.stackFrames.length - 1].reuse();
+        }
+        // this.stackFrames[this.stackFrames.length - 1].reuse();
     }
 
     /**

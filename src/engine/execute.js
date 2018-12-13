@@ -113,7 +113,7 @@ const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached, l
         // If its a command block.
         if (lastOperation && typeof resolvedValue === 'undefined') {
             let stackFrame;
-            let nextBlockId;
+            let nextBlockId = null;
             do {
                 // In the case that the promise is the last block in the current thread stack
                 // We need to pop out repeatedly until we find the next block.
@@ -131,7 +131,9 @@ const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached, l
                 stackFrame = thread.peekStackFrame();
             } while (stackFrame !== null && !stackFrame.isLoop);
 
-            thread.pushStack(nextBlockId);
+            if (nextBlockId !== null) {
+                thread.pushStack(nextBlockId);
+            }
         }
     }, rejectionReason => {
         // Promise rejected: the primitive had some error.
