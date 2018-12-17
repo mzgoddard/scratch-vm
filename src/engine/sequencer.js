@@ -256,6 +256,7 @@ class Sequencer {
             }
 
             const next = thread.lastStackPointer;
+            debugger;
             if (next === currentBlockPointer || !currentBlockPointer.isLoop && next === null) {
                 // No control flow has happened or a non-loop control flow into
                 // an empty branch has happened.
@@ -360,7 +361,7 @@ class Sequencer {
                 // pushed.
                 thread.popStack();
                 if (
-                    currentBlockPointer.warpMode &&
+                    !currentBlockPointer.warpMode ||
                     thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
                 ) {
                     return;
@@ -441,7 +442,7 @@ class Sequencer {
         }
 
         if (thread.warpTimer !== null) {
-            console.log('warpTimer.asks', thread.warpTimer.asks, thread.warpTimer.time() - start);
+            // console.log('warpTimer.asks', thread.warpTimer.asks, thread.warpTimer.time() - start);
         }
     }
 
