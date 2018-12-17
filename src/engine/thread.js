@@ -27,30 +27,6 @@ class _StackFrame {
         this.warpMode = warpMode;
 
         /**
-         * Reported value from just executed block.
-         * @type {Any}
-         */
-        this.justReported = null;
-
-        /**
-         * The active block that is waiting on a promise.
-         * @type {string}
-         */
-        this.reporting = '';
-
-        /**
-         * Persists reported inputs during async block.
-         * @type {Object}
-         */
-        this.reported = null;
-
-        /**
-         * Name of waiting reporter.
-         * @type {string}
-         */
-        this.waitingReporter = null;
-
-        /**
          * Procedure parameters.
          * @type {Object}
          */
@@ -71,10 +47,7 @@ class _StackFrame {
     reset () {
 
         this.isLoop = false;
-        this.warpMode = false;
-        this.justReported = null;
-        this.reported = null;
-        this.waitingReporter = null;
+        // this.warpMode = false;
         this.params = null;
         this.executionContext = null;
 
@@ -98,8 +71,8 @@ class _StackFrame {
      * @returns {_StackFrame} The clean stack frame with correct warpMode setting.
      */
     static create (warpMode) {
-        const stackFrame = _stackFrameFreeList.pop();
-        if (typeof stackFrame !== 'undefined') {
+        if (_stackFrameFreeList.length > 0) {
+            const stackFrame = _stackFrameFreeList.pop();
             stackFrame.warpMode = Boolean(warpMode);
             return stackFrame;
         }
@@ -113,6 +86,8 @@ class _StackFrame {
     static release (stackFrame) {
         if (typeof stackFrame !== 'undefined' && stackFrame !== null) {
             _stackFrameFreeList.push(stackFrame.reset());
+        } else {
+            throw new Error('Trying to release undefined or null');
         }
     }
 }
@@ -186,6 +161,22 @@ class Thread {
          */
         this.warpTimer = null;
 
+       /**
+        * ...
+        * @type {string}
+        */
+       this.reporting = null;
+
+       /**
+        * Persists reported inputs during async block.
+        * @type {Object}
+        */
+       this.reported = null;
+
+        /**
+         * Reported value from just executed block.
+         * @type {Any}
+         */
         this.justReported = null;
     }
 

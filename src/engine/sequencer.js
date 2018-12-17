@@ -192,7 +192,7 @@ class Sequencer {
             thread.warpTimer.start();
         }
 
-        while (currentBlockId) {
+        while (currentBlockId !== null) {
             // Execute the current block.
             if (this.runtime.profiler !== null) {
                 if (executeProfilerId === -1) {
@@ -245,71 +245,63 @@ class Sequencer {
             }
 
             const next = thread.peekStack();
-            if (next === currentBlockId) {
-                // No control flow has happened, switch to next block.
+            if (next === currentBlockId || !stackFrame.isLoop && next === null) {
+                // No control flow has happened or a non-loop control flow into
+                // an empty branch has happened.
                 currentBlockId = thread.target.blocks.getNextBlock(currentBlockId);
 
                 if (currentBlockId !== null) {
                     // We found a block to move to. Move the thread to that
                     // block and execute it.
                     thread.reuseStackForNextBlock(currentBlockId);
+                    continue;
+                }
+
+                // thread.nextBlock();
+                // currentBlockId = thread.peekStack();
+                // stackFrame = thread.peekStackFrame();
+
+                // The end of a C-block or stack has been reached. Pop until
+                // we hit a loop or can increment to a block.
+                while (true) {
+                    thread.popStack();
+
                     stackFrame = thread.peekStackFrame();
-                } else {
-                    // thread.nextBlock();
-                    // currentBlockId = thread.peekStack();
-                    // stackFrame = thread.peekStackFrame();
+                    if (stackFrame === null) {
+                        // The end of the entire stack has been reached.
+                        // Return from stepThread and let stepThreads clean
+                        // it up.
+                        return;
+                    }
 
-                    // The end of a C-block or stack has been reached. Pop until
-                    // we hit a loop or can increment to a block.
-                    while (true) {
-                        thread.popStack();
-
+                    if (stackFrame.isLoop) {
+                        // Don't do anything to the stack, since loops
+                        // need to be re-executed.
+                        if (
+                            !stackFrame.warpMode ||
+                            thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
+                        ) {
+                            // Re-execute the loop in the future.
+                            return;
+                        }
                         // Get currentBlockId block of existing block on the
                         // stack.
                         currentBlockId = thread.peekStack();
-                        if (currentBlockId === null) {
-                            // The end of the entire stack has been reached.
-                            // Return from stepThread and let stepThreads clean
-                            // it up.
-                            return;
-                        }
+                        break;
+                    }
 
-                        stackFrame = thread.peekStackFrame();
+                    // Get currentBlockId block of existing block on the
+                    // stack.
+                    currentBlockId = thread.target.blocks.getNextBlock(thread.peekStack());
 
-                        if (stackFrame.isLoop) {
-                            if (
-                                !stackFrame.warpMode ||
-                                thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
-                            ) {
-                                // Don't do anything to the stack, since loops
-                                // need to be re-executed.
-                                return;
-                            }
-                            break;
-                        }
-
-                        currentBlockId = thread.target.blocks.getNextBlock(currentBlockId);
-
-                        if (currentBlockId !== null) {
-                            // We found a block to move to. Move the thread to
-                            // that block and execute it.
-                            thread.reuseStackForNextBlock(currentBlockId);
-                            stackFrame = thread.peekStackFrame();
-                            break;
-                        }
+                    if (currentBlockId !== null) {
+                        // We found a block to move to. Move the thread to
+                        // that block and execute it.
+                        thread.reuseStackForNextBlock(currentBlockId);
+                        break;
                     }
                 }
-            } else if (next === null) {
-                // Control flow has happened. An empty branch or procedure was
-                // pushed.
-                thread.popStack();
-                if (
-                    stackFrame.warpMode &&
-                    thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
-                ) {
-                    return;
-                }
-            } else {
+            } else if (next !== null) {
                 // Control flow has happened.
                 currentBlockId = next;
                 stackFrame = thread.peekStackFrame();
@@ -322,6 +314,16 @@ class Sequencer {
                     // `Sequencer.WARP_TIME`.
                     thread.warpTimer = new Timer();
                     thread.warpTimer.start();
+                }
+            } else {
+                // Control flow has happened. An empty branch or procedure was
+                // pushed.
+                thread.popStack();
+                if (
+                    stackFrame.warpMode &&
+                    thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
+                ) {
+                    return;
                 }
             }
 
