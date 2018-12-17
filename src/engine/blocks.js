@@ -1181,10 +1181,12 @@ BlocksExecuteCache.getCached = function (runtime, blocks, blockId, CacheType) {
     return cached;
 };
 
-BlocksThreadCache.getCached = function (blocks, blockId) {
+BlocksThreadCache.getCached = function (blocks, blockId, warpMode = false) {
     if (blockId === null) {
         return null;
     }
+
+    // blockId = `${blockId}_${warpMode}`;
 
     let cached = blocks._cache._threadCached[blockId];
     if (typeof cached !== 'undefined') {
@@ -1193,7 +1195,7 @@ BlocksThreadCache.getCached = function (blocks, blockId) {
 
     const blockIndex = blocks._cache._threadIndices.length;
     blocks._cache._threadIndices.push(null);
-    cached = new BlocksThreadCache.Pointer(blocks, blockId, blockIndex);
+    cached = new BlocksThreadCache.Pointer(blocks, blockId, blockIndex, warpMode);
     // console.log(blockId, blockIndex);
 
     blocks._cache._threadIndices[blockIndex] = cached;

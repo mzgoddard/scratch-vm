@@ -112,29 +112,31 @@ const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached, l
         handleReport(resolvedValue, sequencer, thread, blockCached, lastOperation);
         // If its a command block.
         if (lastOperation && typeof resolvedValue === 'undefined') {
-            let stackFrame;
-            let nextBlockPointer;
-            do {
-                // In the case that the promise is the last block in the current thread stack
-                // We need to pop out repeatedly until we find the next block.
-                const popped = thread.lastStackPointer;
-                thread.popStack();
-                if (popped === null) {
-                    return;
-                }
-                nextBlockPointer = popped.getNext();
-                if (nextBlockPointer !== null) {
-                    // A next block exists so break out this loop
-                    break;
-                }
-                // Investigate the next block and if not in a loop,
-                // then repeat and pop the next item off the stack frame
-                stackFrame = thread.peekStackFrame();
-            } while (stackFrame !== null && !stackFrame.isLoop);
-
-            if (nextBlockPointer !== null) {
-                thread.pushStack(null, nextBlockPointer);
-            }
+            // thread.goToNextBlock();
+            thread.lastStackPointer.stepThread(thread);
+            // let stackFrame;
+            // let nextBlockPointer;
+            // do {
+            //     // In the case that the promise is the last block in the current thread stack
+            //     // We need to pop out repeatedly until we find the next block.
+            //     const popped = thread.lastStackPointer;
+            //     thread.popStack();
+            //     if (popped === null) {
+            //         return;
+            //     }
+            //     nextBlockPointer = popped.getNext();
+            //     if (nextBlockPointer !== null) {
+            //         // A next block exists so break out this loop
+            //         break;
+            //     }
+            //     // Investigate the next block and if not in a loop,
+            //     // then repeat and pop the next item off the stack frame
+            //     // stackFrame = thread.peekStackFrame();
+            // } while (!nextBlockPointer.isLoop);
+            //
+            // if (nextBlockPointer !== null) {
+            //     thread.pushStack(null, nextBlockPointer);
+            // }
         }
     }, rejectionReason => {
         // Promise rejected: the primitive had some error.

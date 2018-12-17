@@ -183,13 +183,15 @@ class Sequencer {
 
         // Save the current block ID to notice if we did control flow.
         let currentBlockPointer = thread.lastStackPointer;
-        let stackFrame = thread.peekStackFrame();
+        // let stackFrame = thread.peekStackFrame();
 
-        if (stackFrame.warpMode) {
+        let start;
+        if (currentBlockPointer.warpMode) {
             // Initialize warp-mode timer. This will start counting the thread
             // toward `Sequencer.WARP_TIME`.
             thread.warpTimer = new Timer();
             thread.warpTimer.start();
+            start = thread.warpTimer.time();
         }
 
         while (currentBlockPointer !== null) {
@@ -234,7 +236,7 @@ class Sequencer {
 
                     // In warp mode, yielded blocks are re-executed immediately.
                     if (
-                        stackFrame.warpMode &&
+                        currentBlockPointer.warpMode &&
                         thread.warpTimer.timeElapsed() <= Sequencer.WARP_TIME
                     ) {
                         continue;
@@ -254,22 +256,25 @@ class Sequencer {
             }
 
             const next = thread.lastStackPointer;
-            if (next === currentBlockPointer || !stackFrame.isLoop && next === null) {
+            if (next === currentBlockPointer || !currentBlockPointer.isLoop && next === null) {
                 // No control flow has happened or a non-loop control flow into
                 // an empty branch has happened.
                 currentBlockPointer = currentBlockPointer.stepThread(thread);
-                stackFrame = thread.peekStackFrame();
+                if (thread.stackPointers.length > 0 && currentBlockPointer === null) {
+                    debugger;
+                }
+                // stackFrame = thread.peekStackFrame();
 
-                if (stackFrame !== null &&
-                    stackFrame.isLoop &&
-                    (!stackFrame.warpMode ||
+                if (currentBlockPointer !== null &&
+                    currentBlockPointer.isLoop &&
+                    (!currentBlockPointer.warpMode ||
                     thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME)
                 ) {
                     return;
                     // Don't do anything to the stack, since loops
                     // need to be re-executed.
                     if (
-                        !stackFrame.warpMode ||
+                        !currentBlockPointer.warpMode ||
                         thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
                     ) {
                         // Re-execute the loop in the future.
@@ -307,11 +312,11 @@ class Sequencer {
                 //         return;
                 //     }
                 //
-                //     if (stackFrame.isLoop) {
+                //     if (currentBlockPointer.isLoop) {
                 //         // Don't do anything to the stack, since loops
                 //         // need to be re-executed.
                 //         if (
-                //             !stackFrame.warpMode ||
+                //             !currentBlockPointer.warpMode ||
                 //             thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
                 //         ) {
                 //             // Re-execute the loop in the future.
@@ -337,24 +342,25 @@ class Sequencer {
             } else if (next !== null) {
                 // Control flow has happened.
                 currentBlockPointer = next;
-                stackFrame = thread.peekStackFrame();
+                // stackFrame = thread.peekStackFrame();
                 thread.shouldPushExecutionContext = true;
 
                 // We only need to initialize the warpTimer at the beginning
                 // of stepThread and when control flow has happened.
-                if (stackFrame.warpMode && !thread.warpTimer) {
+                if (currentBlockPointer.warpMode && !thread.warpTimer) {
                     // Initialize warp-mode timer if it hasn't been already.
                     // This will start counting the thread toward
                     // `Sequencer.WARP_TIME`.
                     thread.warpTimer = new Timer();
                     thread.warpTimer.start();
+                    start = thread.warpTimer.time();
                 }
             } else {
                 // Control flow has happened. An empty branch or procedure was
                 // pushed.
                 thread.popStack();
                 if (
-                    stackFrame.warpMode &&
+                    currentBlockPointer.warpMode &&
                     thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
                 ) {
                     return;
@@ -374,7 +380,7 @@ class Sequencer {
             //
             //     currentBlockId = thread.peekStack();
             //
-            //     if (!stackFrame.isLoop) {
+            //     if (!currentBlockPointer.isLoop) {
             //         currentBlockId = thread.target.blocks.getNextBlock(currentBlockId);
             //
             //         if (currentBlockId !== null) {
@@ -401,7 +407,7 @@ class Sequencer {
             //     stackFrame = thread.peekStackFrame();
             //     currentBlockId = thread.peekStack();
             //
-            //     if (stackFrame.isLoop) {
+            //     if (currentBlockPointer.isLoop) {
             //         // The current level of the stack is marked as a loop.
             //         // Return to yield for the frame/tick in general.
             //         // Unless we're in warp mode - then only return if the
@@ -433,6 +439,10 @@ class Sequencer {
             //     stackFrame = thread.peekStackFrame();
             // }
         }
+
+        if (thread.warpTimer !== null) {
+            console.log('warpTimer.asks', thread.warpTimer.asks, thread.warpTimer.time() - start);
+        }
     }
 
     /**
@@ -447,7 +457,7 @@ class Sequencer {
         }
         const currentBlockPointer = thread.lastStackPointer;
         const branchPointer = currentBlockPointer.getBranch(branchNum);
-        thread.peekStackFrame().isLoop = isLoop;
+        // thread.peekStackFrame().isLoop = isLoop;
         thread.lastStackPointer.isLoop = isLoop;
         if (branchPointer) {
             // Push branch ID to the thread's stack.
@@ -480,9 +490,10 @@ class Sequencer {
         if (!thread.lastStackPointer.stepThreadInitialized) {
             thread.lastStackPointer.setStepThread(thread.lastStackPointer.STEP_THREAD_METHOD.POP_PARAMS);
         }
+        const parentPointer = thread.lastStackPointer;
         thread.pushStack(null, definitionPointer);
         // In known warp-mode threads, only yield when time is up.
-        if (thread.peekStackFrame().warpMode &&
+        if (parentPointer.warpMode &&
             thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME) {
             thread.status = Thread.STATUS_YIELD;
         } else {
@@ -500,7 +511,8 @@ class Sequencer {
                 }
             }
             if (doWarp) {
-                thread.peekStackFrame().warpMode = true;
+                // thread.peekStackFrame().warpMode = true;
+                definitionPointer.warpMode = true;
             } else if (isRecursive) {
                 // In normal-mode threads, yield any time we have a recursive call.
                 thread.status = Thread.STATUS_YIELD;

@@ -8,7 +8,7 @@ const STEP_THREAD_METHOD = {
 };
 
 class Pointer {
-    constructor (container, blockId, index) {
+    constructor (container, blockId, index, warpMode) {
         this.container = container;
         this.blockId = blockId;
         this.index = index;
@@ -17,6 +17,7 @@ class Pointer {
         this.block = null;
 
         this.isLoop = false;
+        this.warpMode = warpMode;
 
         this.executeInitialized = false;
         this.executeCached = null;
@@ -61,7 +62,7 @@ class Pointer {
 
     getNext () {
         if (this.nextInitialized === false) {
-            this.next = exports.getCached(this.container, this.container.getNextBlock(this.blockId));
+            this.next = exports.getCached(this.container, this.container.getNextBlock(this.blockId), this.warpMode);
             this.nextInitialized = true;
         }
         return this.next;
@@ -70,8 +71,8 @@ class Pointer {
     getBranch (branchNum) {
         if (this.branchesInitialized === false) {
             this.branches = [
-                exports.getCached(this.container, this.container.getBranch(this.blockId, 1)),
-                exports.getCached(this.container, this.container.getBranch(this.blockId, 2))
+                exports.getCached(this.container, this.container.getBranch(this.blockId, 1), this.warpMode),
+                exports.getCached(this.container, this.container.getBranch(this.blockId, 2), this.warpMode)
             ];
             this.branchesInitialized = true;
         }
@@ -81,7 +82,7 @@ class Pointer {
     _initProcedure () {
         const block = this.container.getBlock(this.blockId);
         const definition = this.container.getProcedureDefinition(block.mutation.proccode);
-        this.procedureDefinition = exports.getCached(this.container, definition);
+        this.procedureDefinition = exports.getCached(this.container, definition, this.warpMode);
         const definitionBlock = this.container.getBlock(definition);
         this.procedureInnerBlock = this.container.getBlock(definitionBlock.inputs.custom_block.block);
         this.procedureInitialized = true;

@@ -25,6 +25,8 @@ class Timer {
          * which is sometimes useful for compatibility with Scratch 2
          */
         this.nowObj = nowObj;
+
+        this.asks = 0;
     }
 
     /**
@@ -88,6 +90,8 @@ class Timer {
     }
 
     timeElapsed () {
+        this.asks += 1;
+        // return 0;
         return this.nowObj.now() - this.startTime;
     }
 }

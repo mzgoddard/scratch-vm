@@ -249,10 +249,10 @@ class Thread {
         this.lastStackPointer = blockPointer;
         // Push an empty stack frame, if we need one.
         // Might not, if we just popped the stack.
-        if (this.stackPointers.length > this.stackFrames.length) {
-            const parent = this.stackFrames[this.stackFrames.length - 1];
-            this.stackFrames.push(_StackFrame.create(typeof parent !== 'undefined' && parent.warpMode));
-        }
+        // if (this.stackPointers.length > this.stackFrames.length) {
+        //     const parent = this.stackFrames[this.stackFrames.length - 1];
+        //     this.stackFrames.push(_StackFrame.create(typeof parent !== 'undefined' && parent.warpMode));
+        // }
     }
 
     /**
@@ -263,7 +263,7 @@ class Thread {
 
     reuseStackForNextBlock () {
         // this.stack[this.stack.length - 1] = blockId;
-        this.stackFrames[this.stackFrames.length - 1].reuse();
+        // this.stackFrames[this.stackFrames.length - 1].reuse();
         const blockPointer = this.lastStackPointer.getNext();
         this.stackPointers[this.stackPointers.length - 1] = blockPointer;
         this.lastStackPointer = blockPointer;
@@ -276,7 +276,7 @@ class Thread {
     popStack () {
         const pointer = this.stackPointers.pop();
         this.lastStackPointer = this.stackPointers.length > 0 ? this.stackPointers[this.stackPointers.length - 1] : null;
-        _StackFrame.release(this.stackFrames.pop());
+        // _StackFrame.release(this.stackFrames.pop());
         return pointer && pointer.blockId;
         // return this.stack.pop();
     }
@@ -316,7 +316,8 @@ class Thread {
      * @return {?object} Last stack frame stored on this thread.
      */
     peekStackFrame () {
-        return this.stackFrames.length > 0 ? this.stackFrames[this.stackFrames.length - 1] : null;
+        throw new Error('peekStackFrame');
+        // return this.stackFrames.length > 0 ? this.stackFrames[this.stackFrames.length - 1] : null;
     }
 
     peekStackPointer () {
@@ -345,7 +346,8 @@ class Thread {
      * @return {?object} Second to last stack frame stored on this thread.
      */
     peekParentStackFrame () {
-        return this.stackFrames.length > 1 ? this.stackFrames[this.stackFrames.length - 2] : null;
+        throw new Error('peekParentStackFrame');
+        // return this.stackFrames.length > 1 ? this.stackFrames[this.stackFrames.length - 2] : null;
     }
 
     /**
@@ -376,16 +378,22 @@ class Thread {
      * @return {*} value Value for parameter.
      */
     getParam (paramName) {
-        for (let i = this.stackFrames.length - 1; i >= 0; i--) {
-            const frame = this.stackFrames[i];
-            if (frame.params === null) {
-                continue;
+        if (this.params.length > 0) {
+            const params = this.params[this.params.length - 1];
+            if (params.hasOwnProperty(paramName)) {
+                return params[paramName];
             }
-            if (frame.params.hasOwnProperty(paramName)) {
-                return frame.params[paramName];
-            }
-            return null;
         }
+        // for (let i = this.stackFrames.length - 1; i >= 0; i--) {
+        //     const frame = this.stackFrames[i];
+        //     if (frame.params === null) {
+        //         continue;
+        //     }
+        //     if (frame.params.hasOwnProperty(paramName)) {
+        //         return frame.params[paramName];
+        //     }
+        //     return null;
+        // }
         return null;
     }
 
@@ -405,9 +413,10 @@ class Thread {
      * where execution proceeds from one block to the next.
      */
     goToNextBlock () {
+        return this.lastStackPointer.stepThread(this);
         // const nextPointer = this.lastStackPointer.getNext();
         // const nextBlockId = nextPointer !== null ? nextPointer.blockId : null;
-        this.reuseStackForNextBlock();
+        // this.reuseStackForNextBlock();
     }
 
     /**

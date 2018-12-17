@@ -253,7 +253,7 @@ class Scratch3SensingBlocks {
         const dstAdjust = today.getTimezoneOffset() - start.getTimezoneOffset();
         let mSecsSinceStart = today.valueOf() - start.valueOf();
         mSecsSinceStart += ((today.getTimezoneOffset() - dstAdjust) * 60 * 1000);
-        console.log(mSecsSinceStart);
+        // console.log(mSecsSinceStart);
         return mSecsSinceStart / msPerDay;
     }
 
