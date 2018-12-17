@@ -186,6 +186,12 @@ class Thread {
         this.justReported = null;
 
         this._blockHelperCache = [];
+
+        this.shouldPushExecutionContext = true;
+
+        this.params = [];
+
+        this.executionContexts = [];
     }
 
     /**
@@ -316,6 +322,22 @@ class Thread {
     peekStackPointer () {
         return this.lastStackPointer;
         // this.stackPointers.length > 0 ? this.stackPointers[this.stackPointers.length - 1] : null;
+    }
+
+    peekExecutionContext () {
+        if (this.shouldPushExecutionContext) {
+            if (!this.lastStackPointer.stepThreadInitialized) {
+                this.lastStackPointer.setStepThread(this.lastStackPointer.STEP_THREAD_METHOD.NEXT_EXECUTION_CONTEXT);
+            }
+            this.executionContexts.push({});
+            this.shouldPushExecutionContext = false;
+        }
+        return this.executionContexts[this.executionContexts.length - 1];
+        const frame = this.peekStackFrame();
+        if (frame.executionContext === null) {
+            frame.executionContext = {};
+        }
+        return frame.executionContext;
     }
 
     /**

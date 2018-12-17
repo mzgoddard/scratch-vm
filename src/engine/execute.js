@@ -132,7 +132,9 @@ const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached, l
                 stackFrame = thread.peekStackFrame();
             } while (stackFrame !== null && !stackFrame.isLoop);
 
-            thread.pushStack(null, nextBlockPointer);
+            if (nextBlockPointer !== null) {
+                thread.pushStack(null, nextBlockPointer);
+            }
         }
     }, rejectionReason => {
         // Promise rejected: the primitive had some error.
@@ -386,17 +388,18 @@ const execute = function (sequencer, thread) {
     // TODO
 
     let blockCached = thread.lastStackPointer.getExecuteCached(runtime, BlockCached);
-    if (blockCached === null) {
-        const currentBlockId = thread.lastStackPointer.blockId;
-        const blockContainer = runtime.flyoutBlocks;
-        blockCached = BlocksExecuteCache.getCached(runtime, blockContainer, currentBlockId, BlockCached);
-        // Stop if block or target no longer exists.
-        if (blockCached === null) {
-            // No block found: stop the thread; script no longer exists.
-            sequencer.retireThread(thread);
-            return;
-        }
-    }
+
+    // if (blockCached === null) {
+    //     const currentBlockId = thread.lastStackPointer.blockId;
+    //     const blockContainer = runtime.flyoutBlocks;
+    //     blockCached = BlocksExecuteCache.getCached(runtime, blockContainer, currentBlockId, BlockCached);
+    //     // Stop if block or target no longer exists.
+    //     if (blockCached === null) {
+    //         // No block found: stop the thread; script no longer exists.
+    //         sequencer.retireThread(thread);
+    //         return;
+    //     }
+    // }
 
     const ops = blockCached._ops;
     const length = ops.length;
@@ -475,14 +478,6 @@ const execute = function (sequencer, thread) {
         const argValues = opCached._argValues;
 
         // Fields are set during opCached initialization.
-
-        // Blocks should glow when a script is starting,
-        // not after it has finished (see #1404).
-        // Only blocks in blockContainers that don't forceNoGlow
-        // should request a glow.
-        if (!thread.blockContainer.forceNoGlow) {
-            thread.requestScriptGlowInFrame = true;
-        }
 
         // Inputs are set during previous steps in the loop.
 
