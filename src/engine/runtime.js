@@ -1290,7 +1290,13 @@ class Runtime extends EventEmitter {
         thread.updateMonitor = opts.updateMonitor;
         thread.blockContainer = opts.updateMonitor ?
             this.monitorBlocks :
-            target.blocks;
+            target.blocks.getBlock(id) ?
+            target.blocks :
+            this.flyoutBlocks;
+
+        if (thread.blockContainer.getBlock(id) === null) {
+            throw new Error('Unable to find block to execute.');
+        }
 
         thread.pushStack(id);
         this.threads.push(thread);
