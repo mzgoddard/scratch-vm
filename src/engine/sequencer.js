@@ -179,19 +179,17 @@ class Sequencer {
         }
 
         let currentBlockId = thread.peekStack();
-        if (!currentBlockId) {
-            // A "null block" - empty branch.
-            thread.popStack();
+        let stackFrame = thread.peekStackFrame();
+
+        if (stackFrame.warpMode) {
+            // Initialize warp-mode timer if it hasn't been already.
+            // This will start counting the thread toward `Sequencer.WARP_TIME`.
+            thread.warpTimer = new Timer();
+            thread.warpTimer.start();
         }
+
         // Save the current block ID to notice if we did control flow.
-        while ((currentBlockId = thread.peekStack())) {
-            let isWarpMode = thread.peekStackFrame().warpMode;
-            if (isWarpMode && !thread.warpTimer) {
-                // Initialize warp-mode timer if it hasn't been already.
-                // This will start counting the thread toward `Sequencer.WARP_TIME`.
-                thread.warpTimer = new Timer();
-                thread.warpTimer.start();
-            }
+        while (currentBlockId) {
             // Execute the current block.
             if (this.runtime.profiler !== null) {
                 if (executeProfilerId === -1) {
@@ -251,46 +249,77 @@ class Sequencer {
                 return;
             }
 
-            // If no control flow has happened, switch to next block.
-            if (thread.peekStack() === currentBlockId) {
-                thread.goToNextBlock();
-            }
-            // If no next block has been found at this point, look on the stack.
-            while (!thread.peekStack()) {
-                thread.popStack();
+            const next = thread.peekStack();
+            if (next === currentBlockId || !stackFrame.isLoop && next === null) {
+                // No control flow has happened or a non-loop control flow into
+                // an empty branch has happened.
+                currentBlockId = thread.target.blocks.getNextBlock(currentBlockId);
 
-                if (thread.stack.length === 0) {
-                    // No more stack to run!
-                    thread.status = Thread.STATUS_DONE;
-                    return;
+                if (currentBlockId !== null) {
+                    // Get next block of existing block on the stack.
+                    thread.reuseStackForNextBlock(currentBlockId);
+                    continue;
                 }
 
-                const stackFrame = thread.peekStackFrame();
-                isWarpMode = stackFrame.warpMode;
+                do {
+                    thread.popStack();
+
+                    stackFrame = thread.peekStackFrame();
+                    if (stackFrame === null) {
+                        // No more stack to run!
+                        return;
+                    }
+
+                    currentBlockId = thread.peekStack();
+                    if (stackFrame.isLoop) {
+                        // Don't go to the next block for this level of the
+                        // stack, since loops need to be re-executed.
+                        break;
+                    }
+
+                    currentBlockId = thread.target.blocks.getNextBlock(currentBlockId);
+                } while (currentBlockId === null);
 
                 if (stackFrame.isLoop) {
                     // The current level of the stack is marked as a loop.
                     // Return to yield for the frame/tick in general.
                     // Unless we're in warp mode - then only return if the
                     // warp timer is up.
-                    if (!isWarpMode ||
-                        thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME) {
+                    if (!stackFrame.warpMode ||
+                        thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
+                    ) {
                         // Don't do anything to the stack, since loops need
                         // to be re-executed.
                         return;
                     }
-                    // Don't go to the next block for this level of the stack,
-                    // since loops need to be re-executed.
-                    continue;
+                } else {
+                    // Get next block of existing block on the stack.
+                    thread.reuseStackForNextBlock(currentBlockId);
+                }
+            } else if (next !== null) {
+                // Control flow has happened.
+                currentBlockId = next;
+                stackFrame = thread.peekStackFrame();
 
-                } else if (stackFrame.waitingReporter) {
-                    // This level of the stack was waiting for a value.
-                    // This means a reporter has just returned - so don't go
-                    // to the next block for this level of the stack.
+                // We only need to initialize the warpTimer at the beginning
+                // of stepThread and when control flow has happened.
+                if (stackFrame.warpMode && !thread.warpTimer) {
+                    // Initialize warp-mode timer if it hasn't been already.
+                    // This will start counting the thread toward
+                    // `Sequencer.WARP_TIME`.
+                    thread.warpTimer = new Timer();
+                    thread.warpTimer.start();
+                }
+            } else {
+                // Control flow has happened. An empty branch or procedure was
+                // pushed.
+                thread.popStack();
+                if (
+                    !stackFrame.warpMode ||
+                    thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
+                ) {
                     return;
                 }
-                // Get next block of existing block on the stack.
-                thread.goToNextBlock();
             }
         }
     }
