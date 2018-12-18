@@ -480,14 +480,6 @@ const execute = function (sequencer, thread) {
 
         // Fields are set during opCached initialization.
 
-        // Blocks should glow when a script is starting,
-        // not after it has finished (see #1404).
-        // Only blocks in blockContainers that don't forceNoGlow
-        // should request a glow.
-        if (!blockContainer.forceNoGlow) {
-            thread.requestScriptGlowInFrame = true;
-        }
-
         // Inputs are set during previous steps in the loop.
 
         let primitiveReportedValue = null;
