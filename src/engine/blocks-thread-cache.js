@@ -1,44 +1,31 @@
 const BlocksExecuteCache = require('./blocks-execute-cache');
 
-const STEP_THREAD_METHOD = {
-    NEXT: 0,
-    NEXT_EXECUTION_CONTEXT: 1,
-    POP: 2,
-    POP_EXECUTION_CONTEXT: 3,
-    POP_PARAMS: 4
-};
+class AbstractPointerMixin {
+    constructor () {
+        throw new Error([
+            'Cannot construct an Abstract mixin. Mix it into a concrete class',
+            'and construct that object.'
+        ].join(' '));
+    }
+}
 
-class Pointer {
-    constructor (container, blockId, index, warpMode) {
-        this.container = container;
-        this.blockId = blockId;
-        this.index = index;
+class IndexPointer extends AbstractPointerMixin {
+    static mixin (prototype) {}
 
-        this.blockInitialized = false;
-        this.block = null;
+    static init (obj, index) {
+        obj.indexInitialized = true;
+        obj.index = index;
+    }
+}
 
-        this.isLoop = false;
-        this.warpMode = warpMode;
-
-        this.executeInitialized = false;
-        this.executeCached = null;
-
-        this.nextInitialized = false;
-        this.next = null;
-
-        this.branchesInitialized = false;
-        this.branches = null;
-
-        this.procedureInitialized = false;
-        this.procedureDefinition = null;
-        this.procedureInnerBlock = null;
-
-        this.stepThreadInitialized = false;
-        this._stepThread = null;
+class BlockDataPointer extends AbstractPointerMixin {
+    static mixin (prototype) {
+        prototype.getBlock = BlockDataPointer.prototype.getBlock;
     }
 
-    get STEP_THREAD_METHOD () {
-        return STEP_THREAD_METHOD;
+    static init (obj) {
+        this.blockInitialized = false;
+        this.block = null;
     }
 
     getBlock () {
@@ -48,6 +35,17 @@ class Pointer {
         }
         return this.block;
     }
+}
+
+class ExecuteCachedPointer extends AbstractPointerMixin {
+    static mixin (prototype) {
+        prototype.getExecuteCached = ExecuteCachedPointer.prototype.getExecuteCached;
+    }
+
+    static init (obj) {
+        obj.executeInitialized = false;
+        obj.executeCached = null;
+    }
 
     getExecuteCached (runtime, CacheType) {
         if (this.executeInitialized === false) {
@@ -56,9 +54,27 @@ class Pointer {
         }
         return this.executeCached;
     }
+}
 
-    getPrevious () {
-        return this.previous;
+class GraphPointer extends AbstractPointerMixin {
+    static mixin (prototype) {
+        prototype.getNext = GraphPointer.prototype.getNext;
+        prototype.getBranch = GraphPointer.prototype.getBranch;
+        prototype._initProcedure = GraphPointer.prototype._initProcedure;
+        prototype.getProcedureDefinition = GraphPointer.prototype.getProcedureDefinition;
+        prototype.getProcedureInnerBlock = GraphPointer.prototype.getProcedureInnerBlock;
+    }
+
+    static init (obj) {
+        obj.nextInitialized = false;
+        obj.next = null;
+
+        obj.branchesInitialized = false;
+        obj.branches = null;
+
+        obj.procedureInitialized = false;
+        obj.procedureDefinition = null;
+        obj.procedureInnerBlock = null;
     }
 
     getNext () {
@@ -101,6 +117,43 @@ class Pointer {
             this._initProcedure();
         }
         return this.procedureInnerBlock;
+    }
+}
+
+const STEP_THREAD_METHOD = {
+    NEXT: 0,
+    NEXT_EXECUTION_CONTEXT: 1,
+    POP: 2,
+    POP_EXECUTION_CONTEXT: 3,
+    POP_PARAMS: 4
+};
+
+class StepThreadPointer extends AbstractPointerMixin {
+    static mixin (prototype) {
+        Object.defineProperty(
+            prototype,
+            'STEP_THREAD_METHOD',
+            Object.getOwnPropertyDescriptor(StepThreadPointer.prototype, 'STEP_THREAD_METHOD')
+        );
+        prototype._stepThreadNext = StepThreadPointer.prototype._stepThreadNext;
+        prototype._stepThreadNextExecutionContext = StepThreadPointer.prototype._stepThreadNextExecutionContext;
+        prototype._stepThreadPop = StepThreadPointer.prototype._stepThreadPop;
+        prototype._stepThreadPopExecutionContext = StepThreadPointer.prototype._stepThreadPopExecutionContext;
+        prototype._stepThreadPopParams = StepThreadPointer.prototype._stepThreadPopParams;
+        prototype.setStepThread = StepThreadPointer.prototype.setStepThread;
+        prototype.stepThread = StepThreadPointer.prototype.stepThread;
+    }
+
+    static init (obj, warpMode) {
+        obj.isLoop = false;
+        obj.warpMode = warpMode;
+
+        obj.stepThreadInitialized = false;
+        obj._stepThread = null;
+    }
+
+    get STEP_THREAD_METHOD () {
+        return STEP_THREAD_METHOD;
     }
 
     _stepThreadNext (thread) {
@@ -182,6 +235,25 @@ class Pointer {
         return thread.lastStackPointer;
     }
 }
+
+class Pointer {
+    constructor (container, blockId, index, warpMode) {
+        this.container = container;
+        this.blockId = blockId;
+
+        IndexPointer.init(this, index);
+        BlockDataPointer.init(this);
+        ExecuteCachedPointer.init(this);
+        GraphPointer.init(this);
+        StepThreadPointer.init(this, warpMode);
+    }
+}
+
+IndexPointer.mixin(Pointer.prototype);
+BlockDataPointer.mixin(Pointer.prototype);
+ExecuteCachedPointer.mixin(Pointer.prototype);
+GraphPointer.mixin(Pointer.prototype);
+StepThreadPointer.mixin(Pointer.prototype);
 
 exports.getCached = function () {
     throw new Error('blocks.js has not initialized BlocksThreadCache');

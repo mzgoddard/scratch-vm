@@ -182,6 +182,7 @@ class Sequencer {
         }
 
         // Save the current block ID to notice if we did control flow.
+        // REQUIRE(BlocksThreadCache): StepThreadPointer
         let currentBlockPointer = thread.lastStackPointer;
         // let stackFrame = thread.peekStackFrame();
 
