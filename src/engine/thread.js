@@ -305,14 +305,21 @@ class Thread {
         this.pointer = this.stackFrames.pop() || null;
     }
 
+    peekExecutionContext () {
+        const frame = this.thread.peekStackFrame();
+        if (frame.executionContext === null) {
+            frame.executionContext = {};
+        }
+        return frame.executionContext;
+    }
+
     /**
      * Pop last block on the stack and its stack frame.
      * @return {string} Block ID popped from the stack.
      */
     popStack () {
         const id = this.pointer.id;
-        _StackFrame.release(this.pointer);
-        this.pointer = this.stackFrames.pop() || null;
+        this.popPointer();
         return id;
     }
 
