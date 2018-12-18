@@ -248,6 +248,48 @@ class Thread {
         // }
     }
 
+    initPointer (blockId) {
+        this.pointer = _StackFrame.create(blockId, false);
+    }
+
+    incrementPointer () {
+        let stackFrame = this.pointer;
+        let currentBlockId = stackFrame.id;
+        currentBlockId = this.blockContainer.getNextBlock(currentBlockId);
+
+        while (currentBlockId === null) {
+            this.popPointer();
+
+            stackFrame = this.pointer;
+            if (stackFrame === null) {
+                // No more stack to run!
+                return;
+            }
+
+            currentBlockId = stackFrame.id;
+            if (stackFrame.isLoop) {
+                // Don't go to the next block for this level of the
+                // stack, since loops need to be re-executed.
+                return;
+            }
+
+            currentBlockId = this.blockContainer.getNextBlock(currentBlockId);
+        }
+
+        // Get next block of existing block on the stack.
+        this.reuseStackForNextBlock(currentBlockId);
+    }
+
+    pushProcedurePointer (blockId) {
+        const parent = this.pointer;
+        this.stackFrames.push(parent);
+        this.pointer = _StackFrame.create(blockId, parent.warpMode);
+    }
+
+    pushBranchPointer (blockId) {
+        this.pushProcedurePointer(blockId);
+    }
+
     /**
      * Reset the stack frame for use by the next block.
      * (avoids popping and re-pushing a new stack frame - keeps the warpmode the same
@@ -258,14 +300,18 @@ class Thread {
         this.pointer.reuse(blockId);
     }
 
+    popPointer () {
+        _StackFrame.release(this.pointer);
+        this.pointer = this.stackFrames.pop() || null;
+    }
+
     /**
      * Pop last block on the stack and its stack frame.
      * @return {string} Block ID popped from the stack.
      */
     popStack () {
         const id = this.pointer.id;
-        _StackFrame.release(this.pointer);
-        this.pointer = this.stackFrames.pop() || null;
+        this.popPointer();
         return id;
     }
 
@@ -279,7 +325,7 @@ class Thread {
             if (typeof block !== 'undefined' && block.opcode === 'procedures_call') {
                 break;
             }
-            this.popStack();
+            this.popPointer();
             blockID = this.peekStack();
         }
 
