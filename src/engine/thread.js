@@ -89,6 +89,8 @@ class _StackFrame {
      */
     static release (stackFrame) {
         if (typeof stackFrame !== 'undefined' && stackFrame !== null) {
+            // stackFrame.isLoop = false;
+            // stackFrame.params = null;
             _stackFrameFreeList.push(stackFrame.reset());
         } else {
             throw new Error('Trying to release undefined or null');
@@ -184,6 +186,11 @@ class Thread {
          * @type {Any}
          */
         this.justReported = null;
+
+        this.popPointerMethod = [];
+
+        this.params = null;
+        this.paramStack = [];
     }
 
     /**
@@ -249,12 +256,14 @@ class Thread {
     }
 
     initPointer (blockId) {
+        this.popPointerMethod.push(this._popInit);
         this.pointer = _StackFrame.create(blockId, false);
     }
 
     incrementPointer () {
         let stackFrame = this.pointer;
         let currentBlockId = stackFrame.id;
+
         currentBlockId = this.blockContainer.getNextBlock(currentBlockId);
 
         while (currentBlockId === null) {
@@ -277,17 +286,23 @@ class Thread {
         }
 
         // Get next block of existing block on the stack.
-        this.reuseStackForNextBlock(currentBlockId);
+        this.pointer.reuse(currentBlockId);
     }
 
     pushProcedurePointer (blockId) {
+        this.popPointerMethod.push(this._popProcedurePointer);
+
         const parent = this.pointer;
         this.stackFrames.push(parent);
         this.pointer = _StackFrame.create(blockId, parent.warpMode);
     }
 
-    pushBranchPointer (blockId) {
-        this.pushProcedurePointer(blockId);
+    pushBranchPointer (blockId, isLoop) {
+        this.popPointerMethod.push(this._popBranchPointer);
+
+        const parent = this.pointer;
+        this.stackFrames.push(parent);
+        this.pointer = _StackFrame.create(blockId, parent.warpMode);
     }
 
     /**
@@ -300,17 +315,30 @@ class Thread {
         this.pointer.reuse(blockId);
     }
 
-    popPointer () {
+    _popInit () {
+        this.pointer = null;
+    }
+
+    _popProcedurePointer () {
+        _StackFrame.release(this.pointer);
+        this.pointer = this.stackFrames.pop() || null;
+        this.params = this.paramStack.pop();
+    }
+
+    _popBranchPointer () {
         _StackFrame.release(this.pointer);
         this.pointer = this.stackFrames.pop() || null;
     }
 
+    popPointer () {
+        this.popPointerMethod.pop().call(this);
+    }
+
     peekExecutionContext () {
-        const frame = this.thread.peekStackFrame();
-        if (frame.executionContext === null) {
-            frame.executionContext = {};
+        if (this.pointer.executionContext === null) {
+            this.pointer.executionContext = {};
         }
-        return frame.executionContext;
+        return this.pointer.executionContext;
     }
 
     /**
@@ -380,6 +408,11 @@ class Thread {
         this.justReported = typeof value === 'undefined' ? null : value;
     }
 
+    initParams () {
+        this.paramStack.push(this.params);
+        this.params = {};
+    }
+
     /**
      * Add a parameter to the stack frame.
      * Use when calling a procedure with parameter values.
@@ -387,6 +420,8 @@ class Thread {
      * @param {*} value Value to set for parameter.
      */
     pushParam (paramName, value) {
+        this.params[paramName] = value;
+        return;
         const stackFrame = this.peekStackFrame();
         if (stackFrame.params === null) {
             stackFrame.params = {};
@@ -400,6 +435,10 @@ class Thread {
      * @return {*} value Value for parameter.
      */
     getParam (paramName) {
+        if (this.params !== null && this.params.hasOwnProperty(paramName)) {
+            return this.params[paramName];
+        }
+        return null;
         if (this.pointer.params !== null) {
             if (this.pointer.params.hasOwnProperty(paramName)) {
                 return this.pointer.params[paramName];
