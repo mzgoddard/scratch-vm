@@ -262,49 +262,24 @@ class Sequencer {
             if (next === currentBlockId || !stackFrame.isLoop && next === null) {
                 // No control flow has happened or a non-loop control flow into
                 // an empty branch has happened.
-                currentBlockId = thread.target.blocks.getNextBlock(currentBlockId);
-
-                if (currentBlockId !== null) {
-                    // Get next block of existing block on the stack.
-                    thread.reuseStackForNextBlock(currentBlockId);
-                    continue;
-                }
-
-                do {
-                    thread.popStack();
-
-                    stackFrame = thread.peekStackFrame();
-                    if (stackFrame === null) {
-                        // No more stack to run!
-                        return;
-                    }
-
-                    currentBlockId = thread.peekStack();
-                    if (stackFrame.isLoop) {
-                        // Don't go to the next block for this level of the
-                        // stack, since loops need to be re-executed.
-                        break;
-                    }
-
-                    currentBlockId = thread.target.blocks.getNextBlock(currentBlockId);
-                } while (currentBlockId === null);
-
-                if (stackFrame.isLoop) {
+                thread.incrementPointer();
+                stackFrame = thread.pointer;
+                if (stackFrame === null || (
+                    stackFrame.isLoop && (
+                        !stackFrame.warpMode ||
+                        thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
+                    )
+                )) {
                     // The current level of the stack is marked as a loop.
                     // Return to yield for the frame/tick in general.
                     // Unless we're in warp mode - then only return if the
                     // warp timer is up.
-                    if (!stackFrame.warpMode ||
-                        thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
-                    ) {
-                        // Don't do anything to the stack, since loops need
-                        // to be re-executed.
-                        return;
-                    }
-                } else {
-                    // Get next block of existing block on the stack.
-                    thread.reuseStackForNextBlock(currentBlockId);
+
+                    // Don't do anything to the stack, since loops need
+                    // to be re-executed.
+                    return;
                 }
+                currentBlockId = stackFrame.id;
             } else if (next !== null) {
                 // Control flow has happened.
                 currentBlockId = next;
@@ -322,7 +297,7 @@ class Sequencer {
             } else {
                 // Control flow has happened. An empty branch or procedure was
                 // pushed.
-                thread.popStack();
+                thread.popPointer();
                 if (
                     !stackFrame.warpMode ||
                     thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
@@ -351,9 +326,9 @@ class Sequencer {
         thread.peekStackFrame().isLoop = isLoop;
         if (branchId) {
             // Push branch ID to the thread's stack.
-            thread.pushStack(branchId);
+            thread.pushBranchPointer(branchId);
         } else {
-            thread.pushStack(null);
+            thread.pushBranchPointer(null);
         }
     }
 
@@ -375,7 +350,7 @@ class Sequencer {
         // and on to the main definition of the procedure.
         // When that set of blocks finishes executing, it will be popped
         // from the stack by the sequencer, returning control to the caller.
-        thread.pushStack(definition);
+        thread.pushProcedurePointer(definition);
         // In known warp-mode threads, only yield when time is up.
         if (thread.peekStackFrame().warpMode &&
             thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME) {
