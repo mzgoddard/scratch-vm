@@ -5,6 +5,7 @@ const MonitorRecord = require('./monitor-record');
 const Clone = require('../util/clone');
 const {Map} = require('immutable');
 const BlocksExecuteCache = require('./blocks-execute-cache');
+const BlocksThreadCache = require('./blocks-thread-cache');
 const log = require('../util/log');
 const Variable = require('./variable');
 const getMonitorIdForBlockWithArgs = require('../util/get-monitor-id');
@@ -71,7 +72,11 @@ class Blocks {
              * actively monitored.
              * @type {Array<{blockId: string, target: Target}>}
              */
-            _monitored: null
+            _monitored: null,
+
+            _threadCached: {},
+
+            _threadIndices: []
         };
 
         /**
@@ -504,6 +509,8 @@ class Blocks {
         this._cache.procedureDefinitions = {};
         this._cache._executeCached = {};
         this._cache._monitored = null;
+        this._cache._threadCached = {};
+        this._cache._threadIndices = [];
     }
 
     /**
@@ -1143,7 +1150,7 @@ class Blocks {
  * @param {function} CacheType constructor for cached block information
  * @return {object} execute cache object
  */
-BlocksExecuteCache.getCached = function (blocks, blockId, CacheType) {
+BlocksExecuteCache.getCached = function (runtime, blocks, blockId, CacheType) {
     let cached = blocks._cache._executeCached[blockId];
     if (typeof cached !== 'undefined') {
         return cached;
@@ -1161,7 +1168,7 @@ BlocksExecuteCache.getCached = function (blocks, blockId, CacheType) {
             mutation: blocks.getMutation(block)
         };
     } else {
-        cached = new CacheType(blocks, {
+        cached = new CacheType(runtime, blocks, {
             id: blockId,
             opcode: blocks.getOpcode(block),
             fields: blocks.getFields(block),
@@ -1171,6 +1178,28 @@ BlocksExecuteCache.getCached = function (blocks, blockId, CacheType) {
     }
 
     blocks._cache._executeCached[blockId] = cached;
+    return cached;
+};
+
+BlocksThreadCache.getCached = function (blocks, blockId, warpMode = false) {
+    if (blockId === null) {
+        return null;
+    }
+
+    // blockId = `${blockId}_${warpMode}`;
+
+    let cached = blocks._cache._threadCached[blockId];
+    if (typeof cached !== 'undefined') {
+        return cached;
+    }
+
+    const blockIndex = blocks._cache._threadIndices.length;
+    blocks._cache._threadIndices.push(null);
+    cached = new BlocksThreadCache.Pointer(blocks, blockId, blockIndex, warpMode);
+    // console.log(blockId, blockIndex);
+
+    blocks._cache._threadIndices[blockIndex] = cached;
+    blocks._cache._threadCached[blockId] = cached;
     return cached;
 };
 
