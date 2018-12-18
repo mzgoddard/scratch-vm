@@ -272,13 +272,13 @@ class BlockCached {
          */
         this._ops = [];
 
-        const {runtime} = blockUtility.sequencer;
-
         const {opcode, fields, inputs} = this;
 
         // Assign opcode isHat and blockFunction data to avoid dynamic lookups.
         this._isHat = runtime.getIsHat(opcode);
         this._blockFunction = runtime.getOpcodeFunction(opcode);
+        this._blockFunctionContext = this._blockFunction && this._blockFunction.context;
+        this._blockFunction = this._blockFunction && this._blockFunction.primitive || this._blockFunction;
         this._definedBlockFunction = typeof this._blockFunction !== 'undefined';
 
         // Store the current shadow value if there is a shadow value.
@@ -471,6 +471,7 @@ const execute = function (sequencer, thread) {
         const opCached = ops[i];
 
         const blockFunction = opCached._blockFunction;
+        const blockFunctionContext = opCached._blockFunctionContext;
 
         // Update values for arguments (inputs).
         const argValues = opCached._argValues;
@@ -489,7 +490,7 @@ const execute = function (sequencer, thread) {
 
         let primitiveReportedValue = null;
         if (runtime.profiler === null) {
-            primitiveReportedValue = blockFunction(argValues, blockUtility);
+            primitiveReportedValue = blockFunction.call(blockFunctionContext, argValues, blockUtility);
         } else {
             const opcode = opCached.opcode;
             if (blockFunctionProfilerId === -1) {
@@ -503,7 +504,7 @@ const execute = function (sequencer, thread) {
             runtime.profiler.records.push(
                 runtime.profiler.START, blockFunctionProfilerId, opcode, 0);
 
-            primitiveReportedValue = blockFunction(argValues, blockUtility);
+            primitiveReportedValue = blockFunction.call(blockFunctionContext, argValues, blockUtility);
 
             // runtime.profiler.stop(blockFunctionProfilerId);
             runtime.profiler.records.push(runtime.profiler.STOP, 0);
