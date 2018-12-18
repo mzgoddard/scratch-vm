@@ -12,6 +12,23 @@
  * to do some measurement yourself.
  */
 
+const nowThread = (() => {
+    try {
+        const NowThread = require('worker-loader?name=extension-worker.js!./timer-now-thread');
+        const nowThread = new NowThread();
+        const buffer = new SharedArrayBuffer(8);
+        const float64 = new Float64Array(buffer);
+        nowThread.postMessage(buffer);
+        return {
+            now () {
+                return float64[0] || Date.now();
+            }
+        };
+    } catch (e) {
+        return null;
+    }
+})() || null;
+
 class Timer {
     constructor (nowObj = Timer.nowObj) {
         /**
@@ -52,7 +69,9 @@ class Timer {
      * Use this object to route all time functions through single access points.
      */
     static get nowObj () {
-        if (Timer.USE_PERFORMANCE && typeof self !== 'undefined' && self.performance && 'now' in self.performance) {
+        if (nowThread) {
+            return nowThread;
+        } else if (Timer.USE_PERFORMANCE && typeof self !== 'undefined' && self.performance && 'now' in self.performance) {
             return self.performance;
         } else if (Date.now) {
             return Date;
