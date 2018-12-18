@@ -213,7 +213,17 @@ class Sequencer {
                 // this.runtime.profiler.stop();
                 this.runtime.profiler.records.push(this.runtime.profiler.STOP, 0);
             }
+
             thread.blockGlowInFrame = currentBlockId;
+
+            // Blocks should glow when a script is starting,
+            // not after it has finished (see #1404).
+            // Only blocks in blockContainers that don't forceNoGlow
+            // should request a glow.
+            if (!thread.blockContainer.forceNoGlow) {
+                thread.requestScriptGlowInFrame = true;
+            }
+
             // If the thread has yielded or is waiting, yield to other threads.
             if (thread.status === Thread.STATUS_YIELD) {
                 // Mark as running for next iteration.
