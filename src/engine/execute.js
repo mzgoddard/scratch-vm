@@ -272,6 +272,8 @@ class BlockCached {
          */
         this._ops = [];
 
+        const {runtime} = blockUtility.sequencer;
+
         const {opcode, fields, inputs} = this;
 
         // Assign opcode isHat and blockFunction data to avoid dynamic lookups.
