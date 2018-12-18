@@ -173,6 +173,11 @@ class Sequencer {
      * @param {!Thread} thread Thread object to step.
      */
     stepThread (thread) {
+        if (thread.target === null) {
+            this.retireThread(thread);
+            return;
+        }
+
         let currentBlockId = thread.peekStack();
         if (!currentBlockId) {
             // A "null block" - empty branch.
@@ -200,11 +205,9 @@ class Sequencer {
                 this.runtime.profiler.records.push(
                     this.runtime.profiler.START, executeProfilerId, null, 0);
             }
-            if (thread.target === null) {
-                this.retireThread(thread);
-            } else {
-                execute(this, thread);
-            }
+
+            execute(this, thread);
+
             if (this.runtime.profiler !== null) {
                 // this.runtime.profiler.stop();
                 this.runtime.profiler.records.push(this.runtime.profiler.STOP, 0);
