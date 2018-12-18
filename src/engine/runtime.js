@@ -1456,7 +1456,7 @@ class Runtime extends EventEmitter {
             throw new Error('Unable to find block to execute.');
         }
 
-        thread.pushStack(id);
+        thread.initPointer(id);
         this.threads.push(thread);
         return thread;
     }
@@ -1485,7 +1485,7 @@ class Runtime extends EventEmitter {
         newThread.stackClick = thread.stackClick;
         newThread.updateMonitor = thread.updateMonitor;
         newThread.blockContainer = thread.blockContainer;
-        newThread.pushStack(thread.topBlock);
+        newThread.initPointer(thread.topBlock);
         const i = this.threads.indexOf(thread);
         if (i > -1) {
             this.threads[i] = newThread;
