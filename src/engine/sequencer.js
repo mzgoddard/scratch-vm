@@ -224,25 +224,34 @@ class Sequencer {
                 thread.requestScriptGlowInFrame = true;
             }
 
-            // If the thread has yielded or is waiting, yield to other threads.
-            if (thread.status === Thread.STATUS_YIELD) {
-                // Mark as running for next iteration.
-                thread.status = Thread.STATUS_RUNNING;
-                // In warp mode, yielded blocks are re-executed immediately.
-                if (isWarpMode &&
-                    thread.warpTimer.timeElapsed() <= Sequencer.WARP_TIME) {
-                    continue;
+            if (thread.status !== Thread.STATUS_RUNNING) {
+                // If the thread has yielded or is waiting, yield to other
+                // threads.
+                if (thread.status === Thread.STATUS_YIELD) {
+                    // Mark as running for next iteration.
+                    thread.status = Thread.STATUS_RUNNING;
+
+                    // In warp mode, yielded blocks are re-executed immediately.
+                    if (
+                        stackFrame.warpMode &&
+                        thread.warpTimer.timeElapsed() <= Sequencer.WARP_TIME
+                    ) {
+                        continue;
+                    }
                 }
-                return;
-            } else if (thread.status === Thread.STATUS_PROMISE_WAIT) {
+
+                // } else if (thread.status === Thread.STATUS_PROMISE_WAIT) {
+                //
                 // A promise was returned by the primitive. Yield the thread
                 // until the promise resolves. Promise resolution should reset
                 // thread.status to Thread.STATUS_RUNNING.
-                return;
-            } else if (thread.status === Thread.STATUS_YIELD_TICK) {
+
+                // } else if (thread.status === Thread.STATUS_YIELD_TICK) {
+                //
                 // stepThreads will reset the thread to Thread.STATUS_RUNNING
                 return;
             }
+
             // If no control flow has happened, switch to next block.
             if (thread.peekStack() === currentBlockId) {
                 thread.goToNextBlock();
