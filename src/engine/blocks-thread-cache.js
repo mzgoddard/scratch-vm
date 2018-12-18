@@ -58,7 +58,6 @@ class ExecuteCachedPointer extends AbstractPointerMixin {
 
 class GraphPointer extends AbstractPointerMixin {
     static mixin (prototype) {
-        prototype.getNext = GraphPointer.prototype.getNext;
         prototype.getBranch = GraphPointer.prototype.getBranch;
         prototype._initProcedure = GraphPointer.prototype._initProcedure;
         prototype.getProcedureDefinition = GraphPointer.prototype.getProcedureDefinition;
@@ -66,23 +65,12 @@ class GraphPointer extends AbstractPointerMixin {
     }
 
     static init (obj) {
-        obj.nextInitialized = false;
-        obj.next = null;
-
         obj.branchesInitialized = false;
         obj.branches = null;
 
         obj.procedureInitialized = false;
         obj.procedureDefinition = null;
         obj.procedureInnerBlock = null;
-    }
-
-    getNext () {
-        if (this.nextInitialized === false) {
-            this.next = exports.getCached(this.container, this.container.getNextBlock(this.blockId), this.warpMode);
-            this.nextInitialized = true;
-        }
-        return this.next;
     }
 
     getBranch (branchNum) {
@@ -135,6 +123,7 @@ class StepThreadPointer extends AbstractPointerMixin {
             'STEP_THREAD_METHOD',
             Object.getOwnPropertyDescriptor(StepThreadPointer.prototype, 'STEP_THREAD_METHOD')
         );
+        prototype.getNext = GraphPointer.prototype.getNext;
         prototype._stepThreadNext = StepThreadPointer.prototype._stepThreadNext;
         prototype._stepThreadNextExecutionContext = StepThreadPointer.prototype._stepThreadNextExecutionContext;
         prototype._stepThreadPop = StepThreadPointer.prototype._stepThreadPop;
@@ -144,12 +133,22 @@ class StepThreadPointer extends AbstractPointerMixin {
         prototype.stepThread = StepThreadPointer.prototype.stepThread;
     }
 
-    static init (obj, warpMode) {
+    static init (obj) {
+        obj.nextInitialized = false;
+        obj.next = null;
+
         obj.isLoop = false;
-        obj.warpMode = warpMode;
 
         obj.stepThreadInitialized = false;
         obj._stepThread = null;
+    }
+
+    getNext () {
+        if (this.nextInitialized === false) {
+            this.next = exports.getCached(this.container, this.container.getNextBlock(this.blockId), this.warpMode);
+            this.nextInitialized = true;
+        }
+        return this.next;
     }
 
     get STEP_THREAD_METHOD () {
@@ -240,6 +239,7 @@ class Pointer {
     constructor (container, blockId, index, warpMode) {
         this.container = container;
         this.blockId = blockId;
+        this.warpMode = warpMode;
 
         IndexPointer.init(this, index);
         BlockDataPointer.init(this);

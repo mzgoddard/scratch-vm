@@ -239,6 +239,14 @@ class Thread {
         return 4;
     }
 
+    incrementInstruction () {}
+
+    stepInBranch () {}
+
+    pushInstruction () {}
+
+    popInstruction () {}
+
     /**
      * Push stack and update stack frames appropriately.
      * @param {string} blockId Block ID to push to stack.
