@@ -117,7 +117,7 @@ class BlockUtility {
      * @param {boolean} isLoop Whether this block is a loop.
      */
     startBranch (branchNum, isLoop) {
-        this.sequencer.stepToBranch(this.thread, branchNum, isLoop);
+        this.thread.stepToBranch(branchNum, isLoop);
     }
 
     /**
@@ -147,7 +147,7 @@ class BlockUtility {
      * @param {string} procedureCode Procedure code for procedure to start.
      */
     startProcedure (procedureCode) {
-        this.sequencer.stepToProcedure(this.thread, procedureCode);
+        this.thread.stepToProcedure(procedureCode);
     }
 
     /**
