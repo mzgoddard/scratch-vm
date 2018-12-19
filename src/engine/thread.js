@@ -195,6 +195,14 @@ class Thread {
     }
 
     /**
+     * Time to run a warp-mode thread, in ms.
+     * @type {number}
+     */
+    static get WARP_TIME () {
+        return 500;
+    }
+
+    /**
      * Thread status for initialized or running thread.
      * This is the default state for a thread - execution should run normally,
      * stepping from block to block.
@@ -258,16 +266,16 @@ class Thread {
 
     initPointer (blockId) {
         this.popPointerMethod.push(this._popInit);
-        // this.pointer = _StackFrame.create(BlocksThreadCache.getCached(blockId), false);
-        this.pointer = _StackFrame.create(blockId, false);
+        this.pointer = _StackFrame.create(BlocksThreadCache.getCached(this.blockContainer, blockId), false);
+        // this.pointer = _StackFrame.create(blockId, false);
     }
 
     incrementPointer () {
         let stackFrame = this.pointer;
         let currentBlockId = stackFrame.id;
 
-        // currentBlockId = BlocksThreadCache.Increment.getNext(currentBlockId);
-        currentBlockId = this.blockContainer.getNextBlock(currentBlockId);
+        currentBlockId = BlocksThreadCache.Increment.getNext(currentBlockId);
+        // currentBlockId = this.blockContainer.getNextBlock(currentBlockId);
 
         while (currentBlockId === null) {
             this.popPointer();
@@ -285,8 +293,8 @@ class Thread {
                 return;
             }
 
-            // currentBlockId = BlocksThreadCache.Increment.getNext(currentBlockId);
-            currentBlockId = this.blockContainer.getNextBlock(currentBlockId);
+            currentBlockId = BlocksThreadCache.Increment.getNext(currentBlockId);
+            // currentBlockId = this.blockContainer.getNextBlock(currentBlockId);
         }
 
         // Get next block of existing block on the stack.
@@ -361,8 +369,8 @@ class Thread {
     stopThisScript () {
         let blockID = this.peekStack();
         while (blockID !== null) {
-            // const block = BlocksThreadCache.Block.getBlock(blockID);
-            const block = this.blocksContainer.getBlock(blockID);
+            const block = BlocksThreadCache.Block.getBlock(blockID);
+            // const block = this.blocksContainer.getBlock(blockID);
             if (typeof block !== 'undefined' && block.opcode === 'procedures_call') {
                 break;
             }
@@ -478,8 +486,8 @@ class Thread {
      * where execution proceeds from one block to the next.
      */
     goToNextBlock () {
-        // const nextBlockId = BlocksThreadCache.Increment.getNext(this.peekStack());
-        const nextBlockId = this.blocksContainer.getNextBlock(this.peekStack());
+        const nextBlockId = BlocksThreadCache.Increment.getNext(this.peekStack());
+        // const nextBlockId = this.blocksContainer.getNextBlock(this.peekStack());
         this.reuseStackForNextBlock(nextBlockId);
     }
 
@@ -493,8 +501,8 @@ class Thread {
         let callCount = 5; // Max number of enclosing procedure calls to examine.
         const sp = this.stackFrames.length;
         for (let i = sp - 1; i >= 0; i--) {
-            // const block = BlocksThreadCache.Block.getBlock(this.stackFrames[i].id);
-            const block = this.blocksContainer.getBlock(this.stackFrames[i].id);
+            const block = BlocksThreadCache.Block.getBlock(this.stackFrames[i].id);
+            // const block = this.blocksContainer.getBlock(this.stackFrames[i].id);
             if (block.opcode === 'procedures_call' &&
                 block.mutation.proccode === procedureCode) {
                 return true;
@@ -515,11 +523,11 @@ class Thread {
             branchNum = 1;
         }
         const currentBlockId = this.peekStack();
-        // const branchId = BlocksThreadCache.Graph.getBranch(currentBlockId, branchNum);
-        const branchId = this.blockContainer.getBranch(
-            currentBlockId,
-            branchNum
-        );
+        const branchId = BlocksThreadCache.Graph.getBranch(currentBlockId, branchNum);
+        // const branchId = this.blockContainer.getBranch(
+        //     currentBlockId,
+        //     branchNum
+        // );
         this.peekStackFrame().isLoop = isLoop;
         if (branchId) {
             // Push branch ID to the this's stack.
@@ -534,8 +542,9 @@ class Thread {
      * @param {!string} procedureCode Procedure code of procedure to step to.
      */
     stepToProcedure (procedureCode) {
-        // const definition = BlocksThreadCache.Graph.getProcedureDefinition(procedureCode);
-        const definition = this.blockContainer.getProcedureDefinition(procedureCode);
+        const currentBlockId = this.peekStack();
+        const definition = BlocksThreadCache.Graph.getProcedureDefinition(currentBlockId, procedureCode);
+        // const definition = this.blockContainer.getProcedureDefinition(procedureCode);
         if (!definition) {
             return;
         }
@@ -550,16 +559,16 @@ class Thread {
         this.pushProcedurePointer(definition);
         // In known warp-mode thiss, only yield when time is up.
         if (this.peekStackFrame().warpMode &&
-            this.warpTimer.timeElapsed() > Sequencer.WARP_TIME) {
+            this.warpTimer.timeElapsed() > Thread.WARP_TIME) {
             this.status = this.STATUS_YIELD;
         } else {
             // Look for warp-mode flag on definition, and set the this
             // to warp-mode if needed.
-            // const definitionBlock = BlocksThreadCache.Block.getBlock(definition);
-            const definitionBlock = this.blockContainer.getBlock(definition);
-            // const innerBlock = BlocksThreadCache.Graph.getProcedureInnerBlock(definition);
-            const innerBlock = this.blockContainer.getBlock(
-                definitionBlock.inputs.custom_block.block);
+            const definitionBlock = BlocksThreadCache.Block.getBlock(definition);
+            // const definitionBlock = this.blockContainer.getBlock(definition);
+            const innerBlock = BlocksThreadCache.Graph.getProcedureInnerBlock(currentBlockId);
+            // const innerBlock = this.blockContainer.getBlock(
+            //     definitionBlock.inputs.custom_block.block);
             let doWarp = false;
             if (innerBlock && innerBlock.mutation) {
                 const warp = innerBlock.mutation.warp;
