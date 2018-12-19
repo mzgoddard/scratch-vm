@@ -273,7 +273,8 @@ class Sequencer {
                     // to be re-executed.
                     return;
                 }
-                currentBlockId = stackFrame.id;
+                // currentBlockId = stackFrame.id;
+                currentBlockId = stackFrame;
             } else if (next !== null) {
                 // Control flow has happened.
                 currentBlockId = next;
