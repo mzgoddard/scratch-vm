@@ -32,13 +32,6 @@ class BlockDataPointer extends AbstractPointerMixin {
 }
 
 class GraphPointer extends AbstractPointerMixin {
-    static mixin (prototype) {
-        prototype.getBranch = GraphPointer.prototype.getBranch;
-        prototype._initProcedure = GraphPointer.prototype._initProcedure;
-        prototype.getProcedureDefinition = GraphPointer.prototype.getProcedureDefinition;
-        prototype.getProcedureInnerBlock = GraphPointer.prototype.getProcedureInnerBlock;
-    }
-
     static init (_this) {
         _this.branchesInitialized = false;
         _this.branches = null;
@@ -87,30 +80,7 @@ class GraphPointer extends AbstractPointerMixin {
     }
 }
 
-const STEP_THREAD_METHOD = {
-    NEXT: '_next',
-    POP_INIT: '_popInit',
-    POP_PROCEDURE: '_popProcedure',
-    POP_BRANCH: '_popBranch'
-};
-
 class StepThreadPointer extends AbstractPointerMixin {
-    static mixin (prototype) {
-        Object.defineProperty(
-            prototype,
-            'STEP_THREAD_METHOD',
-            Object.getOwnPropertyDescriptor(StepThreadPointer.prototype, 'STEP_THREAD_METHOD')
-        );
-        prototype.getNext = GraphPointer.prototype.getNext;
-        prototype._stepThreadNext = StepThreadPointer.prototype._stepThreadNext;
-        prototype._stepThreadNextExecutionContext = StepThreadPointer.prototype._stepThreadNextExecutionContext;
-        prototype._stepThreadPop = StepThreadPointer.prototype._stepThreadPop;
-        prototype._stepThreadPopExecutionContext = StepThreadPointer.prototype._stepThreadPopExecutionContext;
-        prototype._stepThreadPopParams = StepThreadPointer.prototype._stepThreadPopParams;
-        prototype.setStepThread = StepThreadPointer.prototype.setStepThread;
-        prototype.stepThread = StepThreadPointer.prototype.stepThread;
-    }
-
     static init (_this) {
         _this.nextInitialized = false;
         _this.next = null;
@@ -195,12 +165,6 @@ class Pointer {
         StepThreadPointer.init(this);
     }
 }
-
-// IndexPointer.mixin(Pointer.prototype);
-// BlockDataPointer.mixin(Pointer.prototype);
-// ExecuteCachedPointer.mixin(Pointer.prototype);
-// GraphPointer.mixin(Pointer.prototype);
-// StepThreadPointer.mixin(Pointer.prototype);
 
 exports.getCached = function () {
     throw new Error('blocks.js has not initialized BlocksThreadCache');
