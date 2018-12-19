@@ -54,6 +54,7 @@ class GraphPointer extends AbstractPointerMixin {
                 exports.getCached(_this.container, _this.container.getBranch(_this.blockId, 1), _this.warpMode),
                 exports.getCached(_this.container, _this.container.getBranch(_this.blockId, 2), _this.warpMode)
             ];
+            _this.incrementPop = StepThreadPointer.popBranch;
             _this.branchesInitialized = true;
         }
         return _this.branches[branchNum - 1];
@@ -63,6 +64,9 @@ class GraphPointer extends AbstractPointerMixin {
         const block = _this.container.getBlock(_this.blockId);
         const definition = _this.container.getProcedureDefinition(block.mutation.proccode);
         _this.procedureDefinition = exports.getCached(_this.container, definition, _this.warpMode);
+        if (_this.procedureDefinition) {
+            _this.incrementPop = StepThreadPointer.popProcedure;
+        }
         const definitionBlock = _this.container.getBlock(definition);
         _this.procedureInnerBlock = _this.container.getBlock(definitionBlock.inputs.custom_block.block);
         _this.procedureInitialized = true;
@@ -84,11 +88,10 @@ class GraphPointer extends AbstractPointerMixin {
 }
 
 const STEP_THREAD_METHOD = {
-    NEXT: 0,
-    NEXT_EXECUTION_CONTEXT: 1,
-    POP: 2,
-    POP_EXECUTION_CONTEXT: 3,
-    POP_PARAMS: 4
+    NEXT: '_next',
+    POP_INIT: '_popInit',
+    POP_PROCEDURE: '_popProcedure',
+    POP_BRANCH: '_popBranch'
 };
 
 class StepThreadPointer extends AbstractPointerMixin {
@@ -114,8 +117,11 @@ class StepThreadPointer extends AbstractPointerMixin {
 
         _this.isLoop = false;
 
-        _this.stepThreadInitialized = false;
-        _this._stepThread = null;
+        _this.popExecution = false;
+        _this.increment = _this.container.getNextBlock(_this.blockId) ?
+            StepThreadPointer._next :
+            StepThreadPointer._pop;
+        _this.incrementPop = StepThreadPointer.popInit;
     }
 
     static getNext (_this) {
@@ -126,87 +132,53 @@ class StepThreadPointer extends AbstractPointerMixin {
         return _this.next;
     }
 
-    static get STEP_THREAD_METHOD () {
-        return STEP_THREAD_METHOD;
+    static _next (thread) {
+        thread.pointer = StepThreadPointer.getNext(thread.pointer);
+        thread.executionContext = null;
     }
 
-    static _stepThreadNext (_this, thread) {
-        thread.reuseStackForNextBlock();
-    }
-
-    static _stepThreadNextExecutionContext (_this, thread) {
-        thread.executionContexts.pop();
-        thread.shouldPushExecutionContext = true;
-        thread.reuseStackForNextBlock();
-    }
-
-    static _stepThreadPop (_this, thread) {
-        thread.popStack();
-        const pointer = thread.lastStackPointer;
-        if (pointer !== null && !pointer.isLoop) {
-            pointer.stepThread(thread);
-        }
-    }
-
-    static _stepThreadPopExecutionContext (_this, thread) {
-        thread.executionContexts.pop();
-        thread.shouldPushExecutionContext = false;
-        _this._stepThreadPop(thread);
-    }
-
-    static _stepThreadPopParams (_this, thread) {
-        thread.params.pop();
-        _this._stepThreadPop(thread);
-    }
-
-    static setStepThread (_this, method) {
-        switch (method) {
-        case STEP_THREAD_METHOD.NEXT:
-            _this._stepThread = _this._stepThreadNext;
-            _this.stepThreadInitialized = true;
-            break;
-
-        case STEP_THREAD_METHOD.NEXT_EXECUTION_CONTEXT:
-            _this._stepThread = _this._stepThreadNextExecutionContext;
-            break;
-
-        case STEP_THREAD_METHOD.POP:
-            _this._stepThread = _this._stepThreadPop;
-            _this.stepThreadInitialized = true;
-            break;
-
-        case STEP_THREAD_METHOD.POP_EXECUTION_CONTEXT:
-            _this._stepThread = _this._stepThreadPopExecutionContext;
-            _this.stepThreadInitialized = true;
-            break;
-
-        case STEP_THREAD_METHOD.POP_PARAMS:
-            _this._stepThread = _this._stepThreadPopParams;
-            _this.stepThreadInitialized = true;
-            break;
-
-        default:
-            throw new Error('Unknown step thread style.');
-        }
-    }
-
-    static stepThread (_this, thread) {
-        if (_this.stepThreadInitialized === false) {
-            const next = StepThreadPointer.getNext(_this);
-            if (next !== null) {
-                _this._stepThread = _this._stepThreadNext;
-            } else if (_this._stepThread === _this._stepThreadNextExecutionContext) {
-                _this._stepThread = _this._stepThreadPopExecutionContext;
-            } else if (_this._stepThread === null) {
-                _this._stepThread = _this._stepThreadPop;
+    static _pop (thread) {
+        thread.pointer = thread.stackFrames.pop() || null;
+        if (thread.pointer) {
+            thread.pointer.incrementPop(thread);
+            if (!thread.pointer.isLoop) {
+                thread.pointer.increment(thread);
             }
-            _this.stepThreadInitialized = true;
+        } else {
+            thread.params = null;
+            thread.executionContext = null;
         }
+    }
 
-        // console.log(_this._stepThread.name);
-        _this._stepThread(thread);
+    static popInit (thread) {
+        thread.pointer = null;
+        thread.params = null;
+        thread.executionContext = null;
+    }
 
-        return thread.lastStackPointer;
+    static popProcedure (thread) {
+        thread.params = thread.paramStack.pop();
+        if (thread.pointer.popExecution) {
+            thread.executionContext = thread.executionContexts.pop();
+        } else {
+            thread.executionContext = null;
+        }
+    }
+
+    static popBranch (thread) {
+        if (thread.pointer.popExecution) {
+            thread.executionContext = thread.executionContexts.pop();
+        } else {
+            thread.executionContext = null;
+        }
+    }
+
+    static increment (thread) {
+        thread.pointer.increment(thread);
+    }
+
+    static incrementPop (thread) {
+        thread.pointer.incrementPop(thread);
     }
 }
 
