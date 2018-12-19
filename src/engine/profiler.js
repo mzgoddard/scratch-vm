@@ -1,6 +1,10 @@
+const Timer = require('../util/timer');
+
+const nowObj = Timer.nowObj;
+
 /**
  * @fileoverview
- * A way to profile Scratch internal performance. Like what blocks run during a
+ * A way to profile Scratch internal nowObj. Like what blocks run during a
  * step? How much time do they take? How much time is spent inbetween blocks?
  *
  * Profiler aims for to spend as little time inside its functions while
@@ -8,7 +12,7 @@
  * series of values for each START and STOP event in a single array. This lets
  * all the values be pushed in one call for the array. This simplicity allows
  * the contents of the start() and stop() calls to be inlined in areas that are
- * called frequently enough to want even greater performance from Profiler so
+ * called frequently enough to want even greater nowObj from Profiler so
  * what is recorded better reflects on the profiled code and not Profiler
  * itself.
  */
@@ -160,14 +164,14 @@ class Profiler {
      * @param {?*} arg An arbitrary argument value to store with the frame.
      */
     start (id, arg) {
-        this.records.push(START, id, arg, performance.now());
+        this.records.push(START, id, arg, Profiler.now());
     }
 
     /**
      * Stop the current frame.
      */
     stop () {
-        this.records.push(STOP, performance.now());
+        this.records.push(STOP, Profiler.now());
     }
 
     /**
@@ -307,5 +311,7 @@ Profiler.START = START;
  * @const {number}
  */
 Profiler.STOP = STOP;
+
+Profiler.now = nowObj.now.bind(nowObj);
 
 module.exports = Profiler;
