@@ -186,7 +186,6 @@ class Sequencer {
             return;
         }
 
-        let currentBlockId = thread.peekStack();
         let stackFrame = thread.peekStackFrame();
 
         if (stackFrame.warpMode) {
@@ -197,7 +196,7 @@ class Sequencer {
         }
 
         // Save the current block ID to notice if we did control flow.
-        while (currentBlockId) {
+        while (stackFrame) {
             // Execute the current block.
             if (this.runtime.profiler === null) {
                 execute(this, thread);
@@ -220,7 +219,7 @@ class Sequencer {
             }
 
             // BlocksThreadCache.Pointer
-            thread.blockGlowInFrame = currentBlockId.blockId;
+            thread.blockGlowInFrame = stackFrame.blockId;
             // thread.blockGlowInFrame = currentBlockId;
 
             // Blocks should glow when a script is starting,
@@ -260,7 +259,7 @@ class Sequencer {
             }
 
             const next = thread.peekStack();
-            if (next === currentBlockId || !stackFrame.isLoop && next === null) {
+            if (next === stackFrame || !stackFrame.isLoop && next === null) {
                 // No control flow has happened or a non-loop control flow into
                 // an empty branch has happened.
                 thread.incrementPointer();
@@ -281,11 +280,11 @@ class Sequencer {
                     return;
                 }
                 // currentBlockId = stackFrame.id;
-                currentBlockId = stackFrame;
+                // currentBlockId = stackFrame;
             } else if (next !== null) {
                 // Control flow has happened.
-                currentBlockId = next;
-                stackFrame = thread.peekStackFrame();
+                // currentBlockId = next;
+                stackFrame = next;
 
                 // We only need to initialize the warpTimer at the beginning
                 // of stepThread and when control flow has happened.
