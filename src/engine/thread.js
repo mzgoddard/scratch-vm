@@ -32,7 +32,7 @@ class _StackFrame {
          * Procedure parameters.
          * @type {Object}
          */
-        this.params = null;
+        // this.params = null;
 
         /**
          * A context passed to block implementations.
@@ -50,7 +50,7 @@ class _StackFrame {
 
         this.isLoop = false;
         // this.warpMode = false;
-        this.params = null;
+        // this.params = null;
         this.executionContext = null;
 
         return this;
@@ -61,10 +61,9 @@ class _StackFrame {
      * @param {?boolean} warpMode defaults to current warpMode
      * @returns {_StackFrame} this
      */
-    reuse (id, warpMode = this.warpMode) {
+    reuse (id) {
         this.reset();
         this.id = id;
-        this.warpMode = Boolean(warpMode);
         return this;
     }
 
