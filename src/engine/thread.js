@@ -270,13 +270,15 @@ class Thread {
     initPointer (blockId) {
         this.popPointerMethod.push(this._popInit);
         this.executionContexts.push(null);
-        this.pointer = _StackFrame.create(BlocksThreadCache.getCached(this.blockContainer, blockId), false);
+        // this.pointer = _StackFrame.create(BlocksThreadCache.getCached(this.blockContainer, blockId), false);
+        this.pointer = BlocksThreadCache.getCached(this.blockContainer, blockId);
         // this.pointer = _StackFrame.create(blockId, false);
     }
 
     incrementPointer () {
         let stackFrame = this.pointer;
-        let currentBlockId = stackFrame.id;
+        // let currentBlockId = stackFrame.id;
+        let currentBlockId = stackFrame;
 
         currentBlockId = BlocksThreadCache.Increment.getNext(currentBlockId);
         // currentBlockId = this.blockContainer.getNextBlock(currentBlockId);
@@ -290,7 +292,8 @@ class Thread {
                 return;
             }
 
-            currentBlockId = stackFrame.id;
+            // currentBlockId = stackFrame.id;
+            currentBlockId = stackFrame;
             if (stackFrame.isLoop) {
                 // Don't go to the next block for this level of the
                 // stack, since loops need to be re-executed.
@@ -304,7 +307,8 @@ class Thread {
         this.executionContext = null;
 
         // Get next block of existing block on the stack.
-        this.pointer.reuse(currentBlockId);
+        // this.pointer.reuse(currentBlockId);
+        this.pointer = currentBlockId;
     }
 
     pushProcedurePointer (blockId) {
@@ -314,7 +318,8 @@ class Thread {
 
         const parent = this.pointer;
         this.stackFrames.push(parent);
-        this.pointer = _StackFrame.create(blockId, parent.warpMode);
+        // this.pointer = _StackFrame.create(blockId, parent.warpMode);
+        this.pointer = blockId;
     }
 
     pushBranchPointer (blockId, isLoop) {
@@ -324,7 +329,8 @@ class Thread {
 
         const parent = this.pointer;
         this.stackFrames.push(parent);
-        this.pointer = _StackFrame.create(blockId, parent.warpMode);
+        // this.pointer = _StackFrame.create(blockId, parent.warpMode);
+        this.pointer = blockId;
     }
 
     /**
@@ -342,13 +348,13 @@ class Thread {
     }
 
     _popProcedurePointer () {
-        _StackFrame.release(this.pointer);
+        // _StackFrame.release(this.pointer);
         this.pointer = this.stackFrames.pop() || null;
         this.params = this.paramStack.pop();
     }
 
     _popBranchPointer () {
-        _StackFrame.release(this.pointer);
+        // _StackFrame.release(this.pointer);
         this.pointer = this.stackFrames.pop() || null;
     }
 
@@ -362,7 +368,7 @@ class Thread {
      * @return {string} Block ID popped from the stack.
      */
     popStack () {
-        const id = this.pointer.id;
+        const id = this.pointer.blockId;
         this.popPointer();
         return id;
     }
@@ -394,7 +400,8 @@ class Thread {
      * @return {?string} Block ID on top of stack.
      */
     peekStack () {
-        return this.pointer !== null ? this.pointer.id : null;
+        return this.pointer;
+        // return this.pointer !== null ? this.pointer.id : null;
         // return this.stack.length > 0 ? this.stack[this.stack.length - 1] : null;
     }
 
@@ -515,7 +522,7 @@ class Thread {
         let callCount = 5; // Max number of enclosing procedure calls to examine.
         const sp = this.stackFrames.length;
         for (let i = sp - 1; i >= 0; i--) {
-            const block = BlocksThreadCache.Block.getBlock(this.stackFrames[i].id);
+            const block = BlocksThreadCache.Block.getBlock(this.stackFrames[i]);
             // const block = this.blocksContainer.getBlock(this.stackFrames[i].id);
             if (block.opcode === 'procedures_call' &&
                 block.mutation.proccode === procedureCode) {
@@ -571,7 +578,7 @@ class Thread {
         // from the stack by the sequencer, returning control to the caller.
         this.pushProcedurePointer(definition);
         // In known warp-mode thiss, only yield when time is up.
-        if (this.peekStackFrame().warpMode &&
+        if (currentBlockId.warpMode &&
             this.warpTimer.timeElapsed() > Thread.WARP_TIME) {
             this.status = this.STATUS_YIELD;
         } else {
