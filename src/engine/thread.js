@@ -256,6 +256,7 @@ class Thread {
 
     initPointer (blockId) {
         this.popPointerMethod.push(this._popInit);
+        // this.pointer = _StackFrame.create(BlocksThreadCache.getCached(blockId), false);
         this.pointer = _StackFrame.create(blockId, false);
     }
 
@@ -263,6 +264,7 @@ class Thread {
         let stackFrame = this.pointer;
         let currentBlockId = stackFrame.id;
 
+        // currentBlockId = BlocksThreadCache.Increment.getNext(currentBlockId);
         currentBlockId = this.blockContainer.getNextBlock(currentBlockId);
 
         while (currentBlockId === null) {
@@ -281,6 +283,7 @@ class Thread {
                 return;
             }
 
+            // currentBlockId = BlocksThreadCache.Increment.getNext(currentBlockId);
             currentBlockId = this.blockContainer.getNextBlock(currentBlockId);
         }
 
