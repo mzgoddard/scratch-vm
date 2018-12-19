@@ -190,8 +190,11 @@ class Thread {
 
         this.popPointerMethod = [];
 
-        this.params = null;
         this.paramStack = [];
+        this.params = null;
+
+        this.executionContexts = [];
+        this.executionContext = null;
     }
 
     /**
@@ -266,6 +269,7 @@ class Thread {
 
     initPointer (blockId) {
         this.popPointerMethod.push(this._popInit);
+        this.executionContexts.push(null);
         this.pointer = _StackFrame.create(BlocksThreadCache.getCached(this.blockContainer, blockId), false);
         // this.pointer = _StackFrame.create(blockId, false);
     }
@@ -297,12 +301,16 @@ class Thread {
             // currentBlockId = this.blockContainer.getNextBlock(currentBlockId);
         }
 
+        this.executionContext = null;
+
         // Get next block of existing block on the stack.
         this.pointer.reuse(currentBlockId);
     }
 
     pushProcedurePointer (blockId) {
         this.popPointerMethod.push(this._popProcedurePointer);
+        this.executionContexts.push(this.executionContext);
+        this.executionContext = null;
 
         const parent = this.pointer;
         this.stackFrames.push(parent);
@@ -311,6 +319,8 @@ class Thread {
 
     pushBranchPointer (blockId, isLoop) {
         this.popPointerMethod.push(this._popBranchPointer);
+        this.executionContexts.push(this.executionContext);
+        this.executionContext = null;
 
         const parent = this.pointer;
         this.stackFrames.push(parent);
@@ -344,13 +354,14 @@ class Thread {
 
     popPointer () {
         this.popPointerMethod.pop().call(this);
+        this.executionContext = this.executionContexts.pop();
     }
 
     peekExecutionContext () {
-        if (this.pointer.executionContext === null) {
-            this.pointer.executionContext = {};
+        if (this.executionContext === null) {
+            this.executionContext = {};
         }
-        return this.pointer.executionContext;
+        return this.executionContext;
     }
 
     /**
