@@ -154,7 +154,7 @@ class BlockUtility {
      * @return {Array.<string>} List of param names for a procedure.
      */
     getProcedureParamNamesAndIds (procedureCode) {
-        return this.thread.target.blocks.getProcedureParamNamesAndIds(procedureCode);
+        return this.thread.blockContainer.getProcedureParamNamesAndIds(procedureCode);
     }
 
     /**
@@ -163,7 +163,7 @@ class BlockUtility {
      * @return {Array.<string>} List of param names for a procedure.
      */
     getProcedureParamNamesIdsAndDefaults (procedureCode) {
-        return this.thread.target.blocks.getProcedureParamNamesIdsAndDefaults(procedureCode);
+        return this.thread.blockContainer.getProcedureParamNamesIdsAndDefaults(procedureCode);
     }
 
     /**

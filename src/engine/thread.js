@@ -1,3 +1,5 @@
+const BlocksThreadCache = require('./blocks-thread-cache');
+
 /**
  * Recycle bin for empty stackFrame objects
  * @type Array<_StackFrame>
@@ -359,7 +361,8 @@ class Thread {
     stopThisScript () {
         let blockID = this.peekStack();
         while (blockID !== null) {
-            const block = this.target.blocks.getBlock(blockID);
+            // const block = BlocksThreadCache.Block.getBlock(blockID);
+            const block = this.blocksContainer.getBlock(blockID);
             if (typeof block !== 'undefined' && block.opcode === 'procedures_call') {
                 break;
             }
@@ -475,7 +478,8 @@ class Thread {
      * where execution proceeds from one block to the next.
      */
     goToNextBlock () {
-        const nextBlockId = this.target.blocks.getNextBlock(this.peekStack());
+        // const nextBlockId = BlocksThreadCache.Increment.getNext(this.peekStack());
+        const nextBlockId = this.blocksContainer.getNextBlock(this.peekStack());
         this.reuseStackForNextBlock(nextBlockId);
     }
 
@@ -489,7 +493,8 @@ class Thread {
         let callCount = 5; // Max number of enclosing procedure calls to examine.
         const sp = this.stackFrames.length;
         for (let i = sp - 1; i >= 0; i--) {
-            const block = this.target.blocks.getBlock(this.stackFrames[i].id);
+            // const block = BlocksThreadCache.Block.getBlock(this.stackFrames[i].id);
+            const block = this.blocksContainer.getBlock(this.stackFrames[i].id);
             if (block.opcode === 'procedures_call' &&
                 block.mutation.proccode === procedureCode) {
                 return true;
@@ -497,6 +502,80 @@ class Thread {
             if (--callCount < 0) return false;
         }
         return false;
+    }
+
+
+    /**
+     * Step a thread into a block's branch.
+     * @param {number} branchNum Which branch to step to (i.e., 1, 2).
+     * @param {boolean} isLoop Whether this block is a loop.
+     */
+    stepToBranch (branchNum, isLoop) {
+        if (!branchNum) {
+            branchNum = 1;
+        }
+        const currentBlockId = this.peekStack();
+        // const branchId = BlocksThreadCache.Graph.getBranch(currentBlockId, branchNum);
+        const branchId = this.blockContainer.getBranch(
+            currentBlockId,
+            branchNum
+        );
+        this.peekStackFrame().isLoop = isLoop;
+        if (branchId) {
+            // Push branch ID to the this's stack.
+            this.pushBranchPointer(branchId);
+        } else {
+            this.pushBranchPointer(null);
+        }
+    }
+
+    /**
+     * Step a procedure.
+     * @param {!string} procedureCode Procedure code of procedure to step to.
+     */
+    stepToProcedure (procedureCode) {
+        // const definition = BlocksThreadCache.Graph.getProcedureDefinition(procedureCode);
+        const definition = this.blockContainer.getProcedureDefinition(procedureCode);
+        if (!definition) {
+            return;
+        }
+        // Check if the call is recursive.
+        // If so, set the this to yield after pushing.
+        const isRecursive = this.isRecursiveCall(procedureCode);
+        // To step to a procedure, we put its definition on the stack.
+        // Execution for the this will proceed through the definition hat
+        // and on to the main definition of the procedure.
+        // When that set of blocks finishes executing, it will be popped
+        // from the stack by the sequencer, returning control to the caller.
+        this.pushProcedurePointer(definition);
+        // In known warp-mode thiss, only yield when time is up.
+        if (this.peekStackFrame().warpMode &&
+            this.warpTimer.timeElapsed() > Sequencer.WARP_TIME) {
+            this.status = this.STATUS_YIELD;
+        } else {
+            // Look for warp-mode flag on definition, and set the this
+            // to warp-mode if needed.
+            // const definitionBlock = BlocksThreadCache.Block.getBlock(definition);
+            const definitionBlock = this.blockContainer.getBlock(definition);
+            // const innerBlock = BlocksThreadCache.Graph.getProcedureInnerBlock(definition);
+            const innerBlock = this.blockContainer.getBlock(
+                definitionBlock.inputs.custom_block.block);
+            let doWarp = false;
+            if (innerBlock && innerBlock.mutation) {
+                const warp = innerBlock.mutation.warp;
+                if (typeof warp === 'boolean') {
+                    doWarp = warp;
+                } else if (typeof warp === 'string') {
+                    doWarp = JSON.parse(warp);
+                }
+            }
+            if (doWarp) {
+                this.peekStackFrame().warpMode = true;
+            } else if (isRecursive) {
+                // In normal-mode thiss, yield any time we have a recursive call.
+                this.status = this.STATUS_YIELD;
+            }
+        }
     }
 }
 

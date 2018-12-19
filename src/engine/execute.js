@@ -1,5 +1,6 @@
 const BlockUtility = require('./block-utility');
 const BlocksExecuteCache = require('./blocks-execute-cache');
+const BlocksThreadCache = require('./blocks-thread-cache');
 const log = require('../util/log');
 const Thread = require('./thread');
 const {Map} = require('immutable');
@@ -371,6 +372,7 @@ const execute = function (sequencer, thread) {
     const currentStackFrame = thread.peekStackFrame();
 
     let blockContainer = thread.blockContainer;
+    // const blockCached = BlocksThreadCache.Execute.getCached(currentBlockId, BlockCached);
     let blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
     if (blockCached === null) {
         blockContainer = runtime.flyoutBlocks;
