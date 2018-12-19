@@ -142,7 +142,7 @@ const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached, l
  * @param {object} cached default set of cached values
  */
 class BlockCached {
-    constructor (blockContainer, cached) {
+    constructor (runtime, blockContainer, cached) {
         /**
          * Block id in its parent set of blocks.
          * @type {string}
@@ -254,7 +254,7 @@ class BlockCached {
          */
         this._ops = [];
 
-        const {runtime} = blockUtility.sequencer;
+        // const {runtime} = blockUtility.sequencer;
 
         const {opcode, fields, inputs} = this;
 
@@ -325,7 +325,7 @@ class BlockCached {
         for (const inputName in this._inputs) {
             const input = this._inputs[inputName];
             if (input.block) {
-                const inputCached = BlocksExecuteCache.getCached(blockContainer, input.block, BlockCached);
+                const inputCached = BlocksExecuteCache.getCached(runtime, blockContainer, input.block, BlockCached);
 
                 if (inputCached._isHat) {
                     continue;
@@ -371,19 +371,19 @@ const execute = function (sequencer, thread) {
     const currentBlockId = thread.peekStack();
     const currentStackFrame = thread.peekStackFrame();
 
-    let blockContainer = thread.blockContainer;
-    // const blockCached = BlocksThreadCache.Execute.getCached(currentBlockId, BlockCached);
-    let blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
-    if (blockCached === null) {
-        blockContainer = runtime.flyoutBlocks;
-        blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
-        // Stop if block or target no longer exists.
-        if (blockCached === null) {
-            // No block found: stop the thread; script no longer exists.
-            sequencer.retireThread(thread);
-            return;
-        }
-    }
+    const blockCached = BlocksExecuteCache.BlocksThreadExecutePointer.getCached(currentBlockId, runtime, BlockCached);
+    // let blockContainer = thread.blockContainer;
+    // let blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
+    // if (blockCached === null) {
+    //     blockContainer = runtime.flyoutBlocks;
+    //     blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
+    //     // Stop if block or target no longer exists.
+    //     if (blockCached === null) {
+    //         // No block found: stop the thread; script no longer exists.
+    //         sequencer.retireThread(thread);
+    //         return;
+    //     }
+    // }
 
     const ops = blockCached._ops;
     const length = ops.length;

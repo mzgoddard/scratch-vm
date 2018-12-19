@@ -213,8 +213,8 @@ class Sequencer {
             }
 
             // BlocksThreadCache.Pointer
-            // thread.blockGlowInFrame = currentBlockId.blockId;
-            thread.blockGlowInFrame = currentBlockId;
+            thread.blockGlowInFrame = currentBlockId.blockId;
+            // thread.blockGlowInFrame = currentBlockId;
 
             // Blocks should glow when a script is starting,
             // not after it has finished (see #1404).

@@ -48,7 +48,7 @@ class GraphPointer extends AbstractPointerMixin {
         _this.procedureInnerBlock = null;
     }
 
-    static getBranch (branchNum) {
+    static getBranch (_this, branchNum) {
         if (_this.branchesInitialized === false) {
             _this.branches = [
                 exports.getCached(_this.container, _this.container.getBranch(_this.blockId, 1), _this.warpMode),
@@ -59,7 +59,7 @@ class GraphPointer extends AbstractPointerMixin {
         return _this.branches[branchNum - 1];
     }
 
-    static _initProcedure () {
+    static _initProcedure (_this) {
         const block = _this.container.getBlock(_this.blockId);
         const definition = _this.container.getProcedureDefinition(block.mutation.proccode);
         _this.procedureDefinition = exports.getCached(_this.container, definition, _this.warpMode);
@@ -68,16 +68,16 @@ class GraphPointer extends AbstractPointerMixin {
         _this.procedureInitialized = true;
     }
 
-    static getProcedureDefinition () {
+    static getProcedureDefinition (_this) {
         if (_this.procedureInitialized === false) {
-            _this._initProcedure();
+            GraphPointer._initProcedure(_this);
         }
         return _this.procedureDefinition;
     }
 
-    static getProcedureInnerBlock () {
+    static getProcedureInnerBlock (_this) {
         if (_this.procedureInitialized === false) {
-            _this._initProcedure();
+            GraphPointer._initProcedure(_this);
         }
         return _this.procedureInnerBlock;
     }
