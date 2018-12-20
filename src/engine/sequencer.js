@@ -38,6 +38,12 @@ let stepThreadsInnerProfilerId = -1;
  */
 let executeProfilerId = -1;
 
+const _freeTimers = [];
+
+const createTimer = () => _freeTimers.pop() || new Timer();
+
+const releaseTimer = timer => _freeTimers.push(timer);
+
 class Sequencer {
     constructor (runtime) {
         /**
@@ -124,7 +130,10 @@ class Sequencer {
                     if (this.runtime.profiler !== null) {
                         this.runtime.profiler.stop();
                     }
-                    activeThread.warpTimer = null;
+                    if (activeThread.warpTimer !== null) {
+                        releaseTimer(activeThread.warpTimer);
+                        activeThread.warpTimer = null;
+                    }
                     if (activeThread.isKilled) {
                         i--; // if the thread is removed from the list (killed), do not increase index
                     }
@@ -184,14 +193,16 @@ class Sequencer {
         if (stackFrame.warpMode) {
             // Initialize warp-mode timer if it hasn't been already.
             // This will start counting the thread toward `Sequencer.WARP_TIME`.
-            thread.warpTimer = new Timer();
+            thread.warpTimer = createTimer();
             thread.warpTimer.start();
         }
 
         // Save the current block ID to notice if we did control flow.
         while (stackFrame) {
             // Execute the current block.
-            if (this.runtime.profiler !== null) {
+            if (this.runtime.profiler === null) {
+                execute(this, thread);
+            } else {
                 if (executeProfilerId === -1) {
                     executeProfilerId = this.runtime.profiler.idByName(executeProfilerFrame);
                 }
@@ -202,11 +213,9 @@ class Sequencer {
                 // this.runtime.profiler.start(executeProfilerId, null);
                 this.runtime.profiler.records.push(
                     this.runtime.profiler.START, executeProfilerId, null, 0);
-            }
 
-            execute(this, thread);
+                execute(this, thread);
 
-            if (this.runtime.profiler !== null) {
                 // this.runtime.profiler.stop();
                 this.runtime.profiler.records.push(this.runtime.profiler.STOP, 0);
             }
@@ -282,7 +291,7 @@ class Sequencer {
                     // Initialize warp-mode timer if it hasn't been already.
                     // This will start counting the thread toward
                     // `Sequencer.WARP_TIME`.
-                    thread.warpTimer = new Timer();
+                    thread.warpTimer = createTimer();
                     thread.warpTimer.start();
                 }
             } else {
