@@ -13,7 +13,7 @@ class Scratch3ProcedureBlocks {
      */
     getPrimitives () {
         return {
-            procedures_definition: this.definition,
+            // procedures_definition: this.definition,
             procedures_call: this.call,
             argument_reporter_string_number: this.argumentReporterStringNumber,
             argument_reporter_boolean: this.argumentReporterBoolean
