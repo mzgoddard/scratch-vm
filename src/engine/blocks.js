@@ -510,7 +510,7 @@ class Blocks {
         this._cache._executeCached = {};
         this._cache._monitored = null;
 
-        for (const cached of this._cache._threadCached) {
+        for (const cached of Object.values(this._cache._threadCached)) {
             cached.clear();
         }
 
