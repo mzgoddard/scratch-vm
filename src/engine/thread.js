@@ -197,7 +197,7 @@ class Thread {
         // this.popPointerMethod = [];
 
         this.paramStack = [];
-        this.params = null;
+        this.params = {};
 
         this.executionContexts = [];
         this.executionContext = null;
@@ -482,10 +482,11 @@ class Thread {
      * @return {*} value Value for parameter.
      */
     getParam (paramName) {
-        if (this.params !== null && this.params.hasOwnProperty(paramName)) {
+        if (this.params.hasOwnProperty(paramName)) {
             return this.params[paramName];
         }
         return null;
+
         if (this.pointer.params !== null) {
             if (this.pointer.params.hasOwnProperty(paramName)) {
                 return this.pointer.params[paramName];
