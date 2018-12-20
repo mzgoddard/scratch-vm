@@ -22,6 +22,10 @@ class BlockDataPointer extends AbstractPointerMixin {
         _this.block = null;
     }
 
+    static clear (_this) {
+        _this.blockInitialized = false;
+    }
+
     static getBlock (_this) {
         if (_this.blockInitialized === false) {
             _this.block = _this.container.getBlock(_this.blockId);
@@ -39,6 +43,11 @@ class GraphPointer extends AbstractPointerMixin {
         _this.procedureInitialized = false;
         _this.procedureDefinition = null;
         _this.procedureInnerBlock = null;
+    }
+
+    static clear (_this) {
+        _this.branchesInitialized = false;
+        _this.procedureInitialized = false;
     }
 
     static getBranch (_this, branchNum) {
@@ -92,6 +101,13 @@ class StepThreadPointer extends AbstractPointerMixin {
             StepThreadPointer._next :
             StepThreadPointer._pop;
         _this.incrementPop = StepThreadPointer.popInit;
+    }
+
+    static clear (_this) {
+        _this.nextInitialized = false;
+        _this.increment = _this.container.getNextBlock(_this.blockId) ?
+            StepThreadPointer._next :
+            StepThreadPointer._pop;
     }
 
     static getNext (_this) {
@@ -163,6 +179,13 @@ class Pointer {
         BlocksThreadExecutePointer.init(this);
         GraphPointer.init(this);
         StepThreadPointer.init(this);
+    }
+
+    clear () {
+        BlockDataPointer.clear(this);
+        BlocksThreadExecutePointer.clear(this);
+        GraphPointer.clear(this);
+        StepThreadPointer.clear(this);
     }
 }
 
