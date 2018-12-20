@@ -509,6 +509,11 @@ class Blocks {
         this._cache.procedureDefinitions = {};
         this._cache._executeCached = {};
         this._cache._monitored = null;
+
+        for (const cached of this._cache._threadCached) {
+            cached.clear();
+        }
+
         this._cache._threadCached = {};
         this._cache._threadIndices = [];
     }

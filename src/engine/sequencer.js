@@ -272,11 +272,8 @@ class Sequencer {
                     // to be re-executed.
                     return;
                 }
-                // currentBlockId = stackFrame.id;
-                // currentBlockId = stackFrame;
             } else if (next !== null) {
                 // Control flow has happened.
-                // currentBlockId = next;
                 stackFrame = next;
 
                 // We only need to initialize the warpTimer at the beginning

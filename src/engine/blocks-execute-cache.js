@@ -21,6 +21,10 @@ exports.BlocksThreadExecutePointer = class ExecuteCachedPointer {
         _this.executeCached = null;
     }
 
+    static clear (_this) {
+        _this.executeInitialized = false;
+    }
+
     static getCached (_this, runtime, CacheType) {
         if (_this.executeInitialized === false) {
             _this.executeCached = exports.getCached(runtime, _this.container, _this.blockId, CacheType);
