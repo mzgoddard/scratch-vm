@@ -59,7 +59,7 @@ const isPromise = function (value) {
  */
 // @todo move this to callback attached to the thread when we have performance
 // metrics (dd)
-const handleReport = function (resolvedValue, sequencer, thread, blockCached, lastOperation) {
+const handleReport = function (resolvedValue, sequencer, thread, blockCached) {
     const currentBlockId = blockCached.id;
     const opcode = blockCached.opcode;
     const isHat = blockCached._isHat;
@@ -91,7 +91,7 @@ const handleReport = function (resolvedValue, sequencer, thread, blockCached, la
     } else {
         // In a non-hat, report the value visually if necessary if
         // at the top of the thread stack.
-        if (lastOperation && typeof resolvedValue !== 'undefined' && thread.atStackTop()) {
+        if (typeof resolvedValue !== 'undefined' && thread.atStackTop()) {
             if (thread.stackClick) {
                 sequencer.runtime.visualReport(currentBlockId, resolvedValue);
             }
@@ -113,16 +113,36 @@ const handleReport = function (resolvedValue, sequencer, thread, blockCached, la
     }
 };
 
-const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached, lastOperation) => {
+const handleArgumentPromise = (primitiveReportedValue, thread) => {
     if (thread.status === STATUS_RUNNING) {
         // Primitive returned a promise; automatically yield thread.
         thread.status = STATUS_PROMISE_WAIT;
     }
     // Promise handlers
     primitiveReportedValue.then(resolvedValue => {
-        handleReport(resolvedValue, sequencer, thread, blockCached, lastOperation);
+        // Handle argument report.
+        thread.pushReportedValue(resolvedValue);
+        // Finished any yields.
+        thread.status = STATUS_RUNNING;
+    }, rejectionReason => {
+        // Promise rejected: the primitive had some error.
+        // Log it and proceed.
+        log.warn('Primitive rejected promise: ', rejectionReason);
+        thread.status = STATUS_RUNNING;
+        thread.popPointer();
+    });
+};
+
+const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached) => {
+    if (thread.status === STATUS_RUNNING) {
+        // Primitive returned a promise; automatically yield thread.
+        thread.status = STATUS_PROMISE_WAIT;
+    }
+    // Promise handlers
+    primitiveReportedValue.then(resolvedValue => {
+        handleReport(resolvedValue, sequencer, thread, blockCached);
         // If its a command block.
-        if (lastOperation && typeof resolvedValue === 'undefined') {
+        if (typeof resolvedValue === 'undefined') {
             thread.incrementPointer();
         }
     }, rejectionReason => {
@@ -262,6 +282,10 @@ class BlockCached {
          */
         this._ops = [];
 
+        this.setArg = null;
+
+        this.storeArg = null;
+
         // const {runtime} = blockUtility.sequencer;
 
         const {opcode, fields, inputs} = this;
@@ -343,6 +367,13 @@ class BlockCached {
                 this._ops.push(...inputCached._ops);
                 inputCached._parentKey = inputName;
                 inputCached._parentValues = this._argValues;
+                if (inputName === 'BROADCAST_INPUT') {
+                    inputCached.setArg = this.setArgBroadcastInput;
+                    inputCached.storeArg = this.storeArgBroadcastInput;
+                } else {
+                    inputCached.setArg = this.setArgKey;
+                    inputCached.storeArg = this.storeArgKey;
+                }
 
                 // Shadow values are static and do not change, go ahead and
                 // store their value on args.
@@ -360,7 +391,84 @@ class BlockCached {
             this._ops.push(this);
         }
     }
+
+    setArgBroadcastInput (primitiveReportedValue) {
+        // By definition a block that is not last in the list has a
+        // parent.
+        const inputName = this._parentKey;
+        const parentValues = this._parentValues;
+
+        // Something is plugged into the broadcast input.
+        // Cast it to a string. We don't need an id here.
+        parentValues.BROADCAST_OPTION.id = null;
+        parentValues.BROADCAST_OPTION.name = cast.toString(primitiveReportedValue);
+    }
+
+    setArgKey (primitiveReportedValue) {
+        // By definition a block that is not last in the list has a
+        // parent.
+        const inputName = this._parentKey;
+        const parentValues = this._parentValues;
+
+        parentValues[inputName] = primitiveReportedValue;
+    }
+
+    storeArgBroadcastInput () {
+        const inputName = this._parentKey;
+        const reportedValues = this._parentValues;
+
+        return {
+            opCached: this.id,
+            inputValue: this[inputName].BROADCAST_OPTION.name
+        };
+    }
+
+    storeArgKey () {
+        const inputName = this._parentKey;
+        const reportedValues = this._parentValues;
+
+        return {
+            opCached: this.id,
+            inputValue: this[inputName]
+        };
+    }
 }
+
+const profileBlockFunction = (runtime, blockUtility, opCached, argValues) => {
+    const opcode = opCached.opcode;
+    const blockFunction = opCached._blockFunction;
+    const blockFunctionContext = opCached._blockFunctionContext;
+
+    if (blockFunctionProfilerId === -1) {
+        blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
+    }
+    // The method commented below has its code inlined
+    // underneath to reduce the bias recorded for the profiler's
+    // calls in this time sensitive execute function.
+    //
+    // runtime.profiler.start(blockFunctionProfilerId, opcode);
+    runtime.profiler.records.push(
+        runtime.profiler.START, blockFunctionProfilerId, opcode, 0);
+
+    const primitiveReportedValue = blockFunction.call(blockFunctionContext, argValues, blockUtility);
+
+    // runtime.profiler.stop(blockFunctionProfilerId);
+    runtime.profiler.records.push(runtime.profiler.STOP, 0);
+
+    return primitiveReportedValue;
+};
+
+const storeReportedValues = (thread, ops, i) => {
+    // Store the already reported values. They will be thawed into the
+    // future versions of the same operations by block id. The reporting
+    // operation if it is promise waiting will set its parent value at
+    // that time.
+    thread.justReported = null;
+    thread.reporting = ops[i].id;
+    thread.reported = ops.slice(0, i).map(reportedCached => (
+        reportedCached.storeArg(reportedCached)
+    ));
+};
 
 /**
  * Execute a block.
@@ -377,7 +485,6 @@ const execute = function (sequencer, thread) {
 
     // Current block to execute is the one on the top of the stack.
     const currentBlockId = thread.peekStack();
-    // const currentStackFrame = thread.peekStackFrame();
 
     const blockCached = BlocksExecuteCache.BlocksThreadExecutePointer.getCached(currentBlockId, runtime, BlockCached);
     // let blockContainer = thread.blockContainer;
@@ -394,7 +501,9 @@ const execute = function (sequencer, thread) {
     // }
 
     const ops = blockCached._ops;
-    const length = ops.length;
+    if (ops.length === 0) {
+        return;
+    }
     let i = 0;
 
     if (thread.reported !== null) {
@@ -406,17 +515,7 @@ const execute = function (sequencer, thread) {
             const opCached = ops.find(op => op.id === oldOpCached);
 
             if (opCached) {
-                const inputName = opCached._parentKey;
-                const argValues = opCached._parentValues;
-
-                if (inputName === 'BROADCAST_INPUT') {
-                    // Something is plugged into the broadcast input.
-                    // Cast it to a string. We don't need an id here.
-                    argValues.BROADCAST_OPTION.id = null;
-                    argValues.BROADCAST_OPTION.name = cast.toString(inputValue);
-                } else {
-                    argValues[inputName] = inputValue;
-                }
+                opCached.setArg(inputValue);
             }
         }
 
@@ -440,17 +539,7 @@ const execute = function (sequencer, thread) {
 
             thread.justReported = null;
 
-            const inputName = opCached._parentKey;
-            const argValues = opCached._parentValues;
-
-            if (inputName === 'BROADCAST_INPUT') {
-                // Something is plugged into the broadcast input.
-                // Cast it to a string. We don't need an id here.
-                argValues.BROADCAST_OPTION.id = null;
-                argValues.BROADCAST_OPTION.name = cast.toString(inputValue);
-            } else {
-                argValues[inputName] = inputValue;
-            }
+            opCached.setArg(inputValue);
 
             i += 1;
         }
@@ -459,12 +548,9 @@ const execute = function (sequencer, thread) {
         thread.reported = null;
     }
 
-    for (; i < length; i++) {
-        const lastOperation = i === length - 1;
+    const length1 = ops.length - 1;
+    for (; i < length1; i++) {
         const opCached = ops[i];
-
-        const blockFunction = opCached._blockFunction;
-        const blockFunctionContext = opCached._blockFunctionContext;
 
         // Update values for arguments (inputs).
         const argValues = opCached._argValues;
@@ -475,9 +561,15 @@ const execute = function (sequencer, thread) {
 
         let primitiveReportedValue = null;
         if (runtime.profiler === null) {
+            const blockFunction = opCached._blockFunction;
+            const blockFunctionContext = opCached._blockFunctionContext;
             primitiveReportedValue = blockFunction.call(blockFunctionContext, argValues, blockUtility);
         } else {
+            // primitiveReportedValue = profileBlockFunction(runtime, blockUtility, opCached, argValues);
             const opcode = opCached.opcode;
+            const blockFunction = opCached._blockFunction;
+            const blockFunctionContext = opCached._blockFunctionContext;
+
             if (blockFunctionProfilerId === -1) {
                 blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
             }
@@ -497,51 +589,67 @@ const execute = function (sequencer, thread) {
 
         // If it's a promise, wait until promise resolves.
         if (isPromise(primitiveReportedValue)) {
-            handlePromise(primitiveReportedValue, sequencer, thread, opCached, lastOperation);
+            handleArgumentPromise(primitiveReportedValue, thread);
 
-            // Store the already reported values. They will be thawed into the
-            // future versions of the same operations by block id. The reporting
-            // operation if it is promise waiting will set its parent value at
-            // that time.
-            thread.justReported = null;
-            thread.reporting = ops[i].id;
-            thread.reported = ops.slice(0, i).map(reportedCached => {
-                const inputName = reportedCached._parentKey;
-                const reportedValues = reportedCached._parentValues;
-
-                if (inputName === 'BROADCAST_INPUT') {
-                    return {
-                        opCached: reportedCached.id,
-                        inputValue: reportedValues[inputName].BROADCAST_OPTION.name
-                    };
-                }
-                return {
-                    opCached: reportedCached.id,
-                    inputValue: reportedValues[inputName]
-                };
-            });
+            storeReportedValues(thread, ops, i);
 
             // We are waiting for a promise. Stop running this set of operations
             // and continue them later after thawing the reported values.
             break;
         } else if (thread.status === STATUS_RUNNING) {
-            if (lastOperation) {
-                handleReport(primitiveReportedValue, sequencer, thread, opCached, lastOperation);
-            } else {
-                // By definition a block that is not last in the list has a
-                // parent.
-                const inputName = opCached._parentKey;
-                const parentValues = opCached._parentValues;
+            opCached.setArg(primitiveReportedValue);
+        }
+    }
 
-                if (inputName === 'BROADCAST_INPUT') {
-                    // Something is plugged into the broadcast input.
-                    // Cast it to a string. We don't need an id here.
-                    parentValues.BROADCAST_OPTION.id = null;
-                    parentValues.BROADCAST_OPTION.name = cast.toString(primitiveReportedValue);
-                } else {
-                    parentValues[inputName] = primitiveReportedValue;
-                }
+    if (thread.status === STATUS_RUNNING) {
+        // debugger;
+        const opCached = ops[i];
+
+        // Update values for arguments (inputs).
+        const argValues = opCached._argValues;
+
+        // Fields are set during opCached initialization.
+
+        // Inputs are set during previous steps in the loop.
+
+        let primitiveReportedValue = null;
+        if (runtime.profiler === null) {
+            const blockFunction = opCached._blockFunction;
+            const blockFunctionContext = opCached._blockFunctionContext;
+            primitiveReportedValue = blockFunction.call(blockFunctionContext, argValues, blockUtility);
+        } else {
+            // primitiveReportedValue = profileBlockFunction(runtime, blockUtility, opCached, argValues);
+            const opcode = opCached.opcode;
+            const blockFunction = opCached._blockFunction;
+            const blockFunctionContext = opCached._blockFunctionContext;
+
+            if (blockFunctionProfilerId === -1) {
+                blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
             }
+            // The method commented below has its code inlined
+            // underneath to reduce the bias recorded for the profiler's
+            // calls in this time sensitive execute function.
+            //
+            // runtime.profiler.start(blockFunctionProfilerId, opcode);
+            runtime.profiler.records.push(
+                runtime.profiler.START, blockFunctionProfilerId, opcode, 0);
+
+            primitiveReportedValue = blockFunction.call(blockFunctionContext, argValues, blockUtility);
+
+            // runtime.profiler.stop(blockFunctionProfilerId);
+            runtime.profiler.records.push(runtime.profiler.STOP, 0);
+        }
+
+        // If it's a promise, wait until promise resolves.
+        if (isPromise(primitiveReportedValue)) {
+            handlePromise(primitiveReportedValue, sequencer, thread, opCached);
+
+            storeReportedValues(thread, ops, i);
+
+            // We are waiting for a promise. Let the function finish without
+            // reporting a final value.
+        } else if (thread.status === STATUS_RUNNING) {
+            handleReport(primitiveReportedValue, sequencer, thread, opCached);
         }
     }
 };
