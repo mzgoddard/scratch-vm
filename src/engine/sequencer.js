@@ -205,7 +205,7 @@ class Sequencer {
         }
 
         // Save the current block ID to notice if we did control flow.
-        while (stackFrame) {
+        while (true) {
             // Execute the current block.
             if (this.runtime.profiler === null) {
                 execute(this, thread);
@@ -225,18 +225,6 @@ class Sequencer {
 
                 // this.runtime.profiler.stop();
                 this.runtime.profiler.records.push(this.runtime.profiler.STOP, 0);
-            }
-
-            // BlocksThreadCache.Pointer
-            thread.blockGlowInFrame = stackFrame.blockId;
-            // thread.blockGlowInFrame = currentBlockId;
-
-            // Blocks should glow when a script is starting,
-            // not after it has finished (see #1404).
-            // Only blocks in blockContainers that don't forceNoGlow
-            // should request a glow.
-            if (!thread.blockContainer.forceNoGlow) {
-                thread.requestScriptGlowInFrame = true;
             }
 
             if (thread.status !== STATUS_RUNNING) {
@@ -264,20 +252,30 @@ class Sequencer {
                 // } else if (thread.status === STATUS_YIELD_TICK) {
                 //
                 // stepThreads will reset the thread to STATUS_RUNNING
+
+                // Blocks should glow when a script is starting,
+                // not after it has finished (see #1404).
+                // Only blocks in blockContainers that don't forceNoGlow
+                // should request a glow.
+                if (!thread.blockContainer.forceNoGlow) {
+                    thread.blockGlowInFrame = stackFrame.blockId;
+                    thread.requestScriptGlowInFrame = true;
+                }
                 return;
             }
 
-            const next = thread.peekStack();
+            let next = thread.peekStack();
             if (next === stackFrame || !stackFrame.isLoop && next === null) {
                 // No control flow has happened or a non-loop control flow into
                 // an empty branch has happened.
                 thread.incrementPointer();
-                stackFrame = thread.pointer;
-                if (stackFrame === null || (
-                    stackFrame.isLoop && (
-                        !stackFrame.warpMode ||
-                        thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
-                    )
+                next = thread.pointer;
+                if (next === null) {
+                    return;
+                }
+                if (next.isLoop && (
+                    !next.warpMode ||
+                    thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
                 )) {
                     // The current level of the stack is marked as a loop.
                     // Return to yield for the frame/tick in general.
@@ -286,8 +284,18 @@ class Sequencer {
 
                     // Don't do anything to the stack, since loops need
                     // to be re-executed.
+
+                    // Blocks should glow when a script is starting,
+                    // not after it has finished (see #1404).
+                    // Only blocks in blockContainers that don't forceNoGlow
+                    // should request a glow.
+                    if (!thread.blockContainer.forceNoGlow) {
+                        thread.blockGlowInFrame = next.blockId;
+                        thread.requestScriptGlowInFrame = true;
+                    }
                     return;
                 }
+                stackFrame = next;
             } else if (next !== null) {
                 // Control flow has happened.
                 stackFrame = next;
@@ -309,6 +317,14 @@ class Sequencer {
                     !stackFrame.warpMode ||
                     thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
                 ) {
+                    // Blocks should glow when a script is starting,
+                    // not after it has finished (see #1404).
+                    // Only blocks in blockContainers that don't forceNoGlow
+                    // should request a glow.
+                    if (!thread.blockContainer.forceNoGlow) {
+                        thread.blockGlowInFrame = stackFrame.blockId;
+                        thread.requestScriptGlowInFrame = true;
+                    }
                     return;
                 }
             }
