@@ -56,7 +56,7 @@ class GraphPointer extends AbstractPointerMixin {
                 exports.getCached(_this.container, _this.container.getBranch(_this.blockId, 1), _this.warpMode),
                 exports.getCached(_this.container, _this.container.getBranch(_this.blockId, 2), _this.warpMode)
             ];
-            _this.incrementPop = StepThreadPointer.popBranch;
+            _this.incrementPop = IncrementThreadPointer.popBranch;
             _this.branchesInitialized = true;
         }
         return _this.branches[branchNum - 1];
@@ -67,7 +67,7 @@ class GraphPointer extends AbstractPointerMixin {
         const definition = _this.container.getProcedureDefinition(block.mutation.proccode);
         _this.procedureDefinition = exports.getCached(_this.container, definition, _this.warpMode);
         if (_this.procedureDefinition) {
-            _this.incrementPop = StepThreadPointer.popProcedure;
+            _this.incrementPop = IncrementThreadPointer.popProcedure;
         }
         const definitionBlock = _this.container.getBlock(definition);
         _this.procedureInnerBlock = _this.container.getBlock(definitionBlock.inputs.custom_block.block);
@@ -89,7 +89,7 @@ class GraphPointer extends AbstractPointerMixin {
     }
 }
 
-class StepThreadPointer extends AbstractPointerMixin {
+class IncrementThreadPointer extends AbstractPointerMixin {
     static init (_this) {
         _this.nextInitialized = false;
         _this.next = null;
@@ -98,16 +98,16 @@ class StepThreadPointer extends AbstractPointerMixin {
 
         _this.popExecution = false;
         _this.increment = _this.container.getNextBlock(_this.blockId) ?
-            StepThreadPointer._next :
-            StepThreadPointer._pop;
-        _this.incrementPop = StepThreadPointer.popInit;
+            IncrementThreadPointer._next :
+            IncrementThreadPointer._pop;
+        _this.incrementPop = IncrementThreadPointer.popInit;
     }
 
     static clear (_this) {
         _this.nextInitialized = false;
         _this.increment = _this.container.getNextBlock(_this.blockId) ?
-            StepThreadPointer._next :
-            StepThreadPointer._pop;
+            IncrementThreadPointer._next :
+            IncrementThreadPointer._pop;
     }
 
     static getNext (_this) {
@@ -119,7 +119,7 @@ class StepThreadPointer extends AbstractPointerMixin {
     }
 
     static _next (thread) {
-        thread.pointer = StepThreadPointer.getNext(thread.pointer);
+        thread.pointer = IncrementThreadPointer.getNext(thread.pointer);
         thread.executionContext = null;
     }
 
@@ -178,14 +178,14 @@ class Pointer {
         BlockDataPointer.init(this);
         BlocksThreadExecutePointer.init(this);
         GraphPointer.init(this);
-        StepThreadPointer.init(this);
+        IncrementThreadPointer.init(this);
     }
 
     clear () {
         BlockDataPointer.clear(this);
         BlocksThreadExecutePointer.clear(this);
         GraphPointer.clear(this);
-        StepThreadPointer.clear(this);
+        IncrementThreadPointer.clear(this);
     }
 }
 
@@ -198,7 +198,7 @@ exports.Pointer = Pointer;
 exports.Index = IndexPointer;
 exports.Block = BlockDataPointer;
 exports.Graph = GraphPointer;
-exports.Increment = StepThreadPointer;
+exports.Increment = IncrementThreadPointer;
 
 // Call after the default throwing getCached is assigned for Blocks to replace.
 require('./blocks');
