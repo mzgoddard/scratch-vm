@@ -370,6 +370,10 @@ class BlockCached {
             this._ops.push(this);
         }
     }
+
+    call () {
+        return this._blockFunction.call(this._blockFunctionContext, this._argValues, blockUtility);
+    }
 }
 
 /**
@@ -472,11 +476,11 @@ const execute = function (sequencer, thread) {
         const lastOperation = i === length - 1;
         const opCached = ops[i];
 
-        const blockFunction = opCached._blockFunction;
-        const blockFunctionContext = opCached._blockFunctionContext;
+        // const blockFunction = opCached._blockFunction;
+        // const blockFunctionContext = opCached._blockFunctionContext;
 
         // Update values for arguments (inputs).
-        const argValues = opCached._argValues;
+        // const argValues = opCached._argValues;
 
         // Fields are set during opCached initialization.
 
@@ -484,7 +488,7 @@ const execute = function (sequencer, thread) {
 
         let primitiveReportedValue = null;
         if (runtime.profiler === null) {
-            primitiveReportedValue = blockFunction.call(blockFunctionContext, argValues, blockUtility);
+            primitiveReportedValue = opCached.call();
         } else {
             const opcode = opCached.opcode;
             if (blockFunctionProfilerId === -1) {
@@ -498,7 +502,7 @@ const execute = function (sequencer, thread) {
             runtime.profiler.records.push(
                 runtime.profiler.START, blockFunctionProfilerId, opcode, 0);
 
-            primitiveReportedValue = blockFunction.call(blockFunctionContext, argValues, blockUtility);
+            primitiveReportedValue = opCached.call();
 
             // runtime.profiler.stop(blockFunctionProfilerId);
             runtime.profiler.records.push(runtime.profiler.STOP, 0);
