@@ -25,31 +25,31 @@ class Scratch3ProcedureBlocks {
     }
 
     call (args, util) {
-        if (!util.stackFrame.executed) {
-            const procedureCode = args.mutation.proccode;
-            const paramNamesIdsAndDefaults = util.getProcedureParamNamesIdsAndDefaults(procedureCode);
+        // if (!util.stackFrame.executed) {
+        const procedureCode = args.mutation.proccode;
+        const paramNamesIdsAndDefaults = util.getProcedureParamNamesIdsAndDefaults(procedureCode);
 
-            // If null, procedure could not be found, which can happen if custom
-            // block is dragged between sprites without the definition.
-            // Match Scratch 2.0 behavior and noop.
-            if (paramNamesIdsAndDefaults === null) {
-                return;
-            }
-
-            const [paramNames, paramIds, paramDefaults] = paramNamesIdsAndDefaults;
-
-            util.thread.initParams();
-            for (let i = 0; i < paramIds.length; i++) {
-                if (args.hasOwnProperty(paramIds[i])) {
-                    util.pushParam(paramNames[i], args[paramIds[i]]);
-                } else {
-                    util.pushParam(paramNames[i], paramDefaults[i]);
-                }
-            }
-
-            util.stackFrame.executed = true;
-            util.startProcedure();
+        // If null, procedure could not be found, which can happen if custom
+        // block is dragged between sprites without the definition.
+        // Match Scratch 2.0 behavior and noop.
+        if (paramNamesIdsAndDefaults === null) {
+            return;
         }
+
+        const [paramNames, paramIds, paramDefaults] = paramNamesIdsAndDefaults;
+
+        util.thread.initParams();
+        for (let i = 0; i < paramIds.length; i++) {
+            if (args.hasOwnProperty(paramIds[i])) {
+                util.pushParam(paramNames[i], args[paramIds[i]]);
+            } else {
+                util.pushParam(paramNames[i], paramDefaults[i]);
+            }
+        }
+
+        // util.stackFrame.executed = true;
+        util.startProcedure();
+        // }
     }
 
     argumentReporterStringNumber (args, util) {
