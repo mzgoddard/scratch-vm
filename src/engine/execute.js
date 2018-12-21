@@ -524,7 +524,7 @@ const execute = function (sequencer, thread) {
             // We are waiting for a promise. Stop running this set of operations
             // and continue them later after thawing the reported values.
             break;
-        } else if (thread.status === Thread.STATUS_RUNNING) {
+        } else if (thread.status === STATUS_RUNNING) {
             if (lastOperation) {
                 handleReport(primitiveReportedValue, sequencer, thread, opCached, lastOperation);
             } else {
