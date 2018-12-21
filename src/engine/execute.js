@@ -415,7 +415,7 @@ const execute = function (sequencer, thread) {
 
     // Current block to execute is the one on the top of the stack.
     const currentBlockId = thread.peekStack();
-    const currentStackFrame = thread.peekStackFrame();
+    // const currentStackFrame = thread.peekStackFrame();
 
     const blockCached = BlocksExecuteCache.BlocksThreadExecutePointer.getCached(currentBlockId, runtime, BlockCached);
     // let blockContainer = thread.blockContainer;
