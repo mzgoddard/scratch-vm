@@ -41,6 +41,7 @@ class GraphPointer extends AbstractPointerMixin {
         _this.branches = null;
 
         _this.procedureInitialized = false;
+        _this.procedureParamsNamesIdsDefaults = null;
         _this.procedureDefinition = null;
         _this.procedureInnerBlock = null;
     }
@@ -67,11 +68,23 @@ class GraphPointer extends AbstractPointerMixin {
         const definition = _this.container.getProcedureDefinition(block.mutation.proccode);
         _this.procedureDefinition = exports.getCached(_this.container, definition, _this.warpMode);
         if (_this.procedureDefinition) {
+            _this.procedureParamsNamesIdsDefaults = _this.container.getProcedureParamNamesIdsAndDefaults(block.mutation.proccode);
             _this.incrementPop = IncrementThreadPointer.popProcedure;
+            const definitionBlock = _this.container.getBlock(definition);
+            _this.procedureInnerBlock = _this.container.getBlock(definitionBlock.inputs.custom_block.block);
+        } else {
+            _this.procedureParamsNamesIdsDefaults = null;
+            _this.procedureDefinition = null;
+            _this.procedureInnerBlock = null;
         }
-        const definitionBlock = _this.container.getBlock(definition);
-        _this.procedureInnerBlock = _this.container.getBlock(definitionBlock.inputs.custom_block.block);
         _this.procedureInitialized = true;
+    }
+
+    static getProcedureParamNamesIdsAndDefaults (_this) {
+        if (_this.procedureInitialized === false) {
+            GraphPointer._initProcedure(_this);
+        }
+        return _this.procedureParamsNamesIdsDefaults;
     }
 
     static getProcedureDefinition (_this) {

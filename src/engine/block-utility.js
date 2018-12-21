@@ -146,8 +146,8 @@ class BlockUtility {
      * Start a specified procedure on this thread.
      * @param {string} procedureCode Procedure code for procedure to start.
      */
-    startProcedure (procedureCode) {
-        this.thread.stepToProcedure(procedureCode);
+    startProcedure () {
+        this.thread.stepToProcedure();
     }
 
     /**
@@ -164,8 +164,8 @@ class BlockUtility {
      * @param {string} procedureCode Procedure code for procedure to query.
      * @return {Array.<string>} List of param names for a procedure.
      */
-    getProcedureParamNamesIdsAndDefaults (procedureCode) {
-        return this.thread.blockContainer.getProcedureParamNamesIdsAndDefaults(procedureCode);
+    getProcedureParamNamesIdsAndDefaults () {
+        return this.thread.getProcedureParamNamesIdsAndDefaults();
     }
 
     /**

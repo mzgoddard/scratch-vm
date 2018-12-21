@@ -52,7 +52,7 @@ class Scratch3ProcedureBlocks {
         }
 
         // util.stackFrame.executed = true;
-        util.startProcedure(procedureCode);
+        util.startProcedure();
         // }
     }
 
