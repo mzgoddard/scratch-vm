@@ -60,6 +60,8 @@ class Sequencer {
          */
         this.timer = new Timer();
 
+        this.warpTimer = new Timer();
+
         /**
          * Reference to the runtime owning this sequencer.
          * @type {!Runtime}
@@ -138,10 +140,7 @@ class Sequencer {
                     if (this.runtime.profiler !== null) {
                         this.runtime.profiler.stop();
                     }
-                    if (activeThread.warpTimer !== null) {
-                        releaseTimer(activeThread.warpTimer);
-                        activeThread.warpTimer = null;
-                    }
+                    activeThread.warpTimer = null;
                     if (activeThread.isKilled) {
                         i--; // if the thread is removed from the list (killed), do not increase index
                     }
@@ -201,7 +200,7 @@ class Sequencer {
         if (stackFrame.warpMode) {
             // Initialize warp-mode timer if it hasn't been already.
             // This will start counting the thread toward `Sequencer.WARP_TIME`.
-            thread.warpTimer = createTimer();
+            thread.warpTimer = this.warpTimer;
             thread.warpTimer.start();
         }
 
@@ -299,7 +298,7 @@ class Sequencer {
                     // Initialize warp-mode timer if it hasn't been already.
                     // This will start counting the thread toward
                     // `Sequencer.WARP_TIME`.
-                    thread.warpTimer = createTimer();
+                    thread.warpTimer = this.warpTimer;
                     thread.warpTimer.start();
                 }
             } else {
