@@ -38,6 +38,14 @@ let stepThreadsInnerProfilerId = -1;
  */
 let executeProfilerId = -1;
 
+const {
+    STATUS_RUNNING,
+    STATUS_PROMISE_WAIT,
+    STATUS_YIELD,
+    STATUS_YIELD_TICK,
+    STATUS_DONE
+} = Thread;
+
 const _freeTimers = [];
 
 const createTimer = () => _freeTimers.pop() || new Timer();
@@ -109,18 +117,18 @@ class Sequencer {
                 const activeThread = this.runtime.threads[i];
                 // Check if the thread is done so it is not executed.
                 if (activeThread.pointer === null ||
-                    activeThread.status === Thread.STATUS_DONE) {
+                    activeThread.status === STATUS_DONE) {
                     // Finished with this thread.
                     stoppedThread = true;
                     continue;
                 }
-                if (activeThread.status === Thread.STATUS_YIELD_TICK &&
+                if (activeThread.status === STATUS_YIELD_TICK &&
                     !ranFirstTick) {
                     // Clear single-tick yield from the last call of `stepThreads`.
-                    activeThread.status = Thread.STATUS_RUNNING;
+                    activeThread.status = STATUS_RUNNING;
                 }
-                if (activeThread.status === Thread.STATUS_RUNNING ||
-                    activeThread.status === Thread.STATUS_YIELD) {
+                if (activeThread.status === STATUS_RUNNING ||
+                    activeThread.status === STATUS_YIELD) {
                     // Normal-mode thread: step.
                     if (this.runtime.profiler !== null) {
                         if (stepThreadProfilerId === -1) {
@@ -137,13 +145,13 @@ class Sequencer {
                         i--; // if the thread is removed from the list (killed), do not increase index
                     }
                 }
-                if (activeThread.status === Thread.STATUS_RUNNING) {
+                if (activeThread.status === STATUS_RUNNING) {
                     numActiveThreads++;
                 }
                 // Check if the thread completed while it just stepped to make
                 // sure we remove it before the next iteration of all threads.
                 if (activeThread.pointer === null ||
-                    activeThread.status === Thread.STATUS_DONE) {
+                    activeThread.status === STATUS_DONE) {
                     // Finished with this thread.
                     stoppedThread = true;
                     this.runtime.updateCurrentMSecs();
@@ -163,7 +171,7 @@ class Sequencer {
                 for (let i = 0; i < this.runtime.threads.length; i++) {
                     const thread = this.runtime.threads[i];
                     if (thread.pointer !== null &&
-                        thread.status !== Thread.STATUS_DONE) {
+                        thread.status !== STATUS_DONE) {
                         this.runtime.threads[nextActiveThread] = thread;
                         nextActiveThread++;
                     } else {
@@ -231,12 +239,12 @@ class Sequencer {
                 thread.requestScriptGlowInFrame = true;
             }
 
-            if (thread.status !== Thread.STATUS_RUNNING) {
+            if (thread.status !== STATUS_RUNNING) {
                 // If the thread has yielded or is waiting, yield to other
                 // threads.
-                if (thread.status === Thread.STATUS_YIELD) {
+                if (thread.status === STATUS_YIELD) {
                     // Mark as running for next iteration.
-                    thread.status = Thread.STATUS_RUNNING;
+                    thread.status = STATUS_RUNNING;
 
                     // In warp mode, yielded blocks are re-executed immediately.
                     if (
@@ -247,15 +255,15 @@ class Sequencer {
                     }
                 }
 
-                // } else if (thread.status === Thread.STATUS_PROMISE_WAIT) {
+                // } else if (thread.status === STATUS_PROMISE_WAIT) {
                 //
                 // A promise was returned by the primitive. Yield the thread
                 // until the promise resolves. Promise resolution should reset
-                // thread.status to Thread.STATUS_RUNNING.
+                // thread.status to STATUS_RUNNING.
 
-                // } else if (thread.status === Thread.STATUS_YIELD_TICK) {
+                // } else if (thread.status === STATUS_YIELD_TICK) {
                 //
-                // stepThreads will reset the thread to Thread.STATUS_RUNNING
+                // stepThreads will reset the thread to STATUS_RUNNING
                 return;
             }
 
@@ -336,7 +344,7 @@ class Sequencer {
         thread.stack = [];
         thread.stackFrames = [];
         thread.requestScriptGlowInFrame = false;
-        thread.status = Thread.STATUS_DONE;
+        thread.status = STATUS_DONE;
     }
 }
 

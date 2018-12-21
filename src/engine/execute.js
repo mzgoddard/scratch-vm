@@ -24,6 +24,14 @@ const blockFunctionProfilerFrame = 'blockFunction';
  */
 let blockFunctionProfilerId = -1;
 
+const {
+    STATUS_RUNNING,
+    STATUS_PROMISE_WAIT,
+    STATUS_YIELD,
+    STATUS_YIELD_TICK,
+    STATUS_DONE
+} = Thread;
+
 /**
  * Utility function to determine if a value is a Promise.
  * @param {*} value Value to check for a Promise.
@@ -101,14 +109,14 @@ const handleReport = function (resolvedValue, sequencer, thread, blockCached, la
             }
         }
         // Finished any yields.
-        thread.status = Thread.STATUS_RUNNING;
+        thread.status = STATUS_RUNNING;
     }
 };
 
 const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached, lastOperation) => {
-    if (thread.status === Thread.STATUS_RUNNING) {
+    if (thread.status === STATUS_RUNNING) {
         // Primitive returned a promise; automatically yield thread.
-        thread.status = Thread.STATUS_PROMISE_WAIT;
+        thread.status = STATUS_PROMISE_WAIT;
     }
     // Promise handlers
     primitiveReportedValue.then(resolvedValue => {
@@ -121,7 +129,7 @@ const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached, l
         // Promise rejected: the primitive had some error.
         // Log it and proceed.
         log.warn('Primitive rejected promise: ', rejectionReason);
-        thread.status = Thread.STATUS_RUNNING;
+        thread.status = STATUS_RUNNING;
         thread.popPointer();
     });
 };
@@ -525,7 +533,7 @@ const execute = function (sequencer, thread) {
             // We are waiting for a promise. Stop running this set of operations
             // and continue them later after thawing the reported values.
             break;
-        } else if (thread.status === Thread.STATUS_RUNNING) {
+        } else if (thread.status === STATUS_RUNNING) {
             if (lastOperation) {
                 handleReport(primitiveReportedValue, sequencer, thread, opCached, lastOperation);
             } else {
