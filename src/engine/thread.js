@@ -7,6 +7,7 @@ const {
     Graph: {
         getBranch: getBranchPointer,
         getProcedureDefinition: getProcedureDefinitionPointer,
+        getProcedureParamNamesIdsAndDefaults: getProcedureParamNamesIdsAndDefaults,
         getProcedureInnerBlock
     },
     Increment: {
@@ -452,13 +453,11 @@ class Thread {
      * @param {!string} procedureCode Procedure code of procedure being called.
      * @return {boolean} True if the call appears recursive.
      */
-    isRecursiveCall (procedureCode) {
+    isRecursiveCall (definition) {
         let callCount = 5; // Max number of enclosing procedure calls to examine.
         const sp = this.stackFrames.length;
         for (let i = sp - 1; i >= 0; i--) {
-            const block = getPointerBlock(this.stackFrames[i]);
-            if (block.opcode === 'procedures_call' &&
-                block.mutation.proccode === procedureCode) {
+            if (getProcedureDefinitionPointer(this.stackFrames[i]) === definition) {
                 return true;
             }
             if (--callCount < 0) return false;
@@ -489,15 +488,12 @@ class Thread {
      * Step a procedure.
      * @param {!string} procedureCode Procedure code of procedure to step to.
      */
-    stepToProcedure (procedureCode) {
+    stepToProcedure () {
         const currentBlockId = this.pointer;
-        const definition = getProcedureDefinitionPointer(currentBlockId, procedureCode);
+        const definition = getProcedureDefinitionPointer(currentBlockId);
         if (!definition) {
             return;
         }
-        // Check if the call is recursive.
-        // If so, set the this to yield after pushing.
-        const isRecursive = this.isRecursiveCall(procedureCode);
         // To step to a procedure, we put its definition on the stack.
         // Execution for the this will proceed through the definition hat
         // and on to the main definition of the procedure.
@@ -524,11 +520,21 @@ class Thread {
             }
             if (doWarp) {
                 this.pointer.warpMode = true;
-            } else if (isRecursive) {
-                // In normal-mode this, yield any time we have a recursive call.
-                this.status = this.STATUS_YIELD;
+            } else {
+                // Check if the call is recursive.
+                // If so, set the this to yield after pushing.
+                const isRecursive = this.isRecursiveCall(definition);
+                if (isRecursive) {
+                    // In normal-mode this, yield any time we have a recursive
+                    // call.
+                    this.status = this.STATUS_YIELD;
+                }
             }
         }
+    }
+
+    getProcedureParamNamesIdsAndDefaults () {
+        return getProcedureParamNamesIdsAndDefaults(this.pointer);
     }
 }
 
