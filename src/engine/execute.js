@@ -365,6 +365,14 @@ class BlockCached {
         }
     }
 
+    setArg (value) {
+        this._parentValues[this._parentKey] = value;
+    }
+
+    copyArg () {
+        return this._parentValues[this._parentKey];
+    }
+
     call () {
         return this._blockFunction.call(this._blockFunctionContext, this._argValues, blockUtility);
     }
@@ -423,17 +431,7 @@ const execute = function (sequencer, thread) {
             const opCached = ops.find(op => op.id === oldOpCached);
 
             if (opCached) {
-                const inputName = opCached._parentKey;
-                const argValues = opCached._parentValues;
-
-                if (inputName === 'BROADCAST_INPUT') {
-                    // Something is plugged into the broadcast input.
-                    // Cast it to a string. We don't need an id here.
-                    argValues.BROADCAST_OPTION.id = null;
-                    argValues.BROADCAST_OPTION.name = cast.toString(inputValue);
-                } else {
-                    argValues[inputName] = inputValue;
-                }
+                opCached.setArg(inputValue);
             }
         }
 
@@ -457,17 +455,7 @@ const execute = function (sequencer, thread) {
 
             thread.justReported = null;
 
-            const inputName = opCached._parentKey;
-            const argValues = opCached._parentValues;
-
-            if (inputName === 'BROADCAST_INPUT') {
-                // Something is plugged into the broadcast input.
-                // Cast it to a string. We don't need an id here.
-                argValues.BROADCAST_OPTION.id = null;
-                argValues.BROADCAST_OPTION.name = cast.toString(inputValue);
-            } else {
-                argValues[inputName] = inputValue;
-            }
+            opCached.setArg(inputValue);
 
             i += 1;
         }
@@ -523,18 +511,9 @@ const execute = function (sequencer, thread) {
             thread.justReported = null;
             thread.reporting = ops[i].id;
             thread.reported = ops.slice(0, i).map(reportedCached => {
-                const inputName = reportedCached._parentKey;
-                const reportedValues = reportedCached._parentValues;
-
-                if (inputName === 'BROADCAST_INPUT') {
-                    return {
-                        opCached: reportedCached.id,
-                        inputValue: reportedValues[inputName].BROADCAST_OPTION.name
-                    };
-                }
                 return {
                     opCached: reportedCached.id,
-                    inputValue: reportedValues[inputName]
+                    inputValue: reportedCached.copyArg()
                 };
             });
 
@@ -547,17 +526,7 @@ const execute = function (sequencer, thread) {
             } else {
                 // By definition a block that is not last in the list has a
                 // parent.
-                const inputName = opCached._parentKey;
-                const parentValues = opCached._parentValues;
-
-                if (inputName === 'BROADCAST_INPUT') {
-                    // Something is plugged into the broadcast input.
-                    // Cast it to a string. We don't need an id here.
-                    parentValues.BROADCAST_OPTION.id = null;
-                    parentValues.BROADCAST_OPTION.name = cast.toString(primitiveReportedValue);
-                } else {
-                    parentValues[inputName] = primitiveReportedValue;
-                }
+                opCached.setArg(primitiveReportedValue);
             }
         }
     }
