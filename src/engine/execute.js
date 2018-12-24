@@ -362,6 +362,10 @@ class BlockCached {
             }
         }
 
+        if ('BROADCAST_OPTION' in this._argValues) {
+            this._argValues = new BroadcastInputArgsProxy(this._argValues);
+        }
+
         // The final operation is this block itself. At the top most block is a
         // command block or a block that is being run as a monitor.
         if (!this._isHat && this._isShadowBlock) {
@@ -373,6 +377,28 @@ class BlockCached {
 
     call () {
         return this._blockFunction.call(this._blockFunctionContext, this._argValues, blockUtility);
+    }
+}
+
+class BroadcastInputOption {
+    constructor ({id, name}) {
+        this.id = id;
+        this.name = name;
+    }
+}
+
+class BroadcastInputArgsProxy {
+    constructor (args) {
+        Object.assign(this, args);
+        this.BROADCAST_OPTION = new BroadcastInputOption(this.BROADCAST_OPTION);
+    }
+
+    get BROADCAST_INPUT () {
+        return this.BROADCAST_OPTION.name;
+    }
+
+    set BROADCAST_INPUT (name) {
+        return this.BROADCAST_OPTION.name = cast.toString(name);
     }
 }
 
