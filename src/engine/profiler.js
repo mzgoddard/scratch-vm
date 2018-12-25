@@ -151,6 +151,8 @@ class Profiler {
          * @const {number}
          */
         this.STOP = STOP;
+
+        this.doDraw = true;
     }
 
     /**
