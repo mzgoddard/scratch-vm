@@ -312,14 +312,18 @@ class OpcodeTable extends StatTable {
 }
 
 class ProfilerRun {
-    constructor ({vm, maxRecordedTime, warmUpTime}) {
+    constructor ({vm, maxRecordedTime, warmUpTime, doDraw}) {
         this.vm = vm;
         this.maxRecordedTime = maxRecordedTime;
         this.warmUpTime = warmUpTime;
+        this.doDraw = doDraw;
+        this.start = 0;
 
-        vm.runtime.enableProfiling();
+        this.vm.runtime.disableProfiling();
+        this.vm.runtime.enableProfiling();
         const profiler = this.profiler = vm.runtime.profiler;
-        vm.runtime.profiler = null;
+        profiler.doDraw = doDraw;
+        this.vm.runtime.profiler = null;
 
         const runningStats = this.runningStats = new RunningStats(profiler);
         const runningStatsView = this.runningStatsView = new RunningStatsView({
@@ -352,6 +356,10 @@ class ProfilerRun {
 
         const stepId = profiler.idByName('Runtime._step');
         profiler.onFrame = ({id, selfTime, totalTime, arg}) => {
+            if (Date.now() - this.start > this.maxRecordedTime) {
+                this.vm.runtime.profiler.onFrame = () => {};
+                this.vm.runtime.profiler = null;
+            }
             if (id === stepId) {
                 runningStatsView.render();
             }
@@ -368,11 +376,14 @@ class ProfilerRun {
             type: 'BENCH_MESSAGE_LOADING'
         }, '*');
 
-        this.vm.on('workspaceUpdate', () => {
+        const workspaceUpdate = () => {
+            this.vm.removeListener('workspaceUpdate', workspaceUpdate);
+
             setTimeout(() => {
                 window.parent.postMessage({
                     type: 'BENCH_MESSAGE_WARMING_UP'
                 }, '*');
+                vm.start();
                 this.vm.greenFlag();
             }, 100);
             setTimeout(() => {
@@ -380,10 +391,13 @@ class ProfilerRun {
                     type: 'BENCH_MESSAGE_ACTIVE'
                 }, '*');
                 this.vm.runtime.profiler = this.profiler;
+                this.profiler.id = Math.random();
+                this.start = Date.now();
             }, 100 + this.warmUpTime);
             setTimeout(() => {
                 this.vm.stopAll();
-                clearTimeout(this.vm.runtime._steppingInterval);
+                clearInterval(this.vm.runtime._steppingInterval);
+                this.vm.runtime._steppingInterval = null;
                 this.vm.runtime.profiler = null;
 
                 this.frameTable.render();
@@ -405,7 +419,9 @@ class ProfilerRun {
                     opcodes: this.opcodes.opcodes
                 });
             }, 100 + this.warmUpTime + this.maxRecordedTime);
-        });
+        };
+
+        this.vm.on('workspaceUpdate', workspaceUpdate);
     }
 
     render (json) {
@@ -432,14 +448,16 @@ class ProfilerRun {
     }
 }
 
+let vm;
+
 /**
  * Run the benchmark with given parameters in the location's hash field or
  * using defaults.
  */
-const runBenchmark = function () {
+const initBenchmark = function () {
     // Lots of global variables to make debugging easier
     // Instantiate the VM.
-    const vm = new window.VirtualMachine();
+    vm = new window.VirtualMachine();
     Scratch.vm = vm;
 
     vm.setTurboMode(true);
@@ -459,20 +477,7 @@ const runBenchmark = function () {
 
     let warmUpTime = 4000;
     let maxRecordedTime = 6000;
-
-    if (location.hash) {
-        const split = location.hash.substring(1).split(',');
-        if (split[1] && split[1].length > 0) {
-            warmUpTime = Number(split[1]);
-        }
-        maxRecordedTime = Number(split[2] || '0') || 6000;
-    }
-
-    new ProfilerRun({
-        vm,
-        warmUpTime,
-        maxRecordedTime
-    }).run();
+    let doDraw = true;
 
     // Instantiate the renderer and connect it to the VM.
     const canvas = document.getElementById('scratch-stage');
@@ -545,9 +550,28 @@ const runBenchmark = function () {
             e.preventDefault();
         }
     });
+};
 
-    // Run threads
-    vm.start();
+/**
+ * Run the benchmark with given parameters in the location's hash field or
+ * using defaults.
+ */
+const runBenchmark = function (hash = location.hash) {
+    if (hash) {
+        const split = hash.substring(1).split(',');
+        if (split[1] && split[1].length > 0) {
+            warmUpTime = Number(split[1]);
+        }
+        maxRecordedTime = Number(split[2] || '0') || 6000;
+        doDraw = String(split[3]) !== 'nodraw';
+    }
+
+    new ProfilerRun({
+        vm,
+        warmUpTime,
+        maxRecordedTime,
+        doDraw
+    }).run();
 };
 
 /**
@@ -568,10 +592,27 @@ window.onload = function () {
         const json = JSON.parse(frozen);
         renderBenchmarkData(json);
     } else {
+        if (!vm) {
+            initBenchmark();
+        }
         runBenchmark();
     }
 };
 
 window.onhashchange = function () {
     location.reload();
+};
+
+window.onmessage = function (event) {
+    if (typeof event.data === 'string' && /index\.html#\d+/.test(event.data)) {
+        if (!vm) {
+            initBenchmark();
+        }
+        runBenchmark(event.data.split('#')[1]);
+    }
+
+    console.log(event.data);
+    if (typeof event.data === 'object' && event.data && event.data.type === 'BENCH_MESSAGE_INACTIVE') {
+        clearInterval(vm.runtime._steppingInterval);
+    }
 };

@@ -1746,7 +1746,7 @@ class Runtime extends EventEmitter {
         // Store threads that completed this iteration for testing and other
         // internal purposes.
         this._lastStepDoneThreads = doneThreads;
-        if (this.renderer) {
+        if (this.renderer && (this.profiler === null || this.profiler.doDraw)) {
             // @todo: Only render when this.redrawRequested or clones rendered.
             if (this.profiler !== null) {
                 if (rendererDrawProfilerId === -1) {
@@ -1772,6 +1772,9 @@ class Runtime extends EventEmitter {
 
         if (this.profiler !== null) {
             this.profiler.stop();
+            if (!this.profiler.doDraw) {
+                Promise.resolve().then(() => this._step());
+            }
             this.profiler.reportFrames();
         }
     }
