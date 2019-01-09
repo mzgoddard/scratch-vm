@@ -207,7 +207,7 @@ class StepThreadPointer extends AbstractPointerMixin {
 
     static stepThread (_this, thread) {
         if (_this.stepThreadInitialized === false) {
-            const next = _this.getNext();
+            const next = StepThreadPointer.getNext(_this);
             if (next !== null) {
                 _this._stepThread = _this._stepThreadNext;
             } else if (_this._stepThread === _this._stepThreadNextExecutionContext) {
@@ -254,8 +254,8 @@ exports.Pointer = Pointer;
 exports.IndexPointer = IndexPointer;
 exports.BlockDataPointer = BlockDataPointer;
 exports.ExecuteCachedPointer = ExecuteCachedPointer;
-exports.GraphPointer = GraphPointer;
-exports.StepThreadPointer = StepThreadPointer;
+exports.Graph = GraphPointer;
+exports.Increment = StepThreadPointer;
 
 // Call after the default throwing getCached is assigned for Blocks to replace.
 require('./blocks');
