@@ -220,6 +220,8 @@ class Sequencer {
                 this.runtime.profiler.records.push(this.runtime.profiler.STOP, 0);
             }
 
+            // BlocksThreadCache.Pointer
+            // thread.blockGlowInFrame = currentBlockId.blockId;
             thread.blockGlowInFrame = currentBlockId;
 
             // Blocks should glow when a script is starting,

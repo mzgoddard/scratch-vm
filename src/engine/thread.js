@@ -262,6 +262,7 @@ class Thread {
     initPointer (blockId) {
         this.popPointerMethod.push(this._popInit);
         this.executionContexts.push(null);
+        // this.pointer = _StackFrame.create(BlocksThreadCache.getCached(blockId), false);
         this.pointer = _StackFrame.create(blockId, false);
     }
 
@@ -269,6 +270,7 @@ class Thread {
         let stackFrame = this.pointer;
         let currentBlockId = stackFrame.id;
 
+        // currentBlockId = BlocksThreadCache.Increment.getNext(currentBlockId);
         currentBlockId = this.blockContainer.getNextBlock(currentBlockId);
 
         while (currentBlockId === null) {
@@ -287,6 +289,7 @@ class Thread {
                 return;
             }
 
+            // currentBlockId = BlocksThreadCache.Increment.getNext(currentBlockId);
             currentBlockId = this.blockContainer.getNextBlock(currentBlockId);
         }
 
@@ -362,7 +365,8 @@ class Thread {
     stopThisScript () {
         let blockID = this.peekStack();
         while (blockID !== null) {
-            const block = this.target.blocks.getBlock(blockID);
+            // const block = BlocksThreadCache.Block.getBlock(blockID);
+            const block = this.blocksContainer.getBlock(blockID);
             if (typeof block !== 'undefined' && block.opcode === 'procedures_call') {
                 break;
             }
@@ -488,7 +492,8 @@ class Thread {
      * where execution proceeds from one block to the next.
      */
     goToNextBlock () {
-        const nextBlockId = this.target.blocks.getNextBlock(this.peekStack());
+        // const nextBlockId = BlocksThreadCache.Increment.getNext(this.peekStack());
+        const nextBlockId = this.blocksContainer.getNextBlock(this.peekStack());
         this.reuseStackForNextBlock(nextBlockId);
     }
 
@@ -502,7 +507,8 @@ class Thread {
         let callCount = 5; // Max number of enclosing procedure calls to examine.
         const sp = this.stackFrames.length;
         for (let i = sp - 1; i >= 0; i--) {
-            const block = this.target.blocks.getBlock(this.stackFrames[i].id);
+            // const block = BlocksThreadCache.Block.getBlock(this.stackFrames[i].id);
+            const block = this.blocksContainer.getBlock(this.stackFrames[i].id);
             if (block.opcode === 'procedures_call' &&
                 block.mutation.proccode === procedureCode) {
                 return true;
@@ -522,6 +528,7 @@ class Thread {
             branchNum = 1;
         }
         const currentBlockId = this.peekStack();
+        // const branchId = BlocksThreadCache.Graph.getBranch(currentBlockId, branchNum);
         const branchId = this.blockContainer.getBranch(
             currentBlockId,
             branchNum
@@ -540,6 +547,7 @@ class Thread {
      * @param {!string} procedureCode Procedure code of procedure to step to.
      */
     stepToProcedure (procedureCode) {
+        // const definition = BlocksThreadCache.Graph.getProcedureDefinition(procedureCode);
         const definition = this.blockContainer.getProcedureDefinition(procedureCode);
         if (!definition) {
             return;
@@ -560,7 +568,9 @@ class Thread {
         } else {
             // Look for warp-mode flag on definition, and set the this
             // to warp-mode if needed.
+            // const definitionBlock = BlocksThreadCache.Block.getBlock(definition);
             const definitionBlock = this.blockContainer.getBlock(definition);
+            // const innerBlock = BlocksThreadCache.Graph.getProcedureInnerBlock(definition);
             const innerBlock = this.blockContainer.getBlock(
                 definitionBlock.inputs.custom_block.block);
             let doWarp = false;
