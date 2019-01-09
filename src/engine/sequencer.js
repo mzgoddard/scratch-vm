@@ -311,7 +311,8 @@ class Sequencer {
             branchNum = 1;
         }
         const currentBlockId = thread.peekStack();
-        const branchId = thread.target.blocks.getBranch(
+        // const branchId = BlocksThreadCache.Graph.getBranch(currentBlockId, branchNum);
+        const branchId = thread.blockContainer.getBranch(
             currentBlockId,
             branchNum
         );
@@ -330,7 +331,8 @@ class Sequencer {
      * @param {!string} procedureCode Procedure code of procedure to step to.
      */
     stepToProcedure (thread, procedureCode) {
-        const definition = thread.target.blocks.getProcedureDefinition(procedureCode);
+        // const definition = BlocksThreadCache.Graph.getProcedureDefinition(procedureCode);
+        const definition = thread.blockContainer.getProcedureDefinition(procedureCode);
         if (!definition) {
             return;
         }
@@ -350,8 +352,10 @@ class Sequencer {
         } else {
             // Look for warp-mode flag on definition, and set the thread
             // to warp-mode if needed.
-            const definitionBlock = thread.target.blocks.getBlock(definition);
-            const innerBlock = thread.target.blocks.getBlock(
+            // const definitionBlock = BlocksThreadCache.Graph.getProcedureBlock(definition);
+            const definitionBlock = thread.blockContainer.getBlock(definition);
+            // const innerBlock = BlocksThreadCache.Graph.getProcedureInnerBlock(definition);
+            const innerBlock = thread.blockContainer.getBlock(
                 definitionBlock.inputs.custom_block.block);
             let doWarp = false;
             if (innerBlock && innerBlock.mutation) {
