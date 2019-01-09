@@ -371,6 +371,7 @@ const execute = function (sequencer, thread) {
     const currentStackFrame = thread.peekStackFrame();
 
     let blockContainer = thread.blockContainer;
+    // const blockCached = BlocksThreadCache.Execute.getCached(currentBlockId, BlockCached);
     let blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
     if (blockCached === null) {
         blockContainer = runtime.flyoutBlocks;

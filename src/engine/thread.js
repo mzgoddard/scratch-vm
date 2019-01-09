@@ -359,7 +359,8 @@ class Thread {
     stopThisScript () {
         let blockID = this.peekStack();
         while (blockID !== null) {
-            const block = this.target.blocks.getBlock(blockID);
+            // const block = BlocksThreadCache.Block.getBlock(blockID);
+            const block = this.blocksContainer.getBlock(blockID);
             if (typeof block !== 'undefined' && block.opcode === 'procedures_call') {
                 break;
             }
@@ -475,7 +476,8 @@ class Thread {
      * where execution proceeds from one block to the next.
      */
     goToNextBlock () {
-        const nextBlockId = this.target.blocks.getNextBlock(this.peekStack());
+        // const nextBlockId = BlocksThreadCache.Increment.getNext(this.peekStack());
+        const nextBlockId = this.blocksContainer.getNextBlock(this.peekStack());
         this.reuseStackForNextBlock(nextBlockId);
     }
 
@@ -489,7 +491,8 @@ class Thread {
         let callCount = 5; // Max number of enclosing procedure calls to examine.
         const sp = this.stackFrames.length;
         for (let i = sp - 1; i >= 0; i--) {
-            const block = this.target.blocks.getBlock(this.stackFrames[i].id);
+            // const block = BlocksThreadCache.Block.getBlock(this.stackFrames[i].id);
+            const block = this.blocksContainer.getBlock(this.stackFrames[i].id);
             if (block.opcode === 'procedures_call' &&
                 block.mutation.proccode === procedureCode) {
                 return true;
