@@ -97,7 +97,7 @@ class BenchUtil {
     setFrameLocation (url) {
         if (String(this.frame.contentWindow.location).indexOf(url) !== -1) {
             setTimeout(() => {
-                this.frame.contentWindow.postMessage(url);
+                this.frame.contentWindow.postMessage(url, '*');
             }, 100);
             // this.frame.contentWindow.location.reload();
         } else {
