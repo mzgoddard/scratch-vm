@@ -15,5 +15,20 @@ exports.getCached = function () {
     throw new Error('blocks.js has not initialized BlocksExecuteCache');
 };
 
+exports.BlocksThreadExecutePointer = class ExecuteCachedPointer {
+    static init (_this) {
+        _this.executeInitialized = false;
+        _this.executeCached = null;
+    }
+
+    static getExecuteCached (_this, runtime, CacheType) {
+        if (_this.executeInitialized === false) {
+            _this.executeCached = exports.getCached(runtime, _this.container, _this.blockId, CacheType);
+            _this.executeInitialized = true;
+        }
+        return _this.executeCached;
+    }
+};
+
 // Call after the default throwing getCached is assigned for Blocks to replace.
 require('./blocks');
