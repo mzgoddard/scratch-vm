@@ -1,4 +1,4 @@
-const BlocksExecuteCache = require('./blocks-execute-cache');
+const {BlocksThreadExecutePointer} = require('./blocks-execute-cache');
 
 class AbstractPointerMixin {
     constructor () {
@@ -28,21 +28,6 @@ class BlockDataPointer extends AbstractPointerMixin {
             _this.blockInitialized = true;
         }
         return _this.block;
-    }
-}
-
-class ExecuteCachedPointer extends AbstractPointerMixin {
-    static init (_this) {
-        _this.executeInitialized = false;
-        _this.executeCached = null;
-    }
-
-    static getExecuteCached (_this, runtime, CacheType) {
-        if (_this.executeInitialized === false) {
-            _this.executeCached = BlocksExecuteCache.getCached(runtime, _this.container, _this.blockId, CacheType);
-            _this.executeInitialized = true;
-        }
-        return _this.executeCached;
     }
 }
 
@@ -233,7 +218,7 @@ class Pointer {
 
         IndexPointer.init(this, index);
         BlockDataPointer.init(this);
-        ExecuteCachedPointer.init(this);
+        BlocksThreadExecutePointer.init(this);
         GraphPointer.init(this);
         StepThreadPointer.init(this);
     }
@@ -251,9 +236,8 @@ exports.getCached = function () {
 
 exports.Pointer = Pointer;
 
-exports.IndexPointer = IndexPointer;
-exports.BlockDataPointer = BlockDataPointer;
-exports.ExecuteCachedPointer = ExecuteCachedPointer;
+exports.Index = IndexPointer;
+exports.Block = BlockDataPointer;
 exports.Graph = GraphPointer;
 exports.Increment = StepThreadPointer;
 
