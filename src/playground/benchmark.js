@@ -613,6 +613,8 @@ window.onmessage = function (event) {
 
     console.log(event.data);
     if (typeof event.data === 'object' && event.data && event.data.type === 'BENCH_MESSAGE_INACTIVE') {
-        clearInterval(vm.runtime._steppingInterval);
+        if (vm) {
+            clearInterval(vm.runtime._steppingInterval);
+        }
     }
 };

@@ -66,7 +66,7 @@ class BenchFrameStream extends Emitter {
     }
 
     send (message) {
-        this.frame.postMessage(message);
+        this.frame.contentWindow.postMessage(message, '*');
     }
 }
 
@@ -294,9 +294,9 @@ class BenchResultView {
         this.stats = stats;
         this.dom = document.createElement('tr');
 
-        this.stats.on('change', () => {
-            this.update(this.result);
-        });
+        // this.stats.on('change', () => {
+        //     this.update(this.result);
+        // });
     }
 
     update (result) {
