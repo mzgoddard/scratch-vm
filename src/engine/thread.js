@@ -325,6 +325,13 @@ class Thread {
         this.justReported = typeof value === 'undefined' ? null : value;
     }
 
+    initParams () {
+        const stackFrame = this.peekStackFrame();
+        if (stackFrame.params === null) {
+            stackFrame.params = {};
+        }
+    }
+
     /**
      * Add a parameter to the stack frame.
      * Use when calling a procedure with parameter values.
@@ -333,9 +340,6 @@ class Thread {
      */
     pushParam (paramName, value) {
         const stackFrame = this.peekStackFrame();
-        if (stackFrame.params === null) {
-            stackFrame.params = {};
-        }
         stackFrame.params[paramName] = value;
     }
 
