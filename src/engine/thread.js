@@ -314,6 +314,19 @@ class Thread {
     }
 
     /**
+     * Returns the execution context of the current stack frame or creates one
+     * if it does not yet exist.
+     * @return {object} Execution context
+     */
+    peekExecutionContext () {
+        const frame = this.thread.peekStackFrame();
+        if (frame.executionContext === null) {
+            frame.executionContext = {};
+        }
+        return frame.executionContext;
+    }
+
+    /**
      * Push a reported value to the parent of the current stack frame.
      * @param {*} value Reported value to push.
      */
