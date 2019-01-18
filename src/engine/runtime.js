@@ -1278,16 +1278,16 @@ class Runtime extends EventEmitter {
      * @param {?boolean} opts.updateMonitor true if the script should update a monitor value
      * @return {!Thread} The newly created thread.
      */
-    _pushThread (id, target, opts) {
-        opts = Object.assign({
-            stackClick: false,
-            updateMonitor: false
-        }, opts);
+    _pushThread (id, target, opts = {}) {
+        // opts = Object.assign({
+        //     stackClick: false,
+        //     updateMonitor: false
+        // }, opts);
 
         const thread = new Thread(id);
         thread.target = target;
-        thread.stackClick = opts.stackClick;
-        thread.updateMonitor = opts.updateMonitor;
+        thread.stackClick = opts.stackClick || false;
+        thread.updateMonitor = opts.updateMonitor || false;
         thread.blockContainer = opts.updateMonitor ?
             this.monitorBlocks :
             target.blocks;
