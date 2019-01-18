@@ -466,6 +466,26 @@ const execute = function (sequencer, thread) {
         currentStackFrame.reported = null;
     }
 
+    if (runtime.profiler !== null) {
+        if (blockFunctionProfilerId === -1) {
+            blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
+        }
+
+        if (length === 0) {
+            const opcode = blockCached.opcode;
+            // The method commented below has its code inlined
+            // underneath to reduce the bias recorded for the profiler's
+            // calls in this time sensitive execute function.
+            //
+            // runtime.profiler.start(blockFunctionProfilerId, opcode);
+            runtime.profiler.records.push(
+                runtime.profiler.START, blockFunctionProfilerId, opcode, 0);
+
+            // runtime.profiler.stop(blockFunctionProfilerId);
+            runtime.profiler.records.push(runtime.profiler.STOP, 0);
+        }
+    }
+
     for (; i < length; i++) {
         const lastOperation = i === length - 1;
         const opCached = ops[i];
@@ -492,9 +512,6 @@ const execute = function (sequencer, thread) {
             primitiveReportedValue = blockFunction(argValues, blockUtility);
         } else {
             const opcode = opCached.opcode;
-            if (blockFunctionProfilerId === -1) {
-                blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
-            }
             // The method commented below has its code inlined
             // underneath to reduce the bias recorded for the profiler's
             // calls in this time sensitive execute function.
