@@ -5,6 +5,7 @@ const MonitorRecord = require('./monitor-record');
 const Clone = require('../util/clone');
 const {Map} = require('immutable');
 const BlocksExecuteCache = require('./blocks-execute-cache');
+const BlocksRuntimeCache = require('./blocks-runtime-cache');
 const log = require('../util/log');
 const Variable = require('./variable');
 const getMonitorIdForBlockWithArgs = require('../util/get-monitor-id');
@@ -74,7 +75,9 @@ class Blocks {
              * actively monitored.
              * @type {Array<{blockId: string, target: Target}>}
              */
-            _monitored: null
+            _monitored: null,
+
+            scripts: {}
         };
 
         /**
@@ -1207,6 +1210,37 @@ BlocksExecuteCache.getCached = function (blocks, blockId, CacheType) {
 
     blocks._cache._executeCached[blockId] = cached;
     return cached;
+};
+
+/**
+ * Cache class constructor for runtime. Used to consider what threads should
+ * start based on hat data.
+ * @type {function}
+ */
+const RuntimeScriptCache = BlocksRuntimeCache._RuntimeScriptCache;
+
+/**
+ * Get an array of scripts from a block container prefiltered to match opcode.
+ * @param {Blocks} blocks - Container of blocks
+ * @param {string} opcode - Opcode to filter top blocks by
+ * @returns {Array.<RuntimeScriptCache>} - Array of RuntimeScriptCache cache
+ *   objects
+ */
+BlocksRuntimeCache.getScripts = function (blocks, opcode) {
+    let scripts = blocks._cache.scripts[opcode];
+    if (!scripts) {
+        scripts = blocks._cache.scripts[opcode] = [];
+
+        const allScripts = blocks._scripts;
+        for (let i = 0; i < allScripts.length; i++) {
+            const topBlockId = allScripts[i];
+            const block = blocks.getBlock(topBlockId);
+            if (block.opcode === opcode) {
+                scripts.push(new RuntimeScriptCache(blocks, topBlockId));
+            }
+        }
+    }
+    return scripts;
 };
 
 module.exports = Blocks;
