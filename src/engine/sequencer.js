@@ -159,6 +159,7 @@ class Sequencer {
                         this.runtime.threads[nextActiveThread] = thread;
                         nextActiveThread++;
                     } else {
+                        thread.target.removeThread(thread);
                         doneThreads.push(thread);
                     }
                 }

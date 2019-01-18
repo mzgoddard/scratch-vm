@@ -69,6 +69,24 @@ class Target extends EventEmitter {
          * @type {Object.<string, *>}
          */
         this._edgeActivatedHatValues = {};
+
+        this._threads = [];
+    }
+
+    addThread (thread) {
+        this._threads.push(thread);
+    }
+
+    replaceThread (oldThread, newThread) {
+        this.removeThread(oldThread);
+        this.addThread(newThread);
+    }
+
+    removeThread (thread) {
+        const index = this._threads.indexOf(thread);
+        if (index > -1) {
+            this._threads.splice(index, 1);
+        }
     }
 
     /**
