@@ -88,12 +88,11 @@ module.exports = [
     defaultsDeep({}, base, {
         target: 'web',
         entry: {
+            'benchmark': './src/playground/benchmark',
             'scratch-vm': './src/index.js',
             'vendor': [
                 // FPS counter
                 'stats.js/build/stats.min.js',
-                // Scratch Blocks
-                'scratch-blocks/dist/vertical.js',
                 // Audio
                 'scratch-audio',
                 // Storage
