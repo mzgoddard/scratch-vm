@@ -479,14 +479,63 @@ const runBenchmark = function () {
 
     // Instantiate the renderer and connect it to the VM.
     const canvas = document.getElementById('scratch-stage');
-    const renderer = new window.ScratchRender(canvas);
-    Scratch.renderer = renderer;
-    vm.attachRenderer(renderer);
-    const audioEngine = new window.AudioEngine();
-    vm.attachAudioEngine(audioEngine);
-    /* global ScratchSVGRenderer */
-    vm.attachV2SVGAdapter(new ScratchSVGRenderer.SVGRenderer());
-    vm.attachV2BitmapAdapter(new ScratchSVGRenderer.BitmapAdapter());
+
+    Object.defineProperty(vm.runtime, 'renderer', {
+        get () {
+            if (!this._renderer) {
+                const ScratchRender = require('scratch-render');
+                vm.attachRenderer(new ScratchRender(canvas));
+            }
+            return this._renderer;
+        },
+
+        set (renderer) {
+            this._renderer = renderer;
+            return renderer;
+        }
+    });
+    Object.defineProperty(vm.runtime, 'audioEngine', {
+        get () {
+            if (!this._audioEngine) {
+                const AudioEngine = require('scratch-audio');
+                vm.attachAudioEngine(new AudioEngine());
+            }
+            return this._audioEngine;
+        },
+
+        set (audioEngine) {
+            this._audioEngine = audioEngine;
+            return audioEngine;
+        }
+    });
+    Object.defineProperty(vm.runtime, 'v2SvgAdapter', {
+        get () {
+            if (!this._v2SvgAdapter) {
+                const ScratchSVGRenderer = require('scratch-svg-renderer');
+                vm.attachV2SVGAdapter(new ScratchSVGRenderer.SVGRenderer());
+            }
+            return this._v2SvgAdapter;
+        },
+
+        set (v2SvgAdapter) {
+            this._v2SvgAdapter = v2SvgAdapter;
+            return v2SvgAdapter;
+        }
+    });
+    Object.defineProperty(vm.runtime, 'v2BitmapAdapter', {
+        get () {
+            if (!this._v2BitmapAdapter) {
+                const ScratchSVGRenderer = require('scratch-svg-renderer');
+                vm.attachV2BitmapAdapter(new ScratchSVGRenderer.BitmapAdapter());
+            }
+            return this._v2BitmapAdapter;
+        },
+
+        set (v2BitmapAdapter) {
+            this._v2BitmapAdapter = v2BitmapAdapter;
+            return v2BitmapAdapter;
+        }
+    });
 
     // Feed mouse events as VM I/O events.
     document.addEventListener('mousemove', e => {
