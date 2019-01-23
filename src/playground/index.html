@@ -5,6 +5,12 @@
     <meta charset="utf-8">
     <title>Scratch VM Benchmark</title>
     <link rel="stylesheet" href="./benchmark.css" type="text/css" media="screen">
+    <script>
+        window.ScratchVMLoadStart = Date.now();
+        if (window.performance) {
+            performance.mark('Scratch.LoadStart');
+        }
+    </script>
 </head>
 <body>
   <h2>Scratch VM Benchmark</h2>
@@ -30,7 +36,7 @@
 
   <div class="loading">
     <label>Loading:</label>
-    <span class="loading-complete">0</span> / <span class="loading-total">0</span>
+    <span class="loading-complete">0</span> / <span class="loading-total">0</span> <span class="loading-time">(--ms)</span>
   </div>
   <div class="profile-count-group">
     <div class="profile-count">

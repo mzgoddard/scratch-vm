@@ -1,3 +1,7 @@
+if (window.performance) {
+    performance.mark('Scratch.EvalStart');
+}
+
 const ScratchStorage = require('scratch-storage');
 const VirtualMachine = require('..');
 
@@ -372,6 +376,13 @@ class ProfilerRun {
         }, '*');
 
         this.vm.on('workspaceUpdate', () => {
+            if (window.performance) {
+                performance.mark('Scratch.LoadEnd');
+                performance.measure('Scratch.Load', 'Scratch.LoadStart', 'Scratch.LoadEnd');
+            }
+
+            window.ScratchVMLoadEnd = Date.now();
+
             setTimeout(() => {
                 window.parent.postMessage({
                     type: 'BENCH_MESSAGE_WARMING_UP'
@@ -458,6 +469,8 @@ const runBenchmark = function () {
             .innerText = progress.total;
         document.getElementsByClassName('loading-complete')[0]
             .innerText = progress.complete;
+        document.getElementsByClassName('loading-time')[0]
+            .innerText = `(${(window.ScratchVMLoadEnd || Date.now()) - window.ScratchVMLoadStart}ms)`;
     }).on(storage);
 
     let warmUpTime = 4000;
@@ -627,3 +640,10 @@ window.onload = function () {
 window.onhashchange = function () {
     location.reload();
 };
+
+if (window.performance) {
+    performance.mark('Scratch.EvalEnd');
+    performance.measure('Scratch.Eval', 'Scratch.EvalStart', 'Scratch.EvalEnd');
+}
+
+window.ScratchVMEvalEnd = Date.now();
