@@ -1,4 +1,9 @@
-const TextEncoder = require('text-encoding').TextEncoder;
+const _TextEncoder = (function() {
+    if (typeof TextEncoder === 'undefined') {
+        return require('text-encoding').TextEncoder;
+    }
+    return TextEncoder;
+})();
 const EventEmitter = require('events');
 const JSZip = require('jszip');
 
@@ -912,7 +917,7 @@ class VirtualMachine extends EventEmitter {
         costume.asset = storage.createAsset(
             storage.AssetType.ImageVector,
             costume.dataFormat,
-            (new TextEncoder()).encode(svg),
+            (new _TextEncoder()).encode(svg),
             null,
             true // generate md5
         );
