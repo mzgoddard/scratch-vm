@@ -80,6 +80,11 @@ class LoadingProgress {
             _this.total += 1;
             _this.callback(_this);
             result.then(() => {
+                if (_this.complete === 0 && window.performance) {
+                    performance.mark('Scratch.LoadDataEnd');
+                    performance.measure('Scratch.LoadData', 'Scratch.LoadDataStart', 'Scratch.LoadDataEnd');
+                }
+
                 _this.complete += 1;
                 _this.callback(_this);
             });
@@ -369,6 +374,10 @@ class ProfilerRun {
     }
 
     run () {
+        if (window.performance) {
+            performance.mark('Scratch.LoadDataStart');
+        }
+
         this.projectId = loadProject();
 
         window.parent.postMessage({
