@@ -18,7 +18,7 @@ const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
         }
         // createSVGSkin does the right thing if rotationCenter isn't provided, so it's okay if it's
         // undefined here
-        costume.skinId = runtime.renderer.createSVGSkin(svgString, rotationCenter);
+        costume.skinId = runtime.renderer.createSVGSkin(optVersion && optVersion === 2 && runtime.v2SvgAdapter || svgString, rotationCenter);
         costume.size = runtime.renderer.getSkinSize(costume.skinId);
         // Now we should have a rotationCenter even if we didn't before
         if (!rotationCenter) {
@@ -31,6 +31,18 @@ const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
         resolve(costume);
     });
 };
+
+const getCanvas = (function () {
+    const _canvases =[];
+
+    return Object.assign(function () {
+        return _canvases.pop() || document.createElement('canvas');
+    }, {
+        release (canvas) {
+            _canvases.push(canvas);
+        }
+    });
+}());
 
 /**
  * Return a promise to fetch a bitmap from storage and return it as a canvas
@@ -54,53 +66,80 @@ const fetchBitmapCanvas_ = function (costume, runtime, rotationCenter) {
         return Promise.reject('No V2 Bitmap adapter present.');
     }
 
-    return new Promise((resolve, reject) => {
-        const baseImageElement = new Image();
-        let textImageElement;
-
-        // We need to wait for 2 images total to load. loadedOne will be true when one
-        // is done, and we are just waiting for one more.
-        let loadedOne = false;
-
-        const onError = function () {
-            // eslint-disable-next-line no-use-before-define
-            removeEventListeners();
-            reject('Costume load failed. Asset could not be read.');
-        };
-        const onLoad = function () {
-            if (loadedOne) {
-                // eslint-disable-next-line no-use-before-define
-                removeEventListeners();
-                resolve([baseImageElement, textImageElement]);
-            } else {
-                loadedOne = true;
+    return Promise.all([costume.asset, costume.textLayerAsset].map(asset => (
+        new Promise((resolve, reject) => {
+            if (!asset) {
+                return resolve();
             }
-        };
 
-        const removeEventListeners = function () {
-            baseImageElement.removeEventListener('error', onError);
-            baseImageElement.removeEventListener('load', onLoad);
-            if (textImageElement) {
-                textImageElement.removeEventListener('error', onError);
-                textImageElement.removeEventListener('load', onLoad);
+            if (typeof createImageBitmap !== 'undefined') {
+                return createImageBitmap(new Blob([asset.data], {type: asset.assetType.contentType}))
+                .then(resolve, reject);
+                // .then(bitmap => (console.log(bitmap), bitmap));
             }
-        };
 
-        baseImageElement.addEventListener('load', onLoad);
-        baseImageElement.addEventListener('error', onError);
-        if (costume.textLayerAsset) {
-            textImageElement = new Image();
-            textImageElement.addEventListener('load', onLoad);
-            textImageElement.addEventListener('error', onError);
-            textImageElement.src = costume.textLayerAsset.encodeDataURI();
-        } else {
-            loadedOne = true;
-        }
-        baseImageElement.src = costume.asset.encodeDataURI();
-    }).then(imageElements => {
+            const image = new Image();
+            image.onload = function () {
+                resolve(image);
+                image.onload = null;
+                image.onerror = null;
+            };
+            image.onerror = function () {
+                reject('Costume load failed. Asset could not be read.');
+                image.onload = null;
+                image.onerror = null;
+            };
+            image.src = asset.encodeDataURI();
+        })
+    )))
+    // return new Promise((resolve, reject) => {
+    //     const baseImageElement = new Image();
+    //     let textImageElement;
+    //
+    //     // We need to wait for 2 images total to load. loadedOne will be true when one
+    //     // is done, and we are just waiting for one more.
+    //     let loadedOne = false;
+    //
+    //     const onError = function () {
+    //         // eslint-disable-next-line no-use-before-define
+    //         removeEventListeners();
+    //         reject('Costume load failed. Asset could not be read.');
+    //     };
+    //     const onLoad = function () {
+    //         if (loadedOne) {
+    //             // eslint-disable-next-line no-use-before-define
+    //             removeEventListeners();
+    //             resolve([baseImageElement, textImageElement]);
+    //         } else {
+    //             loadedOne = true;
+    //         }
+    //     };
+    //
+    //     const removeEventListeners = function () {
+    //         baseImageElement.removeEventListener('error', onError);
+    //         baseImageElement.removeEventListener('load', onLoad);
+    //         if (textImageElement) {
+    //             textImageElement.removeEventListener('error', onError);
+    //             textImageElement.removeEventListener('load', onLoad);
+    //         }
+    //     };
+    //
+    //     baseImageElement.addEventListener('load', onLoad);
+    //     baseImageElement.addEventListener('error', onError);
+    //     if (costume.textLayerAsset) {
+    //         textImageElement = new Image();
+    //         textImageElement.addEventListener('load', onLoad);
+    //         textImageElement.addEventListener('error', onError);
+    //         textImageElement.src = costume.textLayerAsset.encodeDataURI();
+    //     } else {
+    //         loadedOne = true;
+    //     }
+    //     baseImageElement.src = costume.asset.encodeDataURI();
+    // })
+    .then(imageElements => {
         const [baseImageElement, textImageElement] = imageElements;
 
-        let canvas = document.createElement('canvas');
+        let canvas = getCanvas();
         const scale = costume.bitmapResolution === 1 ? 2 : 1;
         canvas.width = baseImageElement.width;
         canvas.height = baseImageElement.height;
@@ -134,43 +173,50 @@ const fetchBitmapCanvas_ = function (costume, runtime, rotationCenter) {
             assetMatchesBase: scale === 1 && !textImageElement
         };
     })
-        .catch(() => {
+        .catch(e => {
             // Clean up the text layer properties if it fails to load
             delete costume.textLayerMD5;
             delete costume.textLayerAsset;
         });
 };
 
-const loadBitmap_ = function (costume, runtime, rotationCenter) {
-    return fetchBitmapCanvas_(costume, runtime, rotationCenter).then(fetched => new Promise(resolve => {
-        rotationCenter = fetched.rotationCenter;
+const loadBitmap_ = function (costume, runtime, _rotationCenter) {
+    return fetchBitmapCanvas_(costume, runtime, _rotationCenter)
+        .then(fetched => {
+            const updateCostumeAsset = function (dataURI) {
+                if (!runtime.v2BitmapAdapter) {
+                    // TODO: This might be a bad practice since the returned
+                    // promise isn't acted on. If this is something we should be
+                    // creating a rejected promise for we should also catch it
+                    // somewhere and act on that error (like logging).
+                    //
+                    // Return a rejection to stop executing updateCostumeAsset.
+                    return Promise.reject('No V2 Bitmap adapter present.');
+                }
 
-        const updateCostumeAsset = function (dataURI) {
-            if (!runtime.v2BitmapAdapter) {
-                return Promise.reject('No V2 Bitmap adapter present.');
+                const storage = runtime.storage;
+                costume.asset = storage.createAsset(
+                    storage.AssetType.ImageBitmap,
+                    storage.DataFormat.PNG,
+                    runtime.v2BitmapAdapter.convertDataURIToBinary(dataURI),
+                    null,
+                    true // generate md5
+                );
+                costume.dataFormat = storage.DataFormat.PNG;
+                costume.assetId = costume.asset.assetId;
+                costume.md5 = `${costume.assetId}.${costume.dataFormat}`;
+            };
+
+            if (!fetched.assetMatchesBase) {
+                updateCostumeAsset(fetched.canvas.toDataURL());
             }
 
-            const storage = runtime.storage;
-            costume.asset = storage.createAsset(
-                storage.AssetType.ImageBitmap,
-                storage.DataFormat.PNG,
-                runtime.v2BitmapAdapter.convertDataURIToBinary(dataURI),
-                null,
-                true // generate md5
-            );
-            costume.dataFormat = storage.DataFormat.PNG;
-            costume.assetId = costume.asset.assetId;
-            costume.md5 = `${costume.assetId}.${costume.dataFormat}`;
-        };
-
-        if (!fetched.assetMatchesBase) {
-            updateCostumeAsset(fetched.canvas.toDataURL());
-        }
-        resolve(fetched.canvas);
-    }))
-        .then(canvas => {
+            return fetched;
+        })
+        .then(({canvas, rotationCenter}) => {
             // createBitmapSkin does the right thing if costume.bitmapResolution or rotationCenter are undefined...
             costume.skinId = runtime.renderer.createBitmapSkin(canvas, costume.bitmapResolution, rotationCenter);
+            getCanvas.release(canvas);
             const renderSize = runtime.renderer.getSkinSize(costume.skinId);
             costume.size = [renderSize[0] * 2, renderSize[1] * 2]; // Actual size, since all bitmaps are resolution 2
 
