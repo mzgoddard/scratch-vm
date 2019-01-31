@@ -1,35 +1,70 @@
 const StringUtil = require('../util/string-util');
 const log = require('../util/log');
 
-const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
-    return new Promise(resolve => {
-        let svgString = costume.asset.decodeText();
-        // SVG Renderer load fixes "quirks" associated with Scratch 2 projects
-        if (optVersion && optVersion === 2 && !runtime.v2SvgAdapter) {
-            log.error('No V2 SVG adapter present; SVGs may not render correctly.');
-        } else if (optVersion && optVersion === 2 && runtime.v2SvgAdapter) {
-            runtime.v2SvgAdapter.loadString(svgString, true /* fromVersion2 */);
-            svgString = runtime.v2SvgAdapter.toString();
-            // Put back into storage
-            const storage = runtime.storage;
-            costume.asset.encodeTextData(svgString, storage.DataFormat.SVG, true);
-            costume.assetId = costume.asset.assetId;
-            costume.md5 = `${costume.assetId}.${costume.dataFormat}`;
+const syncUp = (function () {
+    let group;
+    let queue = null;
+    const run = function () {
+        const start = Date.now();
+        // let i = 0;
+        while (queue.length) {
+            const [fn, resolve, reject] = queue.shift();
+            try {
+                resolve(fn());
+            } catch (error) {
+                reject(error);
+            }
+            if (Date.now() - start > 30) {
+                return setTimeout(run, 1);
+            }
+            // console.log(queue.length, Date.now() - start);
+            // if (Date.now() - start > 30) {
+            //     return setTimeout(run, 1);
+            // }
         }
-        // createSVGSkin does the right thing if rotationCenter isn't provided, so it's okay if it's
-        // undefined here
-        costume.skinId = runtime.renderer.createSVGSkin(svgString, rotationCenter);
-        costume.size = runtime.renderer.getSkinSize(costume.skinId);
-        // Now we should have a rotationCenter even if we didn't before
-        if (!rotationCenter) {
-            rotationCenter = runtime.renderer.getSkinRotationCenter(costume.skinId);
-            costume.rotationCenterX = rotationCenter[0];
-            costume.rotationCenterY = rotationCenter[1];
-            costume.bitmapResolution = 1;
-        }
+        queue = null;
+    };
+    return function (fn) {
+        return () => {
+            if (!queue) {
+                queue = [];
+                setTimeout(run, 30);
+            }
+            return new Promise((resolve, reject) => queue.push([fn, resolve, reject]));
+        };
+    };
+}());
 
-        resolve(costume);
-    });
+const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
+    return Promise.resolve()
+        .then(syncUp(() => {
+            let svgString = costume.asset.decodeText();
+            // SVG Renderer load fixes "quirks" associated with Scratch 2 projects
+            if (optVersion && optVersion === 2 && !runtime.v2SvgAdapter) {
+                log.error('No V2 SVG adapter present; SVGs may not render correctly.');
+            } else if (optVersion && optVersion === 2 && runtime.v2SvgAdapter) {
+                runtime.v2SvgAdapter.loadString(svgString, true /* fromVersion2 */);
+                svgString = runtime.v2SvgAdapter.toString();
+                // Put back into storage
+                const storage = runtime.storage;
+                costume.asset.encodeTextData(svgString, storage.DataFormat.SVG, true);
+                costume.assetId = costume.asset.assetId;
+                costume.md5 = `${costume.assetId}.${costume.dataFormat}`;
+            }
+            // createSVGSkin does the right thing if rotationCenter isn't provided, so it's okay if it's
+            // undefined here
+            costume.skinId = runtime.renderer.createSVGSkin(svgString, rotationCenter);
+            costume.size = runtime.renderer.getSkinSize(costume.skinId);
+            // Now we should have a rotationCenter even if we didn't before
+            if (!rotationCenter) {
+                rotationCenter = runtime.renderer.getSkinRotationCenter(costume.skinId);
+                costume.rotationCenterX = rotationCenter[0];
+                costume.rotationCenterY = rotationCenter[1];
+                costume.bitmapResolution = 1;
+            }
+
+            return costume;
+        }));
 };
 
 /**
