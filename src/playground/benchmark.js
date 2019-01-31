@@ -11,10 +11,6 @@ const ScratchStorage = require('scratch-storage');
 const VirtualMachine = require('..');
 const Runtime = require('../engine/runtime');
 
-const ScratchRender = require('scratch-render');
-const AudioEngine = require('scratch-audio');
-const ScratchSVGRenderer = require('scratch-svg-renderer');
-
 const Scratch = window.Scratch = window.Scratch || {};
 
 const ASSET_SERVER = 'https://cdn.assets.scratch.mit.edu/';
@@ -524,13 +520,22 @@ const runBenchmark = function () {
 
     // Instantiate the renderer and connect it to the VM.
     const canvas = document.getElementById('scratch-stage');
-    const renderer = new ScratchRender(canvas);
-    Scratch.renderer = renderer;
-    vm.attachRenderer(renderer);
-    const audioEngine = new AudioEngine();
-    vm.attachAudioEngine(audioEngine);
-    vm.attachV2SVGAdapter(new ScratchSVGRenderer.SVGRenderer());
-    vm.attachV2BitmapAdapter(new ScratchSVGRenderer.BitmapAdapter());
+
+    Promise.resolve()
+        .then(() => Promise.resolve())
+        .then(() => {
+            const ScratchRender = require('scratch-render');
+            const AudioEngine = require('scratch-audio');
+            const ScratchSVGRenderer = require('scratch-svg-renderer');
+
+            const renderer = new ScratchRender(canvas);
+            Scratch.renderer = renderer;
+            vm.attachRenderer(renderer);
+            const audioEngine = new AudioEngine();
+            vm.attachAudioEngine(audioEngine);
+            vm.attachV2SVGAdapter(new ScratchSVGRenderer.SVGRenderer());
+            vm.attachV2BitmapAdapter(new ScratchSVGRenderer.BitmapAdapter());
+        });
 
     // Feed mouse events as VM I/O events.
     document.addEventListener('mousemove', e => {

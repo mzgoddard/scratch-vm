@@ -146,6 +146,24 @@ class VirtualMachine extends EventEmitter {
         this.flyoutBlockListener = this.flyoutBlockListener.bind(this);
         this.monitorBlockListener = this.monitorBlockListener.bind(this);
         this.variableListener = this.variableListener.bind(this);
+
+        Promise.resolve()
+            .then(() => Promise.resolve())
+            .then(() => {
+                this.emit(VirtualMachine.DEFERRED_INITIALIZATION);
+            })
+            .then(() => Promise.resolve())
+            .then(() => {
+                this.emit(VirtualMachine.DEFERRED_INITIALIZED);
+            });
+    }
+
+    static get DEFERRED_INITIALIZATION () {
+        return 'DEFERRED_INITIALIZATION';
+    }
+
+    static get DEFERRED_INITIALIZED () {
+        return 'DEFERRED_INITIALIZED';
     }
 
     /**
