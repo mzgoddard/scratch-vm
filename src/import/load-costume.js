@@ -1,35 +1,96 @@
 const StringUtil = require('../util/string-util');
 const log = require('../util/log');
 
-const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
-    return new Promise(resolve => {
-        let svgString = costume.asset.decodeText();
-        // SVG Renderer load fixes "quirks" associated with Scratch 2 projects
-        if (optVersion && optVersion === 2 && !runtime.v2SvgAdapter) {
-            log.error('No V2 SVG adapter present; SVGs may not render correctly.');
-        } else if (optVersion && optVersion === 2 && runtime.v2SvgAdapter) {
-            runtime.v2SvgAdapter.loadString(svgString, true /* fromVersion2 */);
-            svgString = runtime.v2SvgAdapter.toString();
-            // Put back into storage
-            const storage = runtime.storage;
-            costume.asset.encodeTextData(svgString, storage.DataFormat.SVG, true);
-            costume.assetId = costume.asset.assetId;
-            costume.md5 = `${costume.assetId}.${costume.dataFormat}`;
-        }
-        // createSVGSkin does the right thing if rotationCenter isn't provided, so it's okay if it's
-        // undefined here
-        costume.skinId = runtime.renderer.createSVGSkin(optVersion && optVersion === 2 && runtime.v2SvgAdapter || svgString, rotationCenter);
-        costume.size = runtime.renderer.getSkinSize(costume.skinId);
-        // Now we should have a rotationCenter even if we didn't before
-        if (!rotationCenter) {
-            rotationCenter = runtime.renderer.getSkinRotationCenter(costume.skinId);
-            costume.rotationCenterX = rotationCenter[0];
-            costume.rotationCenterY = rotationCenter[1];
-            costume.bitmapResolution = 1;
+const syncUp = (function () {
+    let group;
+    let queue = null;
+    let start = 0;
+    const run = function () {
+        if (!start) {
+            start = Date.now();
         }
 
-        resolve(costume);
-    });
+        const [fn, value, resolve, reject] = queue.shift();
+        try {
+            resolve(fn(value));
+        } catch (error) {
+            reject(error);
+        }
+
+        if (queue.length) {
+            if (Date.now() - start > 90) {
+                start = 0;
+                return setTimeout(run, 1);
+            }
+
+            Promise.resolve().then(run);
+            return;
+        }
+
+        start = 0;
+        queue = null;
+
+        // const start = Date.now();
+        // // let i = 0;
+        // while (queue.length) {
+        //     const [fn, value, resolve, reject] = queue.shift();
+        //     try {
+        //         resolve(fn(value));
+        //     } catch (error) {
+        //         reject(error);
+        //     }
+        //     if (Date.now() - start > 100) {
+        //         return setTimeout(run, 1);
+        //     }
+        //     // console.log(queue.length, Date.now() - start);
+        //     // if (Date.now() - start > 30) {
+        //     //     return setTimeout(run, 1);
+        //     // }
+        // }
+        // queue = null;
+    };
+    return function (fn = i => i) {
+        // return fn;
+        return (value) => {
+            if (!queue) {
+                queue = [];
+                setTimeout(run, 1);
+            }
+            return new Promise((resolve, reject) => queue.push([fn, value, resolve, reject]));
+        };
+    };
+}());
+
+const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
+    return Promise.resolve()
+        .then(syncUp(() => {
+            let svgString = costume.asset.decodeText();
+            // SVG Renderer load fixes "quirks" associated with Scratch 2 projects
+            if (optVersion && optVersion === 2 && !runtime.v2SvgAdapter) {
+                log.error('No V2 SVG adapter present; SVGs may not render correctly.');
+            } else if (optVersion && optVersion === 2 && runtime.v2SvgAdapter) {
+                runtime.v2SvgAdapter.loadString(svgString, true /* fromVersion2 */);
+                svgString = runtime.v2SvgAdapter.toString();
+                // Put back into storage
+                const storage = runtime.storage;
+                costume.asset.encodeTextData(svgString, storage.DataFormat.SVG, true);
+                costume.assetId = costume.asset.assetId;
+                costume.md5 = `${costume.assetId}.${costume.dataFormat}`;
+            }
+            // createSVGSkin does the right thing if rotationCenter isn't provided, so it's okay if it's
+            // undefined here
+            costume.skinId = runtime.renderer.createSVGSkin(optVersion && optVersion === 2 && runtime.v2SvgAdapter || svgString, rotationCenter);
+            costume.size = runtime.renderer.getSkinSize(costume.skinId);
+            // Now we should have a rotationCenter even if we didn't before
+            if (!rotationCenter) {
+                rotationCenter = runtime.renderer.getSkinRotationCenter(costume.skinId);
+                costume.rotationCenterX = rotationCenter[0];
+                costume.rotationCenterY = rotationCenter[1];
+                costume.bitmapResolution = 1;
+            }
+
+            return costume;
+        }));
 };
 
 const getCanvas = (function () {
@@ -66,18 +127,18 @@ const fetchBitmapCanvas_ = function (costume, runtime, rotationCenter) {
         return Promise.reject('No V2 Bitmap adapter present.');
     }
 
-    return Promise.all([costume.asset, costume.textLayerAsset].map(asset => (
-        new Promise((resolve, reject) => {
-            if (!asset) {
-                return resolve();
-            }
+    return Promise.all([costume.asset, costume.textLayerAsset].map(syncUp(asset => {
+        if (!asset) {
+            return;
+        }
 
-            if (typeof createImageBitmap !== 'undefined') {
-                return createImageBitmap(new Blob([asset.data], {type: asset.assetType.contentType}))
-                .then(resolve, reject);
-                // .then(bitmap => (console.log(bitmap), bitmap));
-            }
+        if (typeof createImageBitmap !== 'undefined') {
+            return createImageBitmap(new Blob([asset.data], {type: asset.assetType.contentType}))
+            // .then(resolve, reject);
+            // .then(bitmap => (console.log(bitmap), bitmap));
+        }
 
+        return new Promise((resolve, reject) => {
             const image = new Image();
             image.onload = function () {
                 resolve(image);
@@ -90,8 +151,8 @@ const fetchBitmapCanvas_ = function (costume, runtime, rotationCenter) {
                 image.onerror = null;
             };
             image.src = asset.encodeDataURI();
-        })
-    )))
+        });
+    })))
     // return new Promise((resolve, reject) => {
     //     const baseImageElement = new Image();
     //     let textImageElement;
@@ -136,7 +197,7 @@ const fetchBitmapCanvas_ = function (costume, runtime, rotationCenter) {
     //     }
     //     baseImageElement.src = costume.asset.encodeDataURI();
     // })
-    .then(imageElements => {
+    .then(syncUp(imageElements => {
         const [baseImageElement, textImageElement] = imageElements;
 
         let canvas = getCanvas();
@@ -172,7 +233,7 @@ const fetchBitmapCanvas_ = function (costume, runtime, rotationCenter) {
             // True if the asset matches the base layer; false if it required adjustment
             assetMatchesBase: scale === 1 && !textImageElement
         };
-    })
+    }))
         .catch(e => {
             // Clean up the text layer properties if it fails to load
             delete costume.textLayerMD5;
