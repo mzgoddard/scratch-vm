@@ -400,7 +400,12 @@ const parseMonitorObject = (object, runtime, targets, extensions) => {
  *   Promise for the loaded targets when ready, or null for unsupported objects.
  */
 const parseScratchAssets = function (object, runtime, extensions, topLevel, zip) {
-    const assets = {costumePromises: [], soundPromises: [], children: []};
+    const assets = {
+        costumePromises: [],
+        soundPromises: [],
+        soundBank: runtime.audioEngine && runtime.audioEngine.createBank(),
+        children: []
+    };
 
     // Costumes from JSON.
     const costumePromises = assets.costumePromises;
@@ -448,7 +453,7 @@ const parseScratchAssets = function (object, runtime, extensions, topLevel, zip)
         }
     }
     // Sounds from JSON
-    const soundPromises = assets.soundPromises;
+    const {soundBank, soundPromises} = assets;
     if (object.hasOwnProperty('sounds')) {
         for (let s = 0; s < object.sounds.length; s++) {
             const soundSource = object.sounds[s];
@@ -477,7 +482,10 @@ const parseScratchAssets = function (object, runtime, extensions, topLevel, zip)
             // the file name of the sound should be the soundID (provided from the project.json)
             // followed by the file ext
             const assetFileName = `${soundSource.soundID}.${ext}`;
-            soundPromises.push(deserializeSound(sound, runtime, zip, assetFileName).then(() => sound));
+            soundPromises.push(
+                deserializeSound(sound, runtime, zip, assetFileName)
+                    .then(() => loadSound(sound, runtime, soundBank))
+            );
         }
     }
 
@@ -537,11 +545,7 @@ const parseScratchObject = function (object, runtime, extensions, topLevel, zip,
     // Costumes from JSON.
     const costumePromises = assets.costumePromises;
     // Sounds from JSON
-    const soundPromises = assets.soundPromises;
-    for (let s = 0; s < soundPromises.length; s++) {
-        soundPromises[s] = soundPromises[s]
-            .then(sound => loadSound(sound, runtime, sprite));
-    }
+    const {soundBank, soundPromises} = assets;
 
     // Create the first clone, and load its run-state from JSON.
     const target = sprite.createClone(topLevel ? StageLayering.BACKGROUND_LAYER : StageLayering.SPRITE_LAYER);
@@ -729,6 +733,8 @@ const parseScratchObject = function (object, runtime, extensions, topLevel, zip,
 
     Promise.all(soundPromises).then(sounds => {
         sprite.sounds = sounds;
+        // Make sure if soundBank is undefined, sprite.soundBank is then null.
+        sprite.soundBank = soundBank || null;
     });
 
     // The stage will have child objects; recursively process them.
