@@ -18,10 +18,10 @@ const syncUp = (function () {
         }
 
         if (queue.length) {
-            if (Date.now() - start > 90) {
-                start = 0;
-                return setTimeout(run, 1);
-            }
+            // if (Date.now() - start > 90) {
+            //     start = 0;
+            //     return setTimeout(run, 1);
+            // }
 
             Promise.resolve().then(run);
             return;
@@ -29,6 +29,11 @@ const syncUp = (function () {
 
         start = 0;
         queue = null;
+
+        if (typeof performance !== 'undefined') {
+            performance.mark('LoadWork.End');
+            performance.measure('LoadWork', 'LoadWork.Start', 'LoadWork.End');
+        }
 
         // const start = Date.now();
         // // let i = 0;
@@ -49,12 +54,34 @@ const syncUp = (function () {
         // }
         // queue = null;
     };
+    let raceResolve;
     return function (fn = i => i) {
         // return fn;
         return (value) => {
             if (!queue) {
+                if (typeof performance !== 'undefined') {
+                    performance.mark('LoadWork.Start');
+                }
                 queue = [];
-                setTimeout(run, 1);
+                Promise.race([
+                    new Promise(resolve => setTimeout(resolve, 1)),
+                    new Promise(resolve => {
+                        const id = setInterval(() => {
+                            clearInterval(id);
+                            resolve();
+                        }, 1);
+                    }),
+                    new Promise(resolve => {
+                        raceResolve = resolve;
+                    }),
+                    new Promise(resolve => setImmediate(resolve)),
+                    new Promise(resolve => requestAnimationFrame(resolve))
+                ])
+                    .then(run);
+                // setTimeout(run, 1);
+            }
+            if (queue.length > 10) {
+                raceResolve();
             }
             return new Promise((resolve, reject) => queue.push([fn, value, resolve, reject]));
         };
