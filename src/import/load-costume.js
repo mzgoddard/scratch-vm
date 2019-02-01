@@ -1,123 +1,134 @@
 const StringUtil = require('../util/string-util');
 const log = require('../util/log');
 
-const syncUp = (function () {
-    let group;
+const globalSoon = (function() {
+    let race;
+    let countResolve;
+    let count;
+
+    return function () {
+        if (race) {
+            return [race, count];
+        }
+
+        const timers = [
+            new Promise(resolve => setTimeout(resolve, 1)),
+            new Promise(resolve => {
+                let i = 0;
+                countResolve = resolve;
+                count = () => {
+                    if (i++ > 10) {
+                        resolve();
+                    }
+                };
+            }),
+            new Promise(resolve => setImmediate(resolve)),
+            new Promise(resolve => requestAnimationFrame(resolve)),
+        ];
+
+        race = Promise.race(timers)
+            // Resolve the count promise in case it hasn't already.
+            .then(countResolve);
+
+        race.then(() => {
+            race = null;
+        });
+
+        return [race, count];
+    };
+}());
+
+const soonFactory = window.soonFactory = function (onceFn) {
+    let race;
+    let count;
+
+    return function () {
+        if (race) {
+            count();
+            return race;
+        }
+
+        const soon = globalSoon();
+        race = soon[0];
+        count = soon[1];
+
+        race.then(() => {
+            race = null;
+            onceFn();
+        });
+
+        return race;
+    };
+};
+
+const syncUp = (globalLoop = (function () {
     let queue = null;
-    let start = 0;
-    const run = function () {
-        if (!start) {
-            start = Date.now();
+    function run () {
+        if (queue && queue.length) {
+            queue.shift()();
         }
 
-        const [fn, value, resolve, reject] = queue.shift();
-        try {
-            resolve(fn(value));
-        } catch (error) {
-            reject(error);
-        }
-
-        if (queue.length) {
-            // if (Date.now() - start > 90) {
-            //     start = 0;
-            //     return setTimeout(run, 1);
-            // }
-
+        if (queue && queue.length) {
             Promise.resolve().then(run);
             return;
         }
 
-        start = 0;
         queue = null;
-
-        if (typeof performance !== 'undefined') {
-            performance.mark('LoadWork.End');
-            performance.measure('LoadWork', 'LoadWork.Start', 'LoadWork.End');
-        }
-
-        // const start = Date.now();
-        // // let i = 0;
-        // while (queue.length) {
-        //     const [fn, value, resolve, reject] = queue.shift();
-        //     try {
-        //         resolve(fn(value));
-        //     } catch (error) {
-        //         reject(error);
-        //     }
-        //     if (Date.now() - start > 100) {
-        //         return setTimeout(run, 1);
-        //     }
-        //     // console.log(queue.length, Date.now() - start);
-        //     // if (Date.now() - start > 30) {
-        //     //     return setTimeout(run, 1);
-        //     // }
-        // }
-        // queue = null;
-    };
-    let raceResolve;
-    return function (fn = i => i) {
-        // return fn;
-        return (value) => {
+    }
+    const soon = soonFactory(run);
+    return {
+        shift (work) {
             if (!queue) {
-                if (typeof performance !== 'undefined') {
-                    performance.mark('LoadWork.Start');
-                }
                 queue = [];
-                Promise.race([
-                    new Promise(resolve => setTimeout(resolve, 1)),
-                    new Promise(resolve => {
-                        const id = setInterval(() => {
-                            clearInterval(id);
-                            resolve();
-                        }, 1);
-                    }),
-                    new Promise(resolve => {
-                        raceResolve = resolve;
-                    }),
-                    new Promise(resolve => setImmediate(resolve)),
-                    new Promise(resolve => requestAnimationFrame(resolve))
-                ])
-                    .then(run);
-                // setTimeout(run, 1);
             }
-            if (queue.length > 10) {
-                raceResolve();
+            soon();
+            queue.unshift(work);
+        },
+
+        queue (work) {
+            if (!queue) {
+                queue = [];
             }
-            return new Promise((resolve, reject) => queue.push([fn, value, resolve, reject]));
-        };
+            soon();
+            queue.push(work);
+        }
     };
-}());
+}()));
 
 const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
     return Promise.resolve()
-        .then(syncUp(() => {
-            let svgString = costume.asset.decodeText();
-            // SVG Renderer load fixes "quirks" associated with Scratch 2 projects
-            if (optVersion && optVersion === 2 && !runtime.v2SvgAdapter) {
-                log.error('No V2 SVG adapter present; SVGs may not render correctly.');
-            } else if (optVersion && optVersion === 2 && runtime.v2SvgAdapter) {
-                runtime.v2SvgAdapter.loadString(svgString, true /* fromVersion2 */);
-                svgString = runtime.v2SvgAdapter.toString();
-                // Put back into storage
-                const storage = runtime.storage;
-                costume.asset.encodeTextData(svgString, storage.DataFormat.SVG, true);
-                costume.assetId = costume.asset.assetId;
-                costume.md5 = `${costume.assetId}.${costume.dataFormat}`;
-            }
-            // createSVGSkin does the right thing if rotationCenter isn't provided, so it's okay if it's
-            // undefined here
-            costume.skinId = runtime.renderer.createSVGSkin(optVersion && optVersion === 2 && runtime.v2SvgAdapter || svgString, rotationCenter);
-            costume.size = runtime.renderer.getSkinSize(costume.skinId);
-            // Now we should have a rotationCenter even if we didn't before
-            if (!rotationCenter) {
-                rotationCenter = runtime.renderer.getSkinRotationCenter(costume.skinId);
-                costume.rotationCenterX = rotationCenter[0];
-                costume.rotationCenterY = rotationCenter[1];
-                costume.bitmapResolution = 1;
-            }
+        .then(() => new Promise((resolve, reject) => syncUp.shift(() => {
+            try {
+                let svgString = costume.asset.decodeText();
+                // SVG Renderer load fixes "quirks" associated with Scratch 2 projects
+                if (optVersion && optVersion === 2 && !runtime.v2SvgAdapter) {
+                    log.error('No V2 SVG adapter present; SVGs may not render correctly.');
+                } else if (optVersion && optVersion === 2 && runtime.v2SvgAdapter) {
+                    runtime.v2SvgAdapter.loadString(svgString, true /* fromVersion2 */);
+                    svgString = runtime.v2SvgAdapter.toString();
+                    // Put back into storage
+                    const storage = runtime.storage;
+                    costume.asset.encodeTextData(svgString, storage.DataFormat.SVG, true);
+                    costume.assetId = costume.asset.assetId;
+                    costume.md5 = `${costume.assetId}.${costume.dataFormat}`;
+                }
+                // createSVGSkin does the right thing if rotationCenter isn't provided, so it's okay if it's
+                // undefined here
+                costume.skinId = runtime.renderer.createSVGSkin(optVersion && optVersion === 2 && runtime.v2SvgAdapter || svgString, rotationCenter);
+                costume.size = runtime.renderer.getSkinSize(costume.skinId);
+                // Now we should have a rotationCenter even if we didn't before
+                if (!rotationCenter) {
+                    rotationCenter = runtime.renderer.getSkinRotationCenter(costume.skinId);
+                    costume.rotationCenterX = rotationCenter[0];
+                    costume.rotationCenterY = rotationCenter[1];
+                    costume.bitmapResolution = 1;
+                }
 
-            return costume;
-        }));
+                resolve(costume);
+            } catch (error) {
+                reject(error);
+            }
+        })));
 };
 
 const getCanvas = (function () {
@@ -154,18 +165,17 @@ const fetchBitmapCanvas_ = function (costume, runtime, rotationCenter) {
         return Promise.reject('No V2 Bitmap adapter present.');
     }
 
-    return Promise.all([costume.asset, costume.textLayerAsset].map(syncUp(asset => {
-        if (!asset) {
-            return;
-        }
+    return Promise.all([costume.asset, costume.textLayerAsset].map(asset => (
+        new Promise((resolve, reject) => syncUp.queue(() => {
+            if (!asset) {
+                return resolve();
+            }
 
-        if (typeof createImageBitmap !== 'undefined') {
-            return createImageBitmap(new Blob([asset.data], {type: asset.assetType.contentType}))
-            // .then(resolve, reject);
-            // .then(bitmap => (console.log(bitmap), bitmap));
-        }
+            if (typeof createImageBitmap !== 'undefined') {
+                return createImageBitmap(new Blob([asset.data], {type: asset.assetType.contentType}))
+                    .then(resolve, reject);
+            }
 
-        return new Promise((resolve, reject) => {
             const image = new Image();
             image.onload = function () {
                 resolve(image);
@@ -178,89 +188,49 @@ const fetchBitmapCanvas_ = function (costume, runtime, rotationCenter) {
                 image.onerror = null;
             };
             image.src = asset.encodeDataURI();
-        });
-    })))
-    // return new Promise((resolve, reject) => {
-    //     const baseImageElement = new Image();
-    //     let textImageElement;
-    //
-    //     // We need to wait for 2 images total to load. loadedOne will be true when one
-    //     // is done, and we are just waiting for one more.
-    //     let loadedOne = false;
-    //
-    //     const onError = function () {
-    //         // eslint-disable-next-line no-use-before-define
-    //         removeEventListeners();
-    //         reject('Costume load failed. Asset could not be read.');
-    //     };
-    //     const onLoad = function () {
-    //         if (loadedOne) {
-    //             // eslint-disable-next-line no-use-before-define
-    //             removeEventListeners();
-    //             resolve([baseImageElement, textImageElement]);
-    //         } else {
-    //             loadedOne = true;
-    //         }
-    //     };
-    //
-    //     const removeEventListeners = function () {
-    //         baseImageElement.removeEventListener('error', onError);
-    //         baseImageElement.removeEventListener('load', onLoad);
-    //         if (textImageElement) {
-    //             textImageElement.removeEventListener('error', onError);
-    //             textImageElement.removeEventListener('load', onLoad);
-    //         }
-    //     };
-    //
-    //     baseImageElement.addEventListener('load', onLoad);
-    //     baseImageElement.addEventListener('error', onError);
-    //     if (costume.textLayerAsset) {
-    //         textImageElement = new Image();
-    //         textImageElement.addEventListener('load', onLoad);
-    //         textImageElement.addEventListener('error', onError);
-    //         textImageElement.src = costume.textLayerAsset.encodeDataURI();
-    //     } else {
-    //         loadedOne = true;
-    //     }
-    //     baseImageElement.src = costume.asset.encodeDataURI();
-    // })
-    .then(syncUp(imageElements => {
-        const [baseImageElement, textImageElement] = imageElements;
+        }))
+    )))
+        .then(imageElements => new Promise((resolve, reject) => syncUp.queue(() => {
+            try {
+                const [baseImageElement, textImageElement] = imageElements;
 
-        let canvas = getCanvas();
-        const scale = costume.bitmapResolution === 1 ? 2 : 1;
-        canvas.width = baseImageElement.width;
-        canvas.height = baseImageElement.height;
+                let canvas = getCanvas();
+                const scale = costume.bitmapResolution === 1 ? 2 : 1;
+                canvas.width = baseImageElement.width;
+                canvas.height = baseImageElement.height;
 
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(baseImageElement, 0, 0);
-        if (textImageElement) {
-            ctx.drawImage(textImageElement, 0, 0);
-        }
-        if (scale !== 1) {
-            canvas = runtime.v2BitmapAdapter.resize(canvas, canvas.width * scale, canvas.height * scale);
-        }
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(baseImageElement, 0, 0);
+                if (textImageElement) {
+                    ctx.drawImage(textImageElement, 0, 0);
+                }
+                if (scale !== 1) {
+                    canvas = runtime.v2BitmapAdapter.resize(canvas, canvas.width * scale, canvas.height * scale);
+                }
 
-        // By scaling, we've converted it to bitmap resolution 2
-        if (rotationCenter) {
-            rotationCenter[0] = rotationCenter[0] * scale;
-            rotationCenter[1] = rotationCenter[1] * scale;
-            costume.rotationCenterX = rotationCenter[0];
-            costume.rotationCenterY = rotationCenter[1];
-        }
-        costume.bitmapResolution = 2;
+                // By scaling, we've converted it to bitmap resolution 2
+                if (rotationCenter) {
+                    rotationCenter[0] = rotationCenter[0] * scale;
+                    rotationCenter[1] = rotationCenter[1] * scale;
+                    costume.rotationCenterX = rotationCenter[0];
+                    costume.rotationCenterY = rotationCenter[1];
+                }
+                costume.bitmapResolution = 2;
 
-        // Clean up the costume object
-        delete costume.textLayerMD5;
-        delete costume.textLayerAsset;
+                // Clean up the costume object
+                delete costume.textLayerMD5;
+                delete costume.textLayerAsset;
 
-        return {
-            canvas: canvas,
-            rotationCenter: rotationCenter,
-            // True if the asset matches the base layer; false if it required adjustment
-            assetMatchesBase: scale === 1 && !textImageElement
-        };
-    }))
+                resolve({
+                    canvas: canvas,
+                    rotationCenter: rotationCenter,
+                    // True if the asset matches the base layer; false if it required adjustment
+                    assetMatchesBase: scale === 1 && !textImageElement
+                });
+            } catch (error) {
+                reject(error);
+            }
+        })))
         .catch(e => {
             // Clean up the text layer properties if it fails to load
             delete costume.textLayerMD5;
