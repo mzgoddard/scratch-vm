@@ -163,6 +163,10 @@ class LoadingProgress {
             const result = _load.call(this, ...args);
 
             if (_this.dataLoaded) {
+                if (_this.contentTotal === 0 && window.performance) {
+                    performance.mark('Scratch.DownloadStart');
+                }
+
                 _this.contentTotal += 1;
             }
             _this.sampleMemory();
@@ -188,7 +192,7 @@ class LoadingProgress {
                         // How long did it take to download the html, js, and
                         // all the project assets?
                         performance.mark('Scratch.DownloadEnd');
-                        performance.measure('Scratch.Download', 'Scratch.LoadStart', 'Scratch.DownloadEnd');
+                        performance.measure('Scratch.Download', 'Scratch.DownloadStart', 'Scratch.DownloadEnd');
                     }
 
                     window.ScratchVMDownloadEnd = Date.now();
