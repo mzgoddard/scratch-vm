@@ -73,11 +73,16 @@ const setShareLink = function (json) {
         .href = `suite.html`;
 };
 
-const loadProject = function () {
+const getProjectId = function () {
     let id = location.hash.substring(1).split(',')[0];
     if (id.length < 1 || !isFinite(id)) {
         id = projectInput.value;
     }
+    return id;
+};
+
+const loadProject = function () {
+    const id = getProjectId();
     Scratch.vm.downloadProjectId(id);
     return id;
 };
@@ -146,7 +151,7 @@ class LoadingProgress {
         });
     }
 
-    on (storage, vm) {
+    bindStorage (storage) {
         const _this = this;
 
         this.attachHydrateMiddleware(costumeMiddleware);
@@ -203,6 +208,10 @@ class LoadingProgress {
             });
             return result;
         };
+    }
+
+    bindVM (vm) {
+        const _this = this;
         vm.runtime.on(Runtime.PROJECT_LOADED, () => {
             // Currently LoadingProgress tracks when the data has been loaded
             // and not when the data has been decoded. It may be difficult to
@@ -505,7 +514,7 @@ class ProfilerRun {
     }
 
     run () {
-        this.projectId = loadProject();
+        this.projectId = getProjectId();
 
         window.parent.postMessage({
             type: 'BENCH_MESSAGE_LOADING'
@@ -580,20 +589,7 @@ class ProfilerRun {
  * using defaults.
  */
 const runBenchmark = function () {
-    // Lots of global variables to make debugging easier
-    // Instantiate the VM.
-    const vm = new VirtualMachine();
-    Scratch.vm = vm;
-
-    vm.setTurboMode(true);
-
-    const storage = new ScratchStorage();
-    const AssetType = storage.AssetType;
-    storage.addWebSource([AssetType.Project], getProjectUrl);
-    storage.addWebSource([AssetType.ImageVector, AssetType.ImageBitmap, AssetType.Sound], getAssetUrl);
-    vm.attachStorage(storage);
-
-    new LoadingProgress(progress => {
+    const loadingProgress = new LoadingProgress(progress => {
         document.getElementsByClassName('loading-total')[0]
             .childNodes[0].nodeValue = 1;
         document.getElementsByClassName('loading-complete')[0]
@@ -621,7 +617,28 @@ const runBenchmark = function () {
             document.getElementsByClassName('loading-memory-peak')[0]
                 .childNodes[0].nodeValue = (progress.memoryPeak / 1000000).toFixed(0) + 'MB';
         }
-    }).on(storage, vm);
+    });
+
+    const storage = new ScratchStorage();
+    const AssetType = storage.AssetType;
+    storage.addWebStore([AssetType.Project], getProjectUrl);
+    storage.addWebStore([AssetType.ImageVector, AssetType.ImageBitmap, AssetType.Sound], getAssetUrl);
+    loadingProgress.bindStorage(storage);
+
+    const projectPromise = storage.load(storage.AssetType.Project, getProjectId());
+
+    let vm;
+
+    // Lots of global variables to make debugging easier
+    // Instantiate the VM.
+    vm = new VirtualMachine();
+    Scratch.vm = vm;
+
+    vm.setTurboMode(true);
+
+    vm.attachStorage(storage);
+
+    loadingProgress.bindVM(vm);
 
     let warmUpTime = 4000;
     let maxRecordedTime = 6000;
@@ -649,6 +666,14 @@ const runBenchmark = function () {
     vm.attachAudioEngine(audioEngine);
     vm.attachV2SVGAdapter(new ScratchSVGRenderer.SVGRenderer());
     vm.attachV2BitmapAdapter(new ScratchSVGRenderer.BitmapAdapter());
+
+    projectPromise
+    .then(projectAsset => {
+        vm.loadProject(projectAsset.data);
+
+        // Run threads
+        vm.start();
+    });
 
     // Feed mouse events as VM I/O events.
     document.addEventListener('mousemove', e => {
@@ -710,9 +735,6 @@ const runBenchmark = function () {
             e.preventDefault();
         }
     });
-
-    // Run threads
-    vm.start();
 };
 
 /**
