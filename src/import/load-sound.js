@@ -11,7 +11,7 @@ const log = require('../util/log');
  * @param {Sprite} sprite - Scratch sprite to add sounds to.
  * @returns {!Promise} - a promise which will resolve to the sound when ready.
  */
-const loadSoundFromAsset = function (sound, soundAsset, runtime, sprite) {
+const loadSoundFromAsset = function (sound, soundAsset, runtime, soundBank) {
     sound.assetId = soundAsset.assetId;
     if (!runtime.audioEngine) {
         log.error('No audio engine present; cannot load sound asset: ', sound.md5);
@@ -30,8 +30,8 @@ const loadSoundFromAsset = function (sound, soundAsset, runtime, sprite) {
         sound.rate = soundBuffer.sampleRate;
         sound.sampleCount = soundBuffer.length;
 
-        if (sprite.soundBank !== null) {
-            sprite.soundBank.addSoundPlayer(soundPlayer);
+        if (soundBank !== null) {
+            soundBank.addSoundPlayer(soundPlayer);
         }
 
         return sound;
