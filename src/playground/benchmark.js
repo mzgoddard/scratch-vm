@@ -44,8 +44,6 @@ const soundMiddleware = new LoadingMiddleware();
 importLoadSound.loadSound = soundMiddleware.install(importLoadSound, importLoadSound.loadSound);
 
 const ScratchStorage = require('scratch-storage');
-const VirtualMachine = require('..');
-const Runtime = require('../engine/runtime');
 
 const Scratch = window.Scratch = window.Scratch || {};
 
@@ -207,6 +205,8 @@ class LoadingProgress {
     }
 
     bindVM (vm) {
+        const Runtime = require('../engine/runtime');
+
         const _this = this;
         vm.runtime.on(Runtime.PROJECT_LOADED, () => {
             // Currently LoadingProgress tracks when the data has been loaded
@@ -627,6 +627,7 @@ const runBenchmark = function () {
 
     // Lots of global variables to make debugging easier
     // Instantiate the VM.
+    const VirtualMachine = require('..');
     vm = new VirtualMachine();
     Scratch.vm = vm;
 
@@ -782,6 +783,7 @@ const runBenchmark = function () {
  * @param {object} json data from a previous benchmark run.
  */
 const renderBenchmarkData = function (json) {
+    const VirtualMachine = require('..');
     const vm = new VirtualMachine();
     new ProfilerRun({vm}).render(json);
     setShareLink(json);
