@@ -47,10 +47,6 @@ const ScratchStorage = require('scratch-storage');
 const VirtualMachine = require('..');
 const Runtime = require('../engine/runtime');
 
-const ScratchRender = require('scratch-render');
-const AudioEngine = require('scratch-audio');
-const ScratchSVGRenderer = require('scratch-svg-renderer');
-
 const Scratch = window.Scratch = window.Scratch || {};
 
 const ASSET_SERVER = 'https://cdn.assets.scratch.mit.edu/';
@@ -659,13 +655,57 @@ const runBenchmark = function () {
 
     // Instantiate the renderer and connect it to the VM.
     const canvas = document.getElementById('scratch-stage');
-    const renderer = new ScratchRender(canvas);
-    Scratch.renderer = renderer;
-    vm.attachRenderer(renderer);
-    const audioEngine = new AudioEngine();
-    vm.attachAudioEngine(audioEngine);
-    vm.attachV2SVGAdapter(new ScratchSVGRenderer.SVGRenderer());
-    vm.attachV2BitmapAdapter(new ScratchSVGRenderer.BitmapAdapter());
+
+    Object.defineProperties(vm.runtime, {
+        renderer: {
+            get() {
+                if (!this._renderer) {
+                    const ScratchRender = require('scratch-render');
+                    this.attachRenderer(new ScratchRender(canvas));
+                }
+                return this._renderer;
+            },
+            set(value) {
+                this._renderer = value;
+            }
+        },
+        audioEngine: {
+            get() {
+                if (!this._audioEngine) {
+                    const AudioEngine = require('scratch-audio');
+                    this.attachAudioEngine(new AudioEngine());
+                }
+                return this._audioEngine;
+            },
+            set(value) {
+                this._audioEngine = value;
+            }
+        },
+        v2SvgAdapter: {
+            get() {
+                if (!this._v2SvgAdapter) {
+                    const ScratchSVGRenderer = require('scratch-svg-renderer');
+                    this.attachV2SVGAdapter(new ScratchSVGRenderer.SVGRenderer());
+                }
+                return this._v2SvgAdapter;
+            },
+            set(value) {
+                this._v2SvgAdapter = value;
+            }
+        },
+        v2BitmapAdapter: {
+            get() {
+                if (!this._v2BitmapAdapter) {
+                    const ScratchSVGRenderer = require('scratch-svg-renderer');
+                    this.attachV2BitmapAdapter(new ScratchSVGRenderer.BitmapAdapter());
+                }
+                return this._v2BitmapAdapter;
+            },
+            set(value) {
+                this._v2BitmapAdapter = value;
+            }
+        }
+    });
 
     projectPromise
     .then(projectAsset => {
