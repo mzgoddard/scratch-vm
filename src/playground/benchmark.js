@@ -183,7 +183,7 @@ class LoadingProgress {
                     _this.contentComplete += 1;
                 }
 
-                if (_this.contentComplete === _this.contentTotal) {
+                if (_this.contentComplete && _this.contentComplete === _this.contentTotal) {
                     if (window.performance) {
                         // How long did it take to download the html, js, and
                         // all the project assets?
