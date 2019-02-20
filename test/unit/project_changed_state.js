@@ -48,6 +48,9 @@ test('Adding a sprite (from sprite3) should emit a project changed event', t => 
     vm.addSprite(sprite3).then(() => {
         t.equal(projectChanged, true);
         t.end();
+    }).catch(e => {
+        t.fail(e);
+        t.end();
     });
 });
 
