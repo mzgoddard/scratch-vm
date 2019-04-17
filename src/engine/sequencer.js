@@ -180,7 +180,7 @@ class Sequencer {
                 this.runtime.threads.length = nextActiveThread;
             }
         }
-
+        // console.log(this.runtime.threads.some(thread => thread.stackFrames.some(stackFrame => !stackFrame)));
         return doneThreads;
     }
 
@@ -201,6 +201,10 @@ class Sequencer {
             // This will start counting the thread toward `Sequencer.WARP_TIME`.
             thread.warpTimer = this.warpTimer;
             thread.warpTimer.start();
+        }
+
+        if (thread.peekStack() === null) {
+            debugger;
         }
 
         // Save the current block ID to notice if we did control flow.
@@ -264,7 +268,41 @@ class Sequencer {
             }
 
             let next = thread.peekStack();
-            if (next === stackFrame || !stackFrame.isLoop && next === null) {
+            if (!stackFrame.isLoop && next === null) {
+                // A non-loop control flow into an empty branch has happened.
+                thread.pointer = thread.stackFrames.pop() || null;
+                if (thread.pointer === null) {
+                    return;
+                }
+                thread.incrementPointer();
+                next = thread.pointer;
+                if (next === null) {
+                    return;
+                }
+                if (next.isLoop && (
+                    !next.warpMode ||
+                    thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
+                )) {
+                    // The current level of the stack is marked as a loop.
+                    // Return to yield for the frame/tick in general.
+                    // Unless we're in warp mode - then only return if the
+                    // warp timer is up.
+
+                    // Don't do anything to the stack, since loops need
+                    // to be re-executed.
+
+                    // Blocks should glow when a script is starting,
+                    // not after it has finished (see #1404).
+                    // Only blocks in blockContainers that don't forceNoGlow
+                    // should request a glow.
+                    if (!thread.blockContainer.forceNoGlow) {
+                        thread.blockGlowInFrame = next.blockId;
+                        thread.requestScriptGlowInFrame = true;
+                    }
+                    return;
+                }
+                stackFrame = next;
+            } else if (next === stackFrame) {
                 // No control flow has happened or a non-loop control flow into
                 // an empty branch has happened.
                 thread.incrementPointer();

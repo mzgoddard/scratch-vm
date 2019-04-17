@@ -322,7 +322,7 @@ class Thread {
     }
 
     popPointer () {
-        incrementPopPointer(_this);
+        incrementPopPointer(this);
     }
 
     /**
@@ -406,15 +406,15 @@ class Thread {
         this.params = {};
     }
 
-    /**
-     * Initialize procedure parameters on this stack frame.
-     */
-    initParams () {
-        const stackFrame = this.peekStackFrame();
-        if (stackFrame.params === null) {
-            stackFrame.params = {};
-        }
-    }
+    // /**
+    //  * Initialize procedure parameters on this stack frame.
+    //  */
+    // initParams () {
+    //     const stackFrame = this.peekStackFrame();
+    //     if (stackFrame.params === null) {
+    //         stackFrame.params = {};
+    //     }
+    // }
 
     /**
      * Add a parameter to the stack frame.
@@ -513,7 +513,7 @@ class Thread {
         // In known warp-mode thiss, only yield when time is up.
         if (currentBlockId.warpMode &&
             this.warpTimer.timeElapsed() > Thread.WARP_TIME) {
-            this.status = this.STATUS_YIELD;
+            this.status = Thread.STATUS_YIELD;
         } else {
             // Look for warp-mode flag on definition, and set the this
             // to warp-mode if needed.
@@ -537,7 +537,7 @@ class Thread {
                 if (isRecursive) {
                     // In normal-mode this, yield any time we have a recursive
                     // call.
-                    this.status = this.STATUS_YIELD;
+                    this.status = Thread.STATUS_YIELD;
                 }
             }
         }
