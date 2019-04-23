@@ -12,7 +12,7 @@ const _stackFrameFreeList = [];
  * @private
  */
 class _StackFrame {
-    constructor (warpMode) {
+    constructor (warpMode, endOfStack) {
         /**
          * Whether this level of the stack is a loop.
          * @type {boolean}
@@ -61,6 +61,8 @@ class _StackFrame {
          * @type {Object}
          */
         this.executionContext = null;
+
+        this.endOfStackBlockId = endOfStack;
     }
 
     /**
@@ -70,13 +72,14 @@ class _StackFrame {
      */
     reset () {
 
-        this.isLoop = false;
-        this.warpMode = false;
-        this.justReported = null;
-        this.reported = null;
-        this.waitingReporter = null;
+        // this.isLoop = false;
+        // this.warpMode = false;
+        // this.justReported = null;
+        // this.reported = null;
+        // this.waitingReporter = null;
         this.params = null;
         this.executionContext = null;
+        // this.endOfStackBlockId = null;
 
         return this;
     }
@@ -86,9 +89,12 @@ class _StackFrame {
      * @param {?boolean} warpMode defaults to current warpMode
      * @returns {_StackFrame} this
      */
-    reuse (warpMode = this.warpMode) {
+    reuse (
+        // warpMode = this.warpMode, endOfStack = this.endOfStackBlockId
+    ) {
         this.reset();
-        this.warpMode = Boolean(warpMode);
+        // this.warpMode = Boolean(warpMode);
+        // this.endOfStackBlockId = endOfStack;
         return this;
     }
 
@@ -97,13 +103,14 @@ class _StackFrame {
      * @param {boolean} warpMode Enable warpMode on this frame.
      * @returns {_StackFrame} The clean stack frame with correct warpMode setting.
      */
-    static create (warpMode) {
+    static create (warpMode, endOfStack) {
         const stackFrame = _stackFrameFreeList.pop();
         if (typeof stackFrame !== 'undefined') {
             stackFrame.warpMode = Boolean(warpMode);
+            stackFrame.endOfStackBlockId = endOfStack || 'vm_end_of_thread';
             return stackFrame;
         }
-        return new _StackFrame(warpMode);
+        return new _StackFrame(warpMode, endOfStack);
     }
 
     /**
@@ -187,6 +194,10 @@ class Thread {
         this.warpTimer = null;
 
         this.justReported = null;
+
+        this.reporting = null;
+
+        this.reported = null;
     }
 
     /**
@@ -238,13 +249,14 @@ class Thread {
      * Push stack and update stack frames appropriately.
      * @param {string} blockId Block ID to push to stack.
      */
-    pushStack (blockId) {
+    pushStack (blockId, endBlockId = 'vm_end_of_thread') {
         this.stack.push(blockId);
         // Push an empty stack frame, if we need one.
         // Might not, if we just popped the stack.
         if (this.stack.length > this.stackFrames.length) {
             const parent = this.stackFrames[this.stackFrames.length - 1];
-            this.stackFrames.push(_StackFrame.create(typeof parent !== 'undefined' && parent.warpMode));
+            const warpMode = typeof parent !== 'undefined' && parent.warpMode;
+            this.stackFrames.push(_StackFrame.create(warpMode, endBlockId));
         }
     }
 
@@ -376,7 +388,8 @@ class Thread {
      * where execution proceeds from one block to the next.
      */
     goToNextBlock () {
-        const nextBlockId = this.target.blocks.getNextBlock(this.peekStack());
+        const nextBlockId = this.target.blocks.getNextBlock(this.peekStack()) ||
+            this.peekStackFrame().endOfStackBlockId;
         this.reuseStackForNextBlock(nextBlockId);
     }
 
