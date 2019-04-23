@@ -94,6 +94,16 @@ class Sequencer {
             parent: null,
             next: null
         });
+
+        this.blocks.createBlock({
+            id: 'vm_reenter_promise',
+            opcode: 'vm_reenter_promise',
+            fields: {},
+            inputs: {},
+            shadow: false,
+            parent: null,
+            next: null
+        });
     }
 
     /**
@@ -142,13 +152,13 @@ class Sequencer {
             // Attempt to run each thread one time.
             for (let i = 0; i < this.runtime.threads.length; i++) {
                 const activeThread = this.runtime.threads[i];
-                // Check if the thread is done so it is not executed.
-                if (activeThread.stack.length === 0 ||
-                    activeThread.status === Thread.STATUS_DONE) {
-                    // Finished with this thread.
-                    stoppedThread = true;
-                    continue;
-                }
+                // // Check if the thread is done so it is not executed.
+                // if (activeThread.stack.length === 0 ||
+                //     activeThread.status === Thread.STATUS_DONE) {
+                //     // Finished with this thread.
+                //     stoppedThread = true;
+                //     continue;
+                // }
                 if (activeThread.status === Thread.STATUS_YIELD_TICK &&
                     !ranFirstTick) {
                     // Clear single-tick yield from the last call of `stepThreads`.
@@ -177,8 +187,7 @@ class Sequencer {
                 }
                 // Check if the thread completed while it just stepped to make
                 // sure we remove it before the next iteration of all threads.
-                if (activeThread.stack.length === 0 ||
-                    activeThread.status === Thread.STATUS_DONE) {
+                else if (activeThread.status === Thread.STATUS_DONE) {
                     // Finished with this thread.
                     stoppedThread = true;
                 }
@@ -216,12 +225,6 @@ class Sequencer {
      * @param {!Thread} thread Thread object to step.
      */
     stepThread (thread) {
-        // let currentBlockId = thread.peekStack();
-        // if (!currentBlockId) {
-        //     // A "null block" - empty branch.
-        //     thread.popStack();
-        // }
-
         if (thread.target === null) {
             this.retireThread(thread);
             return;
@@ -247,6 +250,7 @@ class Sequencer {
                 if (executeProfilerId === -1) {
                     executeProfilerId = this.runtime.profiler.idByName(executeProfilerFrame);
                 }
+
                 // The method commented below has its code inlined underneath to
                 // reduce the bias recorded for the profiler's calls in this
                 // time sensitive stepThread method.
@@ -266,65 +270,34 @@ class Sequencer {
             thread.blockGlowInFrame = thread.peekStack();
 
             // If the thread has yielded or is waiting, yield to other threads.
-            if (thread.status === Thread.STATUS_YIELD) {
+            if (thread.status === Thread.STATUS_YIELD &&
+                thread.peekStackFrame().warpMode &&
+                thread.warpTimer.timeElapsed() <= Sequencer.WARP_TIME) {
                 // Mark as running for next iteration.
                 thread.status = Thread.STATUS_RUNNING;
-                // In warp mode, yielded blocks are re-executed immediately.
-                if (thread.peekStackFrame().warpMode &&
-                    thread.warpTimer.timeElapsed() <= Sequencer.WARP_TIME) {
-                    continue;
-                }
-                return;
-            } else if (thread.status === Thread.STATUS_PROMISE_WAIT) {
-                // A promise was returned by the primitive. Yield the thread
-                // until the promise resolves. Promise resolution should reset
-                // thread.status to Thread.STATUS_RUNNING.
-                return;
-            } else if (thread.status === Thread.STATUS_YIELD_TICK) {
-                // stepThreads will reset the thread to Thread.STATUS_RUNNING
-                return;
-            }
-            // If no control flow has happened, switch to next block.
-            else if (thread.peekStack() === currentBlockId) {
+                // // In warp mode, yielded blocks are re-executed immediately.
+                // if (thread.peekStackFrame().warpMode &&
+                //     thread.warpTimer.timeElapsed() <= Sequencer.WARP_TIME) {
+                //     continue;
+                // }
+                // return;
+            // } else if (thread.status === Thread.STATUS_PROMISE_WAIT) {
+            //     // A promise was returned by the primitive. Yield the thread
+            //     // until the promise resolves. Promise resolution should reset
+            //     // thread.status to Thread.STATUS_RUNNING.
+            //     return;
+            // } else if (thread.status === Thread.STATUS_YIELD_TICK) {
+            //     // stepThreads will reset the thread to Thread.STATUS_RUNNING
+            //     return;
+            } else if (thread.status === Thread.STATUS_RUNNING && thread.peekStack() === currentBlockId) {
+                // If no control flow has happened, switch to next block.
                 thread.goToNextBlock();
             }
-            // // If no next block has been found at this point, look on the stack.
-            // while (!thread.peekStack()) {
-            //     thread.popStack();
-            //
-            //     if (thread.stack.length === 0) {
-            //         // No more stack to run!
-            //         thread.status = Thread.STATUS_DONE;
-            //         return;
-            //     }
-            //
-            //     const stackFrame = thread.peekStackFrame();
-            //     isWarpMode = stackFrame.warpMode;
-            //
-            //     if (stackFrame.isLoop) {
-            //         // The current level of the stack is marked as a loop.
-            //         // Return to yield for the frame/tick in general.
-            //         // Unless we're in warp mode - then only return if the
-            //         // warp timer is up.
-            //         if (!isWarpMode ||
-            //             thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME) {
-            //             // Don't do anything to the stack, since loops need
-            //             // to be re-executed.
-            //             return;
-            //         }
-            //         // Don't go to the next block for this level of the stack,
-            //         // since loops need to be re-executed.
-            //         continue;
-            //
-            //     } else if (stackFrame.waitingReporter) {
-            //         // This level of the stack was waiting for a value.
-            //         // This means a reporter has just returned - so don't go
-            //         // to the next block for this level of the stack.
-            //         return;
-            //     }
-            //     // Get next block of existing block on the stack.
-            //     thread.goToNextBlock();
-            // }
+        }
+
+        if (thread.status === Thread.STATUS_YIELD) {
+            // Mark as running for next iteration.
+            thread.status = Thread.STATUS_RUNNING;
         }
     }
 

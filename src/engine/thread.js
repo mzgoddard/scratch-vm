@@ -63,6 +63,8 @@ class _StackFrame {
         this.executionContext = null;
 
         this.endOfStackBlockId = endOfStack;
+
+        this.needReset = false;
     }
 
     /**
@@ -80,6 +82,7 @@ class _StackFrame {
         this.params = null;
         this.executionContext = null;
         // this.endOfStackBlockId = null;
+        this.needReset = false;
 
         return this;
     }
@@ -92,10 +95,16 @@ class _StackFrame {
     reuse (
         // warpMode = this.warpMode, endOfStack = this.endOfStackBlockId
     ) {
-        this.reset();
+        // this.reset();
         // this.warpMode = Boolean(warpMode);
         // this.endOfStackBlockId = endOfStack;
-        return this;
+
+        this.params = null;
+        this.executionContext = null;
+        // this.endOfStackBlockId = null;
+        this.needReset = false;
+
+        // return this;
     }
 
     /**
@@ -104,8 +113,8 @@ class _StackFrame {
      * @returns {_StackFrame} The clean stack frame with correct warpMode setting.
      */
     static create (warpMode, endOfStack) {
-        const stackFrame = _stackFrameFreeList.pop();
-        if (typeof stackFrame !== 'undefined') {
+        const stackFrame = _stackFrameFreeList.pop() || null;
+        if (stackFrame !== null) {
             stackFrame.warpMode = Boolean(warpMode);
             stackFrame.endOfStackBlockId = endOfStack || 'vm_end_of_thread';
             return stackFrame;
@@ -118,8 +127,10 @@ class _StackFrame {
      * @param {_StackFrame} stackFrame The frame to reset and recycle.
      */
     static release (stackFrame) {
-        if (typeof stackFrame !== 'undefined') {
-            _stackFrameFreeList.push(stackFrame.reset());
+        if (stackFrame !== null) {
+            _stackFrameFreeList.push(
+                stackFrame.needReset ? stackFrame.reset() : stackFrame
+            );
         }
     }
 }
@@ -136,6 +147,8 @@ class Thread {
          * @type {!string}
          */
         this.topBlock = firstBlock;
+
+        this.continuous = false;
 
         /**
          * Stack for the thread. When the sequencer enters a control structure,
@@ -266,8 +279,11 @@ class Thread {
      * @param {string} blockId Block ID to push to stack.
      */
     reuseStackForNextBlock (blockId) {
-        this.stack[this.stack.length - 1] = blockId;
-        this.stackFrames[this.stackFrames.length - 1].reuse();
+        const depth = this.stack.length - 1;
+        this.stack[depth] = blockId;
+        if (this.stackFrames[depth].needReset) {
+            this.stackFrames[depth].reuse();
+        }
     }
 
     /**
@@ -333,12 +349,22 @@ class Thread {
         this.justReported = typeof value === 'undefined' ? null : value;
     }
 
+    getExecutionContext () {
+        const frame = this.peekStackFrame();
+        if (frame.executionContext === null) {
+            frame.needReset = true;
+            frame.executionContext = {};
+        }
+        return frame.executionContext;
+    }
+
     /**
      * Initialize procedure parameters on this stack frame.
      */
     initParams () {
         const stackFrame = this.peekStackFrame();
         if (stackFrame.params === null) {
+            stackFrame.needReset = true;
             stackFrame.params = {};
         }
     }

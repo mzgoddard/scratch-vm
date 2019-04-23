@@ -716,6 +716,8 @@ class Runtime extends EventEmitter {
                         if (packagePrimitives.hasOwnProperty(op)) {
                             this._primitives[op] =
                                 packagePrimitives[op].bind(packageObject);
+                            this._primitives[op]._function = packagePrimitives[op];
+                            this._primitives[op]._context = packageObject;
                         }
                     }
                 }
@@ -1681,7 +1683,7 @@ class Runtime extends EventEmitter {
         // threads are stepped. See ScratchRuntime.as for original implementation
         newThreads.forEach(thread => {
             execute(this.sequencer, thread);
-            thread.goToNextBlock();
+            // thread.goToNextBlock();
         });
         return newThreads;
     }

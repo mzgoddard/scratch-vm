@@ -71,21 +71,15 @@ class Scratch3VMBlocks {
         const currentBlockId = thread.peekStack();
         const currentStackFrame = thread.peekStackFrame();
 
-        let blockContainer = thread.blockContainer;
-        let blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
+        let blockCached = (
+            BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId) ||
+            BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId) ||
+            BlocksExecuteCache.getCached(sequencer.runtime.flyoutBlocks, currentBlockId)
+        );
         if (blockCached === null) {
-            blockContainer = sequencer.blocks;
-            blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
-            if (blockCached === null) {
-                blockContainer = runtime.flyoutBlocks;
-                blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
-                // Stop if block or target no longer exists.
-                if (blockCached === null) {
-                    // No block found: stop the thread; script no longer exists.
-                    sequencer.retireThread(thread);
-                    return;
-                }
-            }
+            // No block found: stop the thread; script no longer exists.
+            sequencer.retireThread(thread);
+            return;
         }
 
         const ops = blockCached._ops;
@@ -129,49 +123,46 @@ class Scratch3VMBlocks {
             const inputName = opCached._parentKey;
             const argValues = opCached._parentValues;
             argValues[inputName] = inputValue;
-
-            i += 1;
         }
+
+        i += 1;
 
         thread.reporting = null;
         thread.reported = null;
 
         const allOps = ops;
-        blockCached.ops = blockCached.ops.slice(i);
+        blockCached._ops = blockCached._ops.slice(i);
 
-        execute(sequence, thread);
+        const continuous = thread.continuous;
+        thread.continuous = false;
+        execute(sequencer, thread);
+        thread.continuous = continuous;
 
-        blockCached.ops = allOps;
+        blockCached._ops = allOps;
 
         if (thread.reported) {
             thread.reported = reported.concat(thread.reported);
         }
 
-        if (thread.status === Thread.STATUS_RUNNING) {
+        if (thread.status === Thread.STATUS_RUNNING && thread.peekStack() === currentBlockId) {
             thread.goToNextBlock();
         }
     }
 
-    lastOperation (args, {sequence, thread}) {
+    lastOperation (args, {sequencer, thread}) {
         // Current block to execute is the one on the top of the stack.
         const currentBlockId = thread.peekStack();
         const currentStackFrame = thread.peekStackFrame();
 
-        let blockContainer = thread.blockContainer;
-        let blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
+        let blockCached = (
+            BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId) ||
+            BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId) ||
+            BlocksExecuteCache.getCached(sequencer.runtime.flyoutBlocks, currentBlockId)
+        );
         if (blockCached === null) {
-            blockContainer = sequencer.blocks;
-            blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
-            if (blockCached === null) {
-                blockContainer = sequencer.runtime.flyoutBlocks;
-                blockCached = BlocksExecuteCache.getCached(blockContainer, currentBlockId, BlockCached);
-                // Stop if block or target no longer exists.
-                if (blockCached === null) {
-                    // No block found: stop the thread; script no longer exists.
-                    sequencer.retireThread(thread);
-                    return;
-                }
-            }
+            // No block found: stop the thread; script no longer exists.
+            sequencer.retireThread(thread);
+            return;
         }
 
         const opcode = blockCached.opcode;
@@ -196,12 +187,18 @@ class Scratch3VMBlocks {
                     const edgeWasActivated = hasOldEdgeValue ? (!oldEdgeValue && resolvedValue) : resolvedValue;
                     if (!edgeWasActivated) {
                         sequencer.retireThread(thread);
+                    } else {
+                        thread.goToNextBlock();
                     }
+                } else {
+                    thread.goToNextBlock();
                 }
             } else if (!resolvedValue) {
                 // Not an edge-activated hat: retire the thread
                 // if predicate was false.
                 sequencer.retireThread(thread);
+            } else {
+                thread.goToNextBlock();
             }
         } else {
             // In a non-hat, report the value visually if necessary if

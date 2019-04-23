@@ -361,7 +361,6 @@ class Frames {
     }
 
     update (id, selfTime, totalTime, arg) {
-        if (arg && arg.startsWith('vm_')) return;
         if (!this.frames[id]) {
             this.frames[id] = new StatView(this.profiler.nameById(id));
         }
