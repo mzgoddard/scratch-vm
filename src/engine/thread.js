@@ -270,15 +270,15 @@ class Thread {
      * @param {string} blockId Block ID to push to stack.
      */
     pushStack (blockId, endBlockId = 'vm_end_of_thread') {
+        this.stack.push(this.pointer);
         this.pointer = blockId;
-        this.stack.push(blockId);
 
         const parent = this.stackFrame;
         const warpMode = parent !== null ? parent.warpMode : false;
         const params = parent !== null ? parent.params : defaultParams;
+        this.stackFrames.push(this.stackFrame);
         this.stackFrame = _StackFrame.create(warpMode, endBlockId);
         this.stackFrame.params = params;
-        this.stackFrames.push(this.stackFrame);
     }
 
     /**
@@ -294,7 +294,7 @@ class Thread {
         // }
 
         this.pointer = blockId;
-        this.stack[this.stack.length - 1] = blockId;
+        // this.stack[this.stack.length - 1] = blockId;
         if (this.stackFrame.needReset) this.stackFrame.reuse();
     }
 
@@ -305,11 +305,18 @@ class Thread {
     popStack () {
         // _StackFrame.release(this.stackFrames.pop());
         // return this.stack.pop();
-        const depth = this.stack.length - 2;
-        this.pointer = this.stack[depth] || null;
-        this.stackFrame = this.stackFrames[depth] || null;
-        _StackFrame.release(this.stackFrames.pop());
-        return this.stack.pop();
+
+        const popped = this.pointer;
+        this.pointer = this.stack.pop();
+        _StackFrame.release(this.stackFrame);
+        this.stackFrame = this.stackFrames.pop();
+        return popped;
+
+        // const depth = this.stack.length - 2;
+        // this.pointer = this.stack[depth] || null;
+        // this.stackFrame = this.stackFrames[depth] || null;
+        // _StackFrame.release(this.stackFrames.pop());
+        // return this.stack.pop();
     }
 
     /**
@@ -357,7 +364,8 @@ class Thread {
      * @return {?object} Second to last stack frame stored on this thread.
      */
     peekParentStackFrame () {
-        return this.stackFrames.length > 1 ? this.stackFrames[this.stackFrames.length - 2] : null;
+        return this.stackFrames.length > 0 ? this.stackFrames[this.stackFrames.length - 1] : null;
+        // return this.stackFrames.length > 1 ? this.stackFrames[this.stackFrames.length - 2] : null;
     }
 
     /**
@@ -446,8 +454,8 @@ class Thread {
      */
     isRecursiveCall (procedureCode) {
         let callCount = 5; // Max number of enclosing procedure calls to examine.
-        const sp = this.stack.length - 1;
-        for (let i = sp - 1; i >= 0; i--) {
+        const sp = this.stack.length;
+        for (let i = sp - 1; i >= 1; i--) {
             const block = this.target.blocks.getBlock(this.stack[i]);
             if (block.opcode === 'procedures_call' &&
                 block.mutation.proccode === procedureCode) {
