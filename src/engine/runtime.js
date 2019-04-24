@@ -1450,7 +1450,7 @@ class Runtime extends EventEmitter {
             this.monitorBlocks :
             target.blocks;
 
-        thread.pushStack(id);
+        thread.pushStack(id, opts.stackClick ? 'vm_report_stack_click' : opts.updateMonitor ? 'vm_report_monitor' : 'vm_end_of_thread');
         this.threads.push(thread);
         return thread;
     }
@@ -1681,7 +1681,7 @@ class Runtime extends EventEmitter {
         // threads are stepped. See ScratchRuntime.as for original implementation
         newThreads.forEach(thread => {
             execute(this.sequencer, thread);
-            // thread.goToNextBlock();
+            thread.goToNextBlock();
         });
         return newThreads;
     }

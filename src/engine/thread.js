@@ -4,6 +4,10 @@
  */
 const _stackFrameFreeList = [];
 
+/**
+ * Default params object to for stack frames not inside a procedure.
+ * @type {object}
+ */
 const defaultParams = Object.create(null);
 
 /**
@@ -14,13 +18,7 @@ const defaultParams = Object.create(null);
  * @private
  */
 class _StackFrame {
-    constructor (warpMode, endOfStack) {
-        /**
-         * Whether this level of the stack is a loop.
-         * @type {boolean}
-         */
-        this.isLoop = false;
-
+    constructor (warpMode, params, endBlockId) {
         /**
          * Whether this level is in warp mode.  Is set by some legacy blocks and
          * "turbo mode"
@@ -29,61 +27,36 @@ class _StackFrame {
         this.warpMode = warpMode;
 
         /**
-         * Reported value from just executed block.
-         * @type {Any}
-         */
-        this.justReported = null;
-
-        /**
-         * The active block that is waiting on a promise.
-         * @type {string}
-         */
-        this.reporting = '';
-
-        /**
-         * Persists reported inputs during async block.
-         * @type {Object}
-         */
-        this.reported = null;
-
-        /**
-         * Name of waiting reporter.
-         * @type {string}
-         */
-        this.waitingReporter = null;
-
-        /**
          * Procedure parameters.
          * @type {Object}
          */
-        this.params = defaultParams;
+        this.params = params;
 
         /**
          * A context passed to block implementations.
          * @type {Object}
          */
-        this.executionContext = Object.create(null);
+        this.executionContext = {};
 
-        this.endOfStackBlockId = endOfStack;
+        /**
+         * The block id the thread should step to if a block's next is null.
+         * @type {string}
+         */
+        this.endBlockId = endBlockId;
 
+        /**
+         * Has this frame changed and need a reset?
+         * @type {boolean}
+         */
         this.needReset = false;
     }
 
     /**
-     * Reset all properties of the frame to pristine null and false states.
-     * Used to recycle.
+     * Reset some properties of the frame to default values. Used to recycle.
      * @return {_StackFrame} this
      */
     reset () {
-
-        // this.isLoop = false;
-        // this.warpMode = false;
-        // this.justReported = null;
-        // this.reported = null;
-        // this.waitingReporter = null;
-        // this.params = null;
-        this.executionContext = Object.create(null);
-        // this.endOfStackBlockId = null;
+        this.executionContext = {};
         this.needReset = false;
 
         return this;
@@ -91,37 +64,28 @@ class _StackFrame {
 
     /**
      * Reuse an active stack frame in the stack.
-     * @param {?boolean} warpMode defaults to current warpMode
-     * @returns {_StackFrame} this
      */
-    reuse (
-        // warpMode = this.warpMode, endOfStack = this.endOfStackBlockId
-    ) {
-        // this.reset();
-        // this.warpMode = Boolean(warpMode);
-        // this.endOfStackBlockId = endOfStack;
-
-        // this.params = null;
-        this.executionContext = Object.create(null);
-        // this.endOfStackBlockId = null;
+    reuse () {
+        this.executionContext = {};
         this.needReset = false;
-
-        // return this;
     }
 
     /**
      * Create or recycle a stack frame object.
      * @param {boolean} warpMode Enable warpMode on this frame.
+     * @param {object}
+     * @param {string} endBlockId
      * @returns {_StackFrame} The clean stack frame with correct warpMode setting.
      */
-    static create (warpMode, endOfStack) {
+    static create (warpMode, params, endBlockId) {
         const stackFrame = _stackFrameFreeList.pop() || null;
         if (stackFrame !== null) {
-            stackFrame.warpMode = Boolean(warpMode);
-            stackFrame.endOfStackBlockId = endOfStack || 'vm_end_of_thread';
+            stackFrame.warpMode = warpMode;
+            stackFrame.params = params;
+            stackFrame.endBlockId = endBlockId;
             return stackFrame;
         }
-        return new _StackFrame(warpMode, endOfStack);
+        return new _StackFrame(warpMode, params, endBlockId);
     }
 
     /**
@@ -130,7 +94,6 @@ class _StackFrame {
      */
     static release (stackFrame) {
         if (stackFrame !== null) {
-            stackFrame.params = defaultParams;
             _stackFrameFreeList.push(
                 stackFrame.needReset ? stackFrame.reset() : stackFrame
             );
@@ -151,6 +114,11 @@ class Thread {
          */
         this.topBlock = firstBlock;
 
+        /**
+         * Signal to execute that it may execute blocks continuously until the
+         * thread status is in a non-running state.
+         * @type {boolean}
+         */
         this.continuous = false;
 
         /**
@@ -160,6 +128,11 @@ class Thread {
          */
         this.stack = [];
 
+        /**
+         * The "instruction" pointer the thread is currently at. This
+         * determines what block is executed.
+         * @type {string}
+         */
         this.pointer = null;
 
         /**
@@ -168,6 +141,10 @@ class Thread {
          */
         this.stackFrames = [];
 
+        /**
+         * The current stack frame that goes along with the pointer.
+         * @type {_StackFrame}
+         */
         this.stackFrame = null;
 
         /**
@@ -213,10 +190,24 @@ class Thread {
          */
         this.warpTimer = null;
 
+        /**
+         * The value just reported by a promise.
+         * @type {*}
+         */
         this.justReported = null;
 
+        /**
+         * The id of the block that we will report the promise resolved value
+         * for.
+         * @type {string}
+         */
         this.reporting = null;
 
+        /**
+         * The already reported values in a sequence of blocks to restore when
+         * the awaited promise resolves.
+         * @type {Array.<*>}
+         */
         this.reported = null;
     }
 
@@ -268,8 +259,9 @@ class Thread {
     /**
      * Push stack and update stack frames appropriately.
      * @param {string} blockId Block ID to push to stack.
+     * @param {string} endBlockId BlocK ID to run after the last block.
      */
-    pushStack (blockId, endBlockId = 'vm_end_of_thread') {
+    pushStack (blockId, endBlockId) {
         this.stack.push(this.pointer);
         this.pointer = blockId;
 
@@ -277,8 +269,7 @@ class Thread {
         const warpMode = parent !== null ? parent.warpMode : false;
         const params = parent !== null ? parent.params : defaultParams;
         this.stackFrames.push(this.stackFrame);
-        this.stackFrame = _StackFrame.create(warpMode, endBlockId);
-        this.stackFrame.params = params;
+        this.stackFrame = _StackFrame.create(warpMode, params, endBlockId || 'vm_end_of_thread');
     }
 
     /**
@@ -287,14 +278,7 @@ class Thread {
      * @param {string} blockId Block ID to push to stack.
      */
     reuseStackForNextBlock (blockId) {
-        // const depth = this.stack.length - 1;
-        // this.stack[depth] = blockId;
-        // if (this.stackFrames[depth].needReset) {
-        //     this.stackFrames[depth].reuse();
-        // }
-
         this.pointer = blockId;
-        // this.stack[this.stack.length - 1] = blockId;
         if (this.stackFrame.needReset) this.stackFrame.reuse();
     }
 
@@ -303,20 +287,11 @@ class Thread {
      * @return {string} Block ID popped from the stack.
      */
     popStack () {
-        // _StackFrame.release(this.stackFrames.pop());
-        // return this.stack.pop();
-
         const popped = this.pointer;
         this.pointer = this.stack.pop();
         _StackFrame.release(this.stackFrame);
         this.stackFrame = this.stackFrames.pop();
         return popped;
-
-        // const depth = this.stack.length - 2;
-        // this.pointer = this.stack[depth] || null;
-        // this.stackFrame = this.stackFrames[depth] || null;
-        // _StackFrame.release(this.stackFrames.pop());
-        // return this.stack.pop();
     }
 
     /**
@@ -346,7 +321,6 @@ class Thread {
      */
     peekStack () {
         return this.pointer;
-        // return this.stack.length > 0 ? this.stack[this.stack.length - 1] : null;
     }
 
 
@@ -356,7 +330,6 @@ class Thread {
      */
     peekStackFrame () {
         return this.stackFrame;
-        // return this.stackFrames.length > 0 ? this.stackFrames[this.stackFrames.length - 1] : null;
     }
 
     /**
@@ -365,7 +338,6 @@ class Thread {
      */
     peekParentStackFrame () {
         return this.stackFrames.length > 0 ? this.stackFrames[this.stackFrames.length - 1] : null;
-        // return this.stackFrames.length > 1 ? this.stackFrames[this.stackFrames.length - 2] : null;
     }
 
     /**
@@ -376,8 +348,12 @@ class Thread {
         this.justReported = typeof value === 'undefined' ? null : value;
     }
 
+    /**
+     * Return a execution context for a block to use.
+     * @returns {object} the execution context
+     */
     getExecutionContext () {
-        const frame = this.peekStackFrame();
+        const frame = this.stackFrame;
         frame.needReset = true;
         return frame.executionContext;
     }
@@ -386,7 +362,7 @@ class Thread {
      * Initialize procedure parameters on this stack frame.
      */
     initParams () {
-        const stackFrame = this.peekStackFrame();
+        const stackFrame = this.stackFrame;
         stackFrame.params = Object.create(null);
     }
 
@@ -397,7 +373,7 @@ class Thread {
      * @param {*} value Value to set for parameter.
      */
     pushParam (paramName, value) {
-        const stackFrame = this.peekStackFrame();
+        const stackFrame = this.stackFrame;
         stackFrame.params[paramName] = value;
     }
 
@@ -407,23 +383,11 @@ class Thread {
      * @return {*} value Value for parameter.
      */
     getParam (paramName) {
-        const stackFrame = this.peekStackFrame();
+        const stackFrame = this.stackFrame;
         if (typeof stackFrame.params[paramName] !== 'undefined') {
             return stackFrame.params[paramName];
         }
         return null;
-
-        // for (let i = this.stackFrames.length - 1; i >= 0; i--) {
-        //     const frame = this.stackFrames[i];
-        //     if (frame.params === null) {
-        //         continue;
-        //     }
-        //     if (frame.params.hasOwnProperty(paramName)) {
-        //         return frame.params[paramName];
-        //     }
-        //     return null;
-        // }
-        // return null;
     }
 
     /**
@@ -441,8 +405,10 @@ class Thread {
      * where execution proceeds from one block to the next.
      */
     goToNextBlock () {
-        const nextBlockId = this.target.blocks.getNextBlock(this.peekStack()) ||
-            this.peekStackFrame().endOfStackBlockId;
+        const nextBlockId = (
+            this.target.blocks.getNextBlock(this.pointer) ||
+            this.stackFrame.endBlockId
+        );
         this.reuseStackForNextBlock(nextBlockId);
     }
 

@@ -2,8 +2,12 @@ const BlockUtility = require('./block-utility');
 const BlocksExecuteCache = require('./blocks-execute-cache');
 const log = require('../util/log');
 const Thread = require('./thread');
-const {Map} = require('immutable');
-const cast = require('../util/cast');
+
+/**
+ * Thread status value when it is actively running.
+ * @const {number}
+ */
+const STATUS_RUNNING = Thread.STATUS_RUNNING;
 
 /**
  * Single BlockUtility instance reused by execute for every pritimive ran.
@@ -36,75 +40,7 @@ const isPromise = function (value) {
     );
 };
 
-/**
- * Handle any reported value from the primitive, either directly returned
- * or after a promise resolves.
- * @param {*} resolvedValue Value eventually returned from the primitive.
- * @param {!Sequencer} sequencer Sequencer stepping the thread for the ran
- * primitive.
- * @param {!Thread} thread Thread containing the primitive.
- * @param {!string} currentBlockId Id of the block in its thread for value from
- * the primitive.
- * @param {!string} opcode opcode used to identify a block function primitive.
- * @param {!boolean} isHat Is the current block a hat?
- */
-// @todo move this to callback attached to the thread when we have performance
-// metrics (dd)
-const handleReport = function (resolvedValue, sequencer, thread, blockCached, lastOperation) {
-    const currentBlockId = blockCached.id;
-    const opcode = blockCached.opcode;
-    const isHat = blockCached._isHat;
-
-    thread.pushReportedValue(resolvedValue);
-    if (isHat) {
-        // Hat predicate was evaluated.
-        if (sequencer.runtime.getIsEdgeActivatedHat(opcode)) {
-            // If this is an edge-activated hat, only proceed if the value is
-            // true and used to be false, or the stack was activated explicitly
-            // via stack click
-            if (!thread.stackClick) {
-                const hasOldEdgeValue = thread.target.hasEdgeActivatedValue(currentBlockId);
-                const oldEdgeValue = thread.target.updateEdgeActivatedValue(
-                    currentBlockId,
-                    resolvedValue
-                );
-
-                const edgeWasActivated = hasOldEdgeValue ? (!oldEdgeValue && resolvedValue) : resolvedValue;
-                if (!edgeWasActivated) {
-                    sequencer.retireThread(thread);
-                }
-            }
-        } else if (!resolvedValue) {
-            // Not an edge-activated hat: retire the thread
-            // if predicate was false.
-            sequencer.retireThread(thread);
-        }
-    } else {
-        // In a non-hat, report the value visually if necessary if
-        // at the top of the thread stack.
-        if (lastOperation && typeof resolvedValue !== 'undefined' && thread.atStackTop()) {
-            if (thread.stackClick) {
-                sequencer.runtime.visualReport(currentBlockId, resolvedValue);
-            }
-            if (thread.updateMonitor) {
-                const targetId = sequencer.runtime.monitorBlocks.getBlock(currentBlockId).targetId;
-                if (targetId && !sequencer.runtime.getTargetById(targetId)) {
-                    // Target no longer exists
-                    return;
-                }
-                sequencer.runtime.requestUpdateMonitor(Map({
-                    id: currentBlockId,
-                    spriteName: targetId ? sequencer.runtime.getTargetById(targetId).getName() : null,
-                    value: resolvedValue
-                }));
-            }
-        }
-        // Finished any yields.
-        thread.status = Thread.STATUS_RUNNING;
-    }
-};
-
-const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached) => {
+const handlePromise = (primitiveReportedValue, thread, blockCached) => {
     if (thread.status === Thread.STATUS_RUNNING) {
         // Primitive returned a promise; automatically yield thread.
         thread.status = Thread.STATUS_PROMISE_WAIT;
@@ -168,8 +104,11 @@ class BlockCached {
          */
         this.opcode = cached.opcode;
 
-        this.measure = !cached.opcode.startsWith('vm_');
-        // this.measure = true;
+        /**
+         * Some opcodes (vm_*) should not be measured by the profiler.
+         * @type {boolean}
+         */
+        this.profileOpcode = !cached.opcode.startsWith('vm_');
 
         /**
          * Original block object containing argument values for static fields.
@@ -200,6 +139,18 @@ class BlockCached {
          * @type {?function}
          */
         this._blockFunction = null;
+
+        /**
+         * The block opcode function before being self-bound.
+         * @type {?function}
+         */
+        this._blockFunctionUnbound = null;
+
+        /**
+         * The bound block opcode context.
+         * @type {?object}
+         */
+        this._blockFunctionContext = null;
 
         /**
          * Is the block function defined for this opcode?
@@ -244,7 +195,7 @@ class BlockCached {
          * The inputs key the parent refers to this BlockCached by.
          * @type {string}
          */
-        this._parentKey = 'undefined';
+        this._parentKey = 'VALUE';
 
         /**
          * The target object where the parent wants the resulting value stored
@@ -279,10 +230,12 @@ class BlockCached {
         this._blockFunction = runtime.getOpcodeFunction(opcode);
         this._definedBlockFunction = typeof this._blockFunction !== 'undefined';
         if (this._definedBlockFunction) {
-            this._blockFunctionRaw = this._blockFunction._function || this._blockFunction;
+            // If available, save the unbound function. It's faster to
+            // unbound.call(context) than to call unbound.bind(context)().
+            this._blockFunctionUnbound = this._blockFunction._function || this._blockFunction;
             this._blockFunctionContext = this._blockFunction._context;
         } else {
-            this._blockFunctionRaw = null;
+            this._blockFunctionUnbound = null;
             this._blockFunctionContext = null;
         }
 
@@ -346,6 +299,7 @@ class BlockCached {
         for (const inputName in this._inputs) {
             const input = this._inputs[inputName];
             if (input.block && inputName === 'BROADCAST_INPUT') {
+                // We can use a vm_* block to cast to a string and save it where it would normally be placed. This lets us produce this value dynamically without having special case handling
                 inputCached = new BlockCached(runtime.sequencer.blocks, {
                     id: 'vm_cast_string',
                     opcode: 'vm_cast_string',
@@ -385,8 +339,6 @@ class BlockCached {
 
         this._top = this;
 
-        // this._ops_a = [];
-
         // The final operation is this block itself. At the top most block is a
         // command block or a block that is being run as a monitor.
         if (!this._isHat && this._isShadowBlock) {
@@ -395,33 +347,18 @@ class BlockCached {
             this._ops.push(this);
 
             if (this._isHat) {
-                console.log('build vm_last_operation cached');
-                const lastOperationCached = new BlockCached(null, {
-                    id: 'vm_last_operation',
-                    opcode: 'vm_last_operation',
+                const reportCached = new BlockCached(null, {
+                    id: 'vm_report_hat',
+                    opcode: 'vm_report_hat',
                     fields: {},
                     inputs: {},
                     mutation: null
                 });
 
-                this._ops = lastOperationCached._ops;
+                this._ops = [...this._ops, ...reportCached._ops];
                 this._parentKey = 'VALUE';
-                this._parentValues = lastOperationCached._argValues;
+                this._parentValues = reportCached._argValues;
             }
-
-            // this._ops_a = this._ops.map(op => [op._blockFunction, op._argValues, op._parentKey, op._parentValues]);
-
-            // this._parentKey = 'VALUE';
-            // const lastOperationCached = this._top = new BlockCached(null, {
-            //     id: 'vm_last_operation',
-            //     opcode: 'vm_last_operation',
-            //     fields: {},
-            //     inputs: {},
-            //     mutation: null,
-            // });
-            // this._parentValues = lastOperationCached._argValues;
-            //
-            // this._top._ops = [...this._ops, ...this._top._ops];
         }
     }
 }
@@ -434,18 +371,16 @@ class BlockCached {
 const execute = function (sequencer, thread) {
     const runtime = sequencer.runtime;
 
-    // Blocks should glow when a script is starting,
-    // not after it has finished (see #1404).
-    // Only blocks in blockContainers that don't forceNoGlow
-    // should request a glow.
+    // Blocks should glow when a script is starting, not after it has finished
+    // (see #1404). Only blocks in blockContainers that don't forceNoGlow should
+    // request a glow.
     if (!thread.blockContainer.forceNoGlow) {
         thread.requestScriptGlowInFrame = true;
     }
 
     let currentBlockId;
 
-    const {STATUS_RUNNING} = Thread;
-
+    // Store old sequencer and thread and reset them after execution.
     const _lastSequencer = blockUtility.sequencer;
     const _lastThread = blockUtility.thread;
 
@@ -455,8 +390,14 @@ const execute = function (sequencer, thread) {
     blockUtility.thread = thread;
 
     do {
+        // On a second iteration, step the thread if it has not experienced
+        // control flow.
+        if (thread.pointer === currentBlockId) {
+            thread.goToNextBlock();
+        }
+
         // Current block to execute is the one on the top of the stack.
-        currentBlockId = thread.pointer;
+        currentBlockId = thread.blockGlowInFrame = thread.pointer;
 
         let blockCached = (
             BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, BlockCached) ||
@@ -464,13 +405,13 @@ const execute = function (sequencer, thread) {
             BlocksExecuteCache.getCached(runtime.flyoutBlocks, currentBlockId, BlockCached)
         );
         if (blockCached === null) {
-            console.log('missing block', currentBlockId);
             // No block found: stop the thread; script no longer exists.
             sequencer.retireThread(thread);
             break;
         }
 
-        const isNotProfiling = runtime.profiler === null || !blockCached.measure;
+        const isNotProfiling = runtime.profiler === null || !blockCached.profileOpcode;
+
         const ops = blockCached._ops;
         const length = ops.length;
         let i = 0;
@@ -483,7 +424,7 @@ const execute = function (sequencer, thread) {
             if (isNotProfiling) {
                 opCached._parentValues[opCached._parentKey] =
                     primitiveReportedValue =
-                    opCached._blockFunctionRaw.call(opCached._blockFunctionContext, opCached._argValues, blockUtility);
+                    opCached._blockFunctionUnbound.call(opCached._blockFunctionContext, opCached._argValues, blockUtility);
             } else {
                 const {profiler} = runtime;
 
@@ -502,7 +443,7 @@ const execute = function (sequencer, thread) {
 
                 opCached._parentValues[opCached._parentKey] =
                     primitiveReportedValue =
-                    opCached._blockFunctionRaw.call(opCached._blockFunctionContext, opCached._argValues, blockUtility);
+                    opCached._blockFunctionUnbound.call(opCached._blockFunctionContext, opCached._argValues, blockUtility);
 
                 // profiler.stop(blockFunctionProfilerId);
                 profiler.records.push(profiler.STOP, 0);
@@ -510,19 +451,12 @@ const execute = function (sequencer, thread) {
 
             // If it's a promise, wait until promise resolves.
             if (isPromise(primitiveReportedValue)) {
-                handlePromise(primitiveReportedValue, sequencer, thread, opCached);
-
-                // We are waiting for a promise. Stop running this set of
-                // operations and continue them later after thawing the reported
-                // values.
-                break;
+                // We are waiting for a promise. Set the status to a non-running
+                // state and store the arg values for the executed operations.
+                handlePromise(primitiveReportedValue, thread, opCached);
             }
         }
-    } while (
-        thread.continuous &&
-        thread.status === STATUS_RUNNING &&
-        (thread.pointer === currentBlockId && thread.goToNextBlock(), true)
-    );
+    } while (thread.continuous && thread.status === STATUS_RUNNING);
 
     blockUtility.sequencer = _lastSequencer;
     blockUtility.thread = _lastThread;

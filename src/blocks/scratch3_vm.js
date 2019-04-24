@@ -1,3 +1,5 @@
+const {Map} = require('immutable');
+
 const Cast = require('../util/cast');
 const execute = require('../engine/execute');
 const Thread = require('../engine/thread');
@@ -24,7 +26,9 @@ class Scratch3VMBlocks {
             vm_end_of_branch: this.endOfBranch,
             vm_cast_string: this.castString,
             vm_reenter_promise: this.reenterFromPromise,
-            vm_last_operation: this.lastOperation
+            vm_report_hat: this.reportHat,
+            vm_report_stack_click: this.reportStackClick,
+            vm_report_monitor: this.reportMonitor
         };
     }
 
@@ -41,13 +45,6 @@ class Scratch3VMBlocks {
     endOfProcedure (args, {thread}) {
         thread.popStack();
         thread.goToNextBlock();
-
-        if (thread.peekStackFrame().warpMode && !thread.warpTimer) {
-            // Initialize warp-mode timer if it hasn't been already.
-            // This will start counting the thread toward `Sequencer.WARP_TIME`.
-            thread.warpTimer = new Timer();
-            thread.warpTimer.start();
-        }
     }
 
     endOfLoopBranch (args, {thread}) {
@@ -64,13 +61,7 @@ class Scratch3VMBlocks {
         return Cast.toString(args.VALUE);
     }
 
-    reenterFromPromise (args, {sequencer, thread}) {
-        thread.popStack();
-
-        // Current block to execute is the one on the top of the stack.
-        const currentBlockId = thread.peekStack();
-        const currentStackFrame = thread.peekStackFrame();
-
+    _getBlockCached (sequencer, thread, currentBlockId) {
         let blockCached = (
             BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId) ||
             BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId) ||
@@ -79,8 +70,18 @@ class Scratch3VMBlocks {
         if (blockCached === null) {
             // No block found: stop the thread; script no longer exists.
             sequencer.retireThread(thread);
-            return;
         }
+        return blockCached;
+    }
+
+    reenterFromPromise (args, {sequencer, thread}) {
+        thread.popStack();
+
+        // Current block to execute is the one on the top of the stack.
+        const currentBlockId = thread.peekStack();
+
+        const blockCached = this._getBlockCached(sequencer, thread, currentBlockId);
+        if (blockCached === null) return;
 
         const ops = blockCached._ops;
         const length = ops.length;
@@ -113,8 +114,12 @@ class Scratch3VMBlocks {
             }
         }
 
-        // The reporting block must exist and must be the next one in the sequence of operations.
-        if (thread.justReported !== null && ops[i] && ops[i].id === thread.reporting) {
+        // The reporting block must exist and must be the next one in the
+        // sequence of operations.
+        if (
+            thread.justReported !== null &&
+            ops[i] && ops[i].id === thread.reporting
+        ) {
             const opCached = ops[i];
             const inputValue = thread.justReported;
 
@@ -144,85 +149,93 @@ class Scratch3VMBlocks {
             thread.reported = reported.concat(thread.reported);
         }
 
-        if (thread.status === Thread.STATUS_RUNNING && thread.peekStack() === currentBlockId) {
+        if (
+            thread.status === Thread.STATUS_RUNNING &&
+            thread.peekStack() === currentBlockId
+        ) {
             thread.goToNextBlock();
         }
     }
 
-    lastOperation (args, {sequencer, thread}) {
-        // Current block to execute is the one on the top of the stack.
+    reportHat (args, {sequencer, thread}) {
+        // reportHat is injected as the final operation to the actual hat block
+        // id by execute.js. So looking at the top of the stack will get us the
         const currentBlockId = thread.peekStack();
-        const currentStackFrame = thread.peekStackFrame();
 
-        let blockCached = (
-            BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId) ||
-            BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId) ||
-            BlocksExecuteCache.getCached(sequencer.runtime.flyoutBlocks, currentBlockId)
-        );
-        if (blockCached === null) {
-            // No block found: stop the thread; script no longer exists.
-            sequencer.retireThread(thread);
-            return;
-        }
+        const blockCached = this._getBlockCached(sequencer, thread, currentBlockId);
+        if (blockCached === null) return;
 
         const opcode = blockCached.opcode;
         const isHat = blockCached._isHat;
 
         const resolvedValue = args.VALUE;
 
-        thread.pushReportedValue(resolvedValue);
-        if (isHat) {
-            // Hat predicate was evaluated.
-            if (sequencer.runtime.getIsEdgeActivatedHat(opcode)) {
-                // If this is an edge-activated hat, only proceed if the value is
-                // true and used to be false, or the stack was activated explicitly
-                // via stack click
-                if (!thread.stackClick) {
-                    const hasOldEdgeValue = thread.target.hasEdgeActivatedValue(currentBlockId);
-                    const oldEdgeValue = thread.target.updateEdgeActivatedValue(
-                        currentBlockId,
-                        resolvedValue
-                    );
+        // Hat predicate was evaluated.
+        if (sequencer.runtime.getIsEdgeActivatedHat(opcode)) {
+            // If this is an edge-activated hat, only proceed if the value is
+            // true and used to be false, or the stack was activated explicitly
+            // via stack click
+            if (!thread.stackClick) {
+                const hasOldEdgeValue = thread.target.hasEdgeActivatedValue(currentBlockId);
+                const oldEdgeValue = thread.target.updateEdgeActivatedValue(
+                    currentBlockId,
+                    resolvedValue
+                );
 
-                    const edgeWasActivated = hasOldEdgeValue ? (!oldEdgeValue && resolvedValue) : resolvedValue;
-                    if (!edgeWasActivated) {
-                        sequencer.retireThread(thread);
-                    } else {
-                        thread.goToNextBlock();
-                    }
-                } else {
-                    thread.goToNextBlock();
-                }
-            } else if (!resolvedValue) {
-                // Not an edge-activated hat: retire the thread
-                // if predicate was false.
-                sequencer.retireThread(thread);
-            } else {
-                thread.goToNextBlock();
-            }
-        } else {
-            // In a non-hat, report the value visually if necessary if
-            // at the top of the thread stack.
-            if (lastOperation && typeof resolvedValue !== 'undefined' && thread.atStackTop()) {
-                if (thread.stackClick) {
-                    sequencer.runtime.visualReport(currentBlockId, resolvedValue);
-                }
-                if (thread.updateMonitor) {
-                    const targetId = sequencer.runtime.monitorBlocks.getBlock(currentBlockId).targetId;
-                    if (targetId && !sequencer.runtime.getTargetById(targetId)) {
-                        // Target no longer exists
-                        return;
-                    }
-                    sequencer.runtime.requestUpdateMonitor(Map({
-                        id: currentBlockId,
-                        spriteName: targetId ? sequencer.runtime.getTargetById(targetId).getName() : null,
-                        value: resolvedValue
-                    }));
+                const edgeWasActivated = hasOldEdgeValue ? (!oldEdgeValue && resolvedValue) : resolvedValue;
+                if (!edgeWasActivated) {
+                    sequencer.retireThread(thread);
                 }
             }
-            // Finished any yields.
-            thread.status = Thread.STATUS_RUNNING;
+        } else if (!resolvedValue) {
+            // Not an edge-activated hat: retire the thread
+            // if predicate was false.
+            sequencer.retireThread(thread);
         }
+    }
+
+    reportStackClick (args, {sequencer, thread}) {
+        // Current block to execute is the one on the top of the stack.
+        const currentBlockId = thread.topBlock;
+
+        const blockCached = this._getBlockCached(sequencer, thread, currentBlockId);
+        if (blockCached === null) return;
+
+        const isHat = blockCached._isHat;
+        const resolvedValue = blockCached._parentValues[blockCached._parentKey];
+
+        if (!isHat && typeof resolvedValue !== 'undefined') {
+            sequencer.runtime.visualReport(currentBlockId, resolvedValue);
+        }
+
+        thread.popStack();
+        thread.status = Thread.STATUS_DONE;
+    }
+
+    reportMonitor (args, {sequencer, thread}) {
+        // Current block to execute is the one on the top of the stack.
+        const currentBlockId = thread.topBlock;
+
+        const blockCached = this._getBlockCached(sequencer, thread, currentBlockId);
+        if (blockCached === null) return;
+
+        const resolvedValue = blockCached._parentValues[blockCached._parentKey];
+
+        if (typeof resolvedValue !== 'undefined') {
+            const targetId = sequencer.runtime.monitorBlocks.getBlock(currentBlockId).targetId;
+            if (targetId && !sequencer.runtime.getTargetById(targetId)) {
+                // Target no longer exists
+                return;
+            }
+            sequencer.runtime.requestUpdateMonitor(Map({
+                id: currentBlockId,
+                spriteName: targetId ? sequencer.runtime.getTargetById(targetId).getName() : null,
+                value: resolvedValue
+            }));
+        }
+
+        thread.popStack();
+        thread.status = Thread.STATUS_DONE;
     }
 }
 
