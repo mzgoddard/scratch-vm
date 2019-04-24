@@ -79,7 +79,7 @@ class _StackFrame {
         // this.justReported = null;
         // this.reported = null;
         // this.waitingReporter = null;
-        this.params = null;
+        // this.params = null;
         this.executionContext = null;
         // this.endOfStackBlockId = null;
         this.needReset = false;
@@ -99,7 +99,7 @@ class _StackFrame {
         // this.warpMode = Boolean(warpMode);
         // this.endOfStackBlockId = endOfStack;
 
-        this.params = null;
+        // this.params = null;
         this.executionContext = null;
         // this.endOfStackBlockId = null;
         this.needReset = false;
@@ -128,6 +128,7 @@ class _StackFrame {
      */
     static release (stackFrame) {
         if (stackFrame !== null) {
+            stackFrame.params = null;
             _stackFrameFreeList.push(
                 stackFrame.needReset ? stackFrame.reset() : stackFrame
             );
@@ -269,7 +270,10 @@ class Thread {
         if (this.stack.length > this.stackFrames.length) {
             const parent = this.stackFrames[this.stackFrames.length - 1];
             const warpMode = typeof parent !== 'undefined' && parent.warpMode;
-            this.stackFrames.push(_StackFrame.create(warpMode, endBlockId));
+            const params = parent !== null ? parent.params : null;
+            stackFrame = _StackFrame.create(warpMode, endBlockId);
+            this.stackFrames.push(stackFrame);
+            stackFrame.params = params;
         }
     }
 
@@ -353,7 +357,7 @@ class Thread {
         const frame = this.peekStackFrame();
         if (frame.executionContext === null) {
             frame.needReset = true;
-            frame.executionContext = {};
+            frame.executionContext = Object.create(null);
         }
         return frame.executionContext;
     }
@@ -363,10 +367,7 @@ class Thread {
      */
     initParams () {
         const stackFrame = this.peekStackFrame();
-        if (stackFrame.params === null) {
-            stackFrame.needReset = true;
-            stackFrame.params = {};
-        }
+        stackFrame.params = Object.create(null);
     }
 
     /**
@@ -386,17 +387,23 @@ class Thread {
      * @return {*} value Value for parameter.
      */
     getParam (paramName) {
-        for (let i = this.stackFrames.length - 1; i >= 0; i--) {
-            const frame = this.stackFrames[i];
-            if (frame.params === null) {
-                continue;
-            }
-            if (frame.params.hasOwnProperty(paramName)) {
-                return frame.params[paramName];
-            }
+        const stackFrame = this.peekStackFrame();
+        if (stackFrame.params === null) {
             return null;
         }
-        return null;
+        return stackFrame.params[paramName] || null;
+
+        // for (let i = this.stackFrames.length - 1; i >= 0; i--) {
+        //     const frame = this.stackFrames[i];
+        //     if (frame.params === null) {
+        //         continue;
+        //     }
+        //     if (frame.params.hasOwnProperty(paramName)) {
+        //         return frame.params[paramName];
+        //     }
+        //     return null;
+        // }
+        // return null;
     }
 
     /**
