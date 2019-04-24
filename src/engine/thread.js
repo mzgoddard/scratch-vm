@@ -62,7 +62,7 @@ class _StackFrame {
          * A context passed to block implementations.
          * @type {Object}
          */
-        this.executionContext = null;
+        this.executionContext = Object.create(null);
 
         this.endOfStackBlockId = endOfStack;
 
@@ -82,7 +82,7 @@ class _StackFrame {
         // this.reported = null;
         // this.waitingReporter = null;
         // this.params = null;
-        this.executionContext = null;
+        this.executionContext = Object.create(null);
         // this.endOfStackBlockId = null;
         this.needReset = false;
 
@@ -102,7 +102,7 @@ class _StackFrame {
         // this.endOfStackBlockId = endOfStack;
 
         // this.params = null;
-        this.executionContext = null;
+        this.executionContext = Object.create(null);
         // this.endOfStackBlockId = null;
         this.needReset = false;
 
@@ -357,10 +357,7 @@ class Thread {
 
     getExecutionContext () {
         const frame = this.peekStackFrame();
-        if (frame.executionContext === null) {
-            frame.needReset = true;
-            frame.executionContext = Object.create(null);
-        }
+        frame.needReset = true;
         return frame.executionContext;
     }
 
