@@ -112,14 +112,11 @@ const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached) =
 
     // Promise handlers
     primitiveReportedValue.then(resolvedValue => {
-        // console.log('resolvedValue', resolvedValue);
         thread.pushReportedValue(resolvedValue);
         thread.status = Thread.STATUS_RUNNING;
-        // console.log(thread);
-        // handleReport(resolvedValue, sequencer, thread, blockCached, lastOperation);
+        thread.pushStack('vm_reenter_promise');
     }, rejectionReason => {
-        // Promise rejected: the primitive had some error.
-        // Log it and proceed.
+        // Promise rejected: the primitive had some error. Log it and proceed.
         log.warn('Primitive rejected promise: ', rejectionReason);
         thread.status = Thread.STATUS_RUNNING;
         thread.popStack();
@@ -140,8 +137,6 @@ const handlePromise = (primitiveReportedValue, sequencer, thread, blockCached) =
             inputValue: reportedValues[inputName]
         };
     });
-
-    thread.pushStack('vm_reenter_promise');
 };
 
 /**
