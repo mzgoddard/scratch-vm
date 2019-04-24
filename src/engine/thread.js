@@ -160,11 +160,15 @@ class Thread {
          */
         this.stack = [];
 
+        this.pointer = null;
+
         /**
          * Stack frames for the thread. Store metadata for the executing blocks.
          * @type {Array.<_StackFrame>}
          */
         this.stackFrames = [];
+
+        this.stackFrame = null;
 
         /**
          * Status of the thread, one of three states (below)
@@ -266,17 +270,15 @@ class Thread {
      * @param {string} blockId Block ID to push to stack.
      */
     pushStack (blockId, endBlockId = 'vm_end_of_thread') {
+        this.pointer = blockId;
         this.stack.push(blockId);
-        // Push an empty stack frame, if we need one.
-        // Might not, if we just popped the stack.
-        if (this.stack.length > this.stackFrames.length) {
-            const parent = this.stackFrames[this.stackFrames.length - 1];
-            const warpMode = typeof parent !== 'undefined' && parent.warpMode;
-            const params = parent !== null ? parent.params : null;
-            stackFrame = _StackFrame.create(warpMode, endBlockId);
-            this.stackFrames.push(stackFrame);
-            stackFrame.params = params;
-        }
+
+        const parent = this.stackFrame;
+        const warpMode = parent !== null ? parent.warpMode : false;
+        const params = parent !== null ? parent.params : defaultParams;
+        this.stackFrame = _StackFrame.create(warpMode, endBlockId);
+        this.stackFrame.params = params;
+        this.stackFrames.push(this.stackFrame);
     }
 
     /**
@@ -285,11 +287,15 @@ class Thread {
      * @param {string} blockId Block ID to push to stack.
      */
     reuseStackForNextBlock (blockId) {
-        const depth = this.stack.length - 1;
-        this.stack[depth] = blockId;
-        if (this.stackFrames[depth].needReset) {
-            this.stackFrames[depth].reuse();
-        }
+        // const depth = this.stack.length - 1;
+        // this.stack[depth] = blockId;
+        // if (this.stackFrames[depth].needReset) {
+        //     this.stackFrames[depth].reuse();
+        // }
+
+        this.pointer = blockId;
+        this.stack[this.stack.length - 1] = blockId;
+        if (this.stackFrame.needReset) this.stackFrame.reuse();
     }
 
     /**
@@ -297,6 +303,11 @@ class Thread {
      * @return {string} Block ID popped from the stack.
      */
     popStack () {
+        // _StackFrame.release(this.stackFrames.pop());
+        // return this.stack.pop();
+        const depth = this.stack.length - 2;
+        this.pointer = this.stack[depth] || null;
+        this.stackFrame = this.stackFrames[depth] || null;
         _StackFrame.release(this.stackFrames.pop());
         return this.stack.pop();
     }
@@ -327,7 +338,8 @@ class Thread {
      * @return {?string} Block ID on top of stack.
      */
     peekStack () {
-        return this.stack.length > 0 ? this.stack[this.stack.length - 1] : null;
+        return this.pointer;
+        // return this.stack.length > 0 ? this.stack[this.stack.length - 1] : null;
     }
 
 
@@ -336,7 +348,8 @@ class Thread {
      * @return {?object} Last stack frame stored on this thread.
      */
     peekStackFrame () {
-        return this.stackFrames.length > 0 ? this.stackFrames[this.stackFrames.length - 1] : null;
+        return this.stackFrame;
+        // return this.stackFrames.length > 0 ? this.stackFrames[this.stackFrames.length - 1] : null;
     }
 
     /**

@@ -456,7 +456,7 @@ const execute = function (sequencer, thread) {
 
     do {
         // Current block to execute is the one on the top of the stack.
-        currentBlockId = thread.peekStack();
+        currentBlockId = thread.pointer;
 
         let blockCached = (
             BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, BlockCached) ||
@@ -521,7 +521,7 @@ const execute = function (sequencer, thread) {
     } while (
         thread.continuous &&
         thread.status === STATUS_RUNNING &&
-        (thread.peekStack() === currentBlockId && thread.goToNextBlock(), true)
+        (thread.pointer === currentBlockId && thread.goToNextBlock(), true)
     );
 
     blockUtility.sequencer = _lastSequencer;
