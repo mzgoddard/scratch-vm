@@ -128,7 +128,7 @@ class Sequencer {
         // Start counting toward WORK_TIME.
         this.timer.start();
         // Count of active threads.
-        let numActiveThreads = Infinity;
+        let activeThreads = true;
         // Whether `stepThreads` has run through a full single tick.
         let ranFirstTick = false;
         const doneThreads = [];
@@ -137,7 +137,7 @@ class Sequencer {
         // 2. Time elapsed must be less than WORK_TIME.
         // 3. Either turbo mode, or no redraw has been requested by a primitive.
         while (this.runtime.threads.length > 0 &&
-               numActiveThreads > 0 &&
+               activeThreads &&
                this.timer.timeElapsed() < WORK_TIME &&
                (this.runtime.turboMode || !this.runtime.redrawRequested)) {
             if (this.runtime.profiler !== null) {
@@ -147,7 +147,7 @@ class Sequencer {
                 this.runtime.profiler.start(stepThreadsInnerProfilerId);
             }
 
-            numActiveThreads = 0;
+            activeThreads = false;
             let stoppedThread = false;
             // Attempt to run each thread one time.
             for (let i = 0; i < this.runtime.threads.length; i++) {
@@ -177,17 +177,15 @@ class Sequencer {
                     if (this.runtime.profiler !== null) {
                         this.runtime.profiler.stop();
                     }
-                    activeThread.warpTimer = null;
-                    if (activeThread.isKilled) {
-                        i--; // if the thread is removed from the list (killed), do not increase index
+                    // activeThread.warpTimer = null;
+                    // activeThreads = activeThreads || activeThread.status === Thread.STATUS_RUNNING;
+                    if (activeThread.status === Thread.STATUS_RUNNING) {
+                        activeThreads = true;
                     }
-                }
-                if (activeThread.status === Thread.STATUS_RUNNING) {
-                    numActiveThreads++;
                 }
                 // Check if the thread completed while it just stepped to make
                 // sure we remove it before the next iteration of all threads.
-                else if (activeThread.status === Thread.STATUS_DONE) {
+                if (activeThread.status === Thread.STATUS_DONE) {
                     // Finished with this thread.
                     stoppedThread = true;
                 }
@@ -205,8 +203,7 @@ class Sequencer {
                 let nextActiveThread = 0;
                 for (let i = 0; i < this.runtime.threads.length; i++) {
                     const thread = this.runtime.threads[i];
-                    if (thread.stack.length !== 0 &&
-                        thread.status !== Thread.STATUS_DONE) {
+                    if (thread.status !== Thread.STATUS_DONE) {
                         this.runtime.threads[nextActiveThread] = thread;
                         nextActiveThread++;
                     } else {
@@ -299,6 +296,8 @@ class Sequencer {
             // Mark as running for next iteration.
             thread.status = Thread.STATUS_RUNNING;
         }
+
+        thread.warpTimer = null;
     }
 
     /**

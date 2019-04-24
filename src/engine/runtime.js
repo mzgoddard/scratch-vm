@@ -1873,7 +1873,7 @@ class Runtime extends EventEmitter {
         }
 
         // Clean up threads that were told to stop during or since the last step
-        this.threads = this.threads.filter(thread => !thread.isKilled);
+        // this.threads = this.threads.filter(thread => !thread.isKilled);
 
         // Find all edge-activated hats, and add them to threads to be evaluated.
         for (const hatType in this._hats) {
