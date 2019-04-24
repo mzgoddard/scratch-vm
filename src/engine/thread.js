@@ -4,6 +4,8 @@
  */
 const _stackFrameFreeList = [];
 
+const defaultParams = Object.create(null);
+
 /**
  * A frame used for each level of the stack. A general purpose
  * place to store a bunch of execution context and parameters
@@ -54,7 +56,7 @@ class _StackFrame {
          * Procedure parameters.
          * @type {Object}
          */
-        this.params = null;
+        this.params = defaultParams;
 
         /**
          * A context passed to block implementations.
@@ -128,7 +130,7 @@ class _StackFrame {
      */
     static release (stackFrame) {
         if (stackFrame !== null) {
-            stackFrame.params = null;
+            stackFrame.params = defaultParams;
             _stackFrameFreeList.push(
                 stackFrame.needReset ? stackFrame.reset() : stackFrame
             );
@@ -388,10 +390,10 @@ class Thread {
      */
     getParam (paramName) {
         const stackFrame = this.peekStackFrame();
-        if (stackFrame.params === null) {
-            return null;
+        if (typeof stackFrame.params[paramName] !== 'undefined') {
+            return stackFrame.params[paramName];
         }
-        return stackFrame.params[paramName] || null;
+        return null;
 
         // for (let i = this.stackFrames.length - 1; i >= 0; i--) {
         //     const frame = this.stackFrames[i];
