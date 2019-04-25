@@ -26,7 +26,6 @@ class Scratch3VMBlocks {
             vm_end_of_branch: this.endOfBranch,
             vm_cast_string: this.castString,
             vm_may_continue: this.mayContinue,
-            vm_go_next: this.goNext,
             vm_reenter_promise: this.reenterFromPromise,
             vm_report_hat: this.reportHat,
             vm_report_stack_click: this.reportStackClick,
@@ -68,15 +67,13 @@ class Scratch3VMBlocks {
             thread.continuous && thread.status === Thread.STATUS_RUNNING &&
             thread.pointer === args.EXPECT_STACK
         ) {
-            thread.reuseStackForNextBlock(args.NEXT_STACK);
+            if (args.NEXT_STACK) {
+                thread.reuseStackForNextBlock(args.NEXT_STACK);
+            } else {
+                thread.goToNextBlock();
+            }
         } else if (thread.status === Thread.STATUS_RUNNING) {
             thread.status = Thread.STATUS_INTERRUPT;
-        }
-    }
-
-    goNext (args, {thread}) {
-        if (thread.continuous && thread.status === Thread.STATUS_RUNNING) {
-            thread.goToNextBlock();
         }
     }
 

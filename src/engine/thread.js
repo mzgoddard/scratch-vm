@@ -73,8 +73,9 @@ class _StackFrame {
     /**
      * Create or recycle a stack frame object.
      * @param {boolean} warpMode Enable warpMode on this frame.
-     * @param {object}
-     * @param {string} endBlockId
+     * @param {object} params Carry over parameters from the parent stack frame.
+     * @param {string} endBlockId Execute this block id when the stack would
+     *   otherwise be null.
      * @returns {_StackFrame} The clean stack frame with correct warpMode setting.
      */
     static create (warpMode, params, endBlockId) {
@@ -262,6 +263,15 @@ class Thread {
     }
 
     /**
+     * Thread tests expect popStack to return undefined instead of null when
+     * there is no stack.
+     * @const
+     */
+    static get EMPTY_STACK_POINTER () {
+        return;
+    }
+
+    /**
      * Push stack and update stack frames appropriately.
      * @param {string} blockId Block ID to push to stack.
      * @param {string} endBlockId BlocK ID to run after the last block.
@@ -271,8 +281,8 @@ class Thread {
         this.pointer = blockId;
 
         const parent = this.stackFrame;
-        const warpMode = parent !== null ? parent.warpMode : false;
-        const params = parent !== null ? parent.params : defaultParams;
+        const warpMode = parent === null ? false : parent.warpMode;
+        const params = parent === null ? defaultParams : parent.params;
         this.stackFrames.push(this.stackFrame);
         this.stackFrame = _StackFrame.create(warpMode, params, endBlockId || 'vm_end_of_thread');
     }
@@ -296,7 +306,9 @@ class Thread {
         this.pointer = this.stack.pop();
         _StackFrame.release(this.stackFrame);
         this.stackFrame = this.stackFrames.pop();
-        return popped;
+        // Conform to existing unit tests. Return EMPTY_STACK_POINTER if popped
+        // and pointer are falsy values.
+        return popped || (this.pointer ? null : Thread.EMPTY_STACK_POINTER);
     }
 
     /**
@@ -410,10 +422,7 @@ class Thread {
      * where execution proceeds from one block to the next.
      */
     goToNextBlock () {
-        const nextBlockId = (
-            this.target.blocks.getNextBlock(this.pointer) ||
-            this.stackFrame.endBlockId
-        );
+        const nextBlockId = this.target.blocks.getNextBlock(this.pointer);
         this.reuseStackForNextBlock(nextBlockId);
     }
 

@@ -189,17 +189,24 @@ class Sequencer {
                     }
                 } else if (activeThread.status === Thread.STATUS_YIELD_TICK &&
                     !ranFirstTick) {
-                    // Clear single-tick yield from the last call of `stepThreads`.
+                    // Clear single-tick yield from the last call of
+                    // `stepThreads`.
                     activeThread.status = Thread.STATUS_RUNNING;
+                    // Run this thread again in the loop. (Since most threads
+                    // are RUNNING this second clause will be rarely checked.
+                    // Instead of checking it first we can check it late, and
+                    // loop over this index a second time to get the RUNNING
+                    // behaviour.)
                     i--;
+                    // Skip ahead to running this thread again.
                     continue;
                 }
+                // Check if the thread is running and step threads again of if
+                // it completed while it just stepped to make sure remove it
+                // before the next iteration of all threads.
                 if (activeThread.status === Thread.STATUS_RUNNING) {
                     activeThreads = true;
-                }
-                // Check if the thread completed while it just stepped to make
-                // sure we remove it before the next iteration of all threads.
-                else if (activeThread.status === Thread.STATUS_DONE) {
+                } else if (activeThread.status === Thread.STATUS_DONE) {
                     // Finished with this thread.
                     stoppedThread = true;
                 }
@@ -217,11 +224,11 @@ class Sequencer {
                 let nextActiveThread = 0;
                 for (let i = 0; i < this.runtime.threads.length; i++) {
                     const thread = this.runtime.threads[i];
-                    if (thread.status !== Thread.STATUS_DONE) {
+                    if (thread.status === Thread.STATUS_DONE) {
+                        doneThreads.push(thread);
+                    } else {
                         this.runtime.threads[nextActiveThread] = thread;
                         nextActiveThread++;
-                    } else {
-                        doneThreads.push(thread);
                     }
                 }
                 this.runtime.threads.length = nextActiveThread;
@@ -318,21 +325,11 @@ class Sequencer {
             currentBlockId,
             branchNum
         );
-        // thread.peekStackFrame().isLoop = isLoop;
-        // if (branchId) {
         // Push branch ID to the thread's stack.
         thread.pushStack(
-            branchId || (
-                isLoop ? 'vm_end_of_loop_branch' : 'vm_end_of_branch'
-            ),
+            branchId || null,
             isLoop ? 'vm_end_of_loop_branch' : 'vm_end_of_branch'
         );
-        // } else {
-        //     thread.pushStack(
-        //         isLoop ? 'vm_end_of_loop_branch' : 'vm_end_of_branch',
-        //         isLoop ? 'vm_end_of_loop_branch' : 'vm_end_of_branch'
-        //     );
-        // }
     }
 
     /**

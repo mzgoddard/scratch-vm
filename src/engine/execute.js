@@ -43,7 +43,8 @@ const isPromise = function (value) {
 /**
  * Handle any reported value from the primitive, either directly returned
  * or after a promise resolves.
- * @param {*} resolvedValue Value eventually returned from the primitive.
+ * @param {*} primitiveReportedValue Value eventually returned from the
+ *   primitive.
  * @param {!Thread} thread Thread containing the primitive.
  * @param {!string} blockCached cached block of data used by execute.
  */
@@ -310,7 +311,7 @@ class BlockCached {
                 // it would normally be placed. This lets us produce this value
                 // dynamically without having special case handling later in the
                 // runtime execute function.
-                inputCached = new BlockCached(runtime.sequencer.blocks, {
+                const inputCached = new BlockCached(runtime.sequencer.blocks, {
                     id: 'vm_cast_string',
                     opcode: 'vm_cast_string',
                     fields: {},
@@ -369,12 +370,21 @@ class BlockCached {
                 this._parentKey = 'VALUE';
                 this._parentValues = reportCached._argValues;
             }
+        }
 
-            const nextId = blockContainer && blockContainer.getNextBlock(this.id);
-            if (nextId) {
-                const nextCached = BlocksExecuteCache.getCached(blockContainer, nextId, BlockCached);
-                if (nextCached) {
-                    // console.log(nextId, nextCached.opcode, String(nextCached.opcode).split(''), nextCached);
+
+        if (this.opcode !== 'vm_may_continue') {
+            const nextId = blockContainer ?
+                blockContainer.getNextBlock(this.id) :
+                null;
+            const nextCached = blockContainer ? BlocksExecuteCache.getCached(
+                blockContainer, nextId, BlockCached
+            ) : null;
+
+            this._next = nextCached;
+
+            if (nextCached) {
+                if (!nextCached._next) {
                     const mayContinueCached = new BlockCached(null, {
                         id: 'vm_may_continue',
                         opcode: 'vm_may_continue',
@@ -384,31 +394,37 @@ class BlockCached {
                     });
 
                     mayContinueCached._argValues = {
-                        EXPECT_STACK: this.id,
-                        NEXT_STACK: nextId
+                        EXPECT_STACK: nextCached.id,
+                        NEXT_STACK: null
                     };
 
-                    const goNextCached = new BlockCached(null, {
-                        id: 'vm_go_next',
-                        opcode: 'vm_go_next',
-                        fields: {},
-                        inputs: {},
-                        mutation: null
-                    });
-
-                    this._ops.push(mayContinueCached);
-
-                    this._allOps = [
-                        ...this._ops,
-                        mayContinueCached,
-                        ...(nextCached._ops === nextCached._allOps ? nextCached._allOps : nextCached._allOps.slice(nextCached._allOps.length - 1)),
-                        goNextCached
-                    ];
+                    nextCached._ops.push(mayContinueCached);
                 }
-            }
-        }
 
-        this._allOps = this._allOps || this._ops;
+                const mayContinueCached = new BlockCached(null, {
+                    id: 'vm_may_continue',
+                    opcode: 'vm_may_continue',
+                    fields: {},
+                    inputs: {},
+                    mutation: null
+                });
+
+                mayContinueCached._argValues = {
+                    EXPECT_STACK: this.id,
+                    NEXT_STACK: nextId
+                };
+
+                this._ops.push(mayContinueCached);
+                this._allOps = [
+                    ...this._ops,
+                    ...nextCached._allOps
+                ];
+            } else {
+                this._allOps = this._ops;
+            }
+        } else {
+            this._allOps = this._ops;
+        }
     }
 }
 
@@ -433,10 +449,6 @@ const execute = function (sequencer, thread) {
     const _lastSequencer = blockUtility.sequencer;
     const _lastThread = blockUtility.thread;
 
-    if (_lastThread !== null) {
-        debugger;
-    }
-
     // store sequencer and thread so block functions can access them through
     // convenience methods.
     blockUtility.sequencer = sequencer;
@@ -450,15 +462,14 @@ const execute = function (sequencer, thread) {
         }
 
         // Current block to execute is the one on the top of the stack.
-        currentBlockId = thread.pointer;
+        currentBlockId = thread.pointer || thread.peekStackFrame().endBlockId;
 
-        let blockCached = (
+        const blockCached = (
             BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, BlockCached) ||
             BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId, BlockCached) ||
             BlocksExecuteCache.getCached(runtime.flyoutBlocks, currentBlockId, BlockCached)
         );
         if (blockCached === null) {
-            // console.log('retire thread', currentBlockId);
             // No block found: stop the thread; script no longer exists.
             sequencer.retireThread(thread);
             break;
