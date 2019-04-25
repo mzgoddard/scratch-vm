@@ -263,15 +263,6 @@ class Thread {
     }
 
     /**
-     * Thread tests expect popStack to return undefined instead of null when
-     * there is no stack.
-     * @const
-     */
-    static get EMPTY_STACK_POINTER () {
-        return;
-    }
-
-    /**
      * Push stack and update stack frames appropriately.
      * @param {string} blockId Block ID to push to stack.
      * @param {string} endBlockId BlocK ID to run after the last block.
@@ -299,16 +290,17 @@ class Thread {
 
     /**
      * Pop last block on the stack and its stack frame.
-     * @return {string} Block ID popped from the stack.
+     * @return {?string} Block ID popped from the stack.
      */
     popStack () {
         const popped = this.pointer;
         this.pointer = this.stack.pop();
         _StackFrame.release(this.stackFrame);
         this.stackFrame = this.stackFrames.pop();
-        // Conform to existing unit tests. Return EMPTY_STACK_POINTER if popped
-        // and pointer are falsy values.
-        return popped || (this.pointer ? null : Thread.EMPTY_STACK_POINTER);
+        // Conform to existing unit tests. Return undefined if popped and
+        // pointer are falsy values.
+        if (!popped && !this.pointer) return;
+        return popped || null;
     }
 
     /**

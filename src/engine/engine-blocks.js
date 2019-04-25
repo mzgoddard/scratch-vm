@@ -162,10 +162,6 @@ class Scratch3VMBlocks {
         blockCached._ops = ops;
         blockCached._allOps = allOps;
 
-        if (thread.reported) {
-            thread.reported = reported.concat(thread.reported);
-        }
-
         if (
             thread.status === Thread.STATUS_RUNNING &&
             thread.peekStack() === currentBlockId

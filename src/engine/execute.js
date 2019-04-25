@@ -348,8 +348,6 @@ class BlockCached {
             }
         }
 
-        this._top = this;
-
         // The final operation is this block itself. At the top most block is a
         // command block or a block that is being run as a monitor.
         if (!this._isHat && this._isShadowBlock) {
@@ -372,6 +370,7 @@ class BlockCached {
             }
         }
 
+        this._allOps = this._ops;
 
         if (this.opcode !== 'vm_may_continue') {
             const nextId = blockContainer ?
@@ -385,7 +384,14 @@ class BlockCached {
 
             if (nextCached) {
                 if (!nextCached._next) {
-                    const mayContinueCached = new BlockCached(null, {
+                    // If we step the thread with a block we must step the
+                    // thread in every following thread including the last in
+                    // the sequence. The last block doesn't know though if it is
+                    // last or if it is a reporter so the block before it will
+                    // finish its configuration. If the last block is alone in
+                    // the stack, the normal step behaviour outside of the block
+                    // sequence will step us.
+                    const mayStepFromLastCached = new BlockCached(null, {
                         id: 'vm_may_continue',
                         opcode: 'vm_may_continue',
                         fields: {},
@@ -393,12 +399,12 @@ class BlockCached {
                         mutation: null
                     });
 
-                    mayContinueCached._argValues = {
+                    mayStepFromLastCached._argValues = {
                         EXPECT_STACK: nextCached.id,
                         NEXT_STACK: null
                     };
 
-                    nextCached._ops.push(mayContinueCached);
+                    nextCached._ops.push(mayStepFromLastCached);
                 }
 
                 const mayContinueCached = new BlockCached(null, {
@@ -419,11 +425,7 @@ class BlockCached {
                     ...this._ops,
                     ...nextCached._allOps
                 ];
-            } else {
-                this._allOps = this._ops;
             }
-        } else {
-            this._allOps = this._ops;
         }
     }
 }
