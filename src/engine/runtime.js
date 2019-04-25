@@ -717,6 +717,8 @@ class Runtime extends EventEmitter {
                         if (typeof packagePrimitives[op] === 'function') {
                             this._primitives[op] =
                                 packagePrimitives[op].bind(packageObject);
+                            this._primitives[op]._function = packagePrimitives[op];
+                            this._primitives[op]._context = packageObject;
                         }
                     }
                 }
