@@ -37,7 +37,8 @@ const defaultBlockPackages = {
     scratch3_sound: require('../blocks/scratch3_sound'),
     scratch3_sensing: require('../blocks/scratch3_sensing'),
     scratch3_data: require('../blocks/scratch3_data'),
-    scratch3_procedures: require('../blocks/scratch3_procedures')
+    scratch3_procedures: require('../blocks/scratch3_procedures'),
+    scratch3_vm: require('./engine-blocks')
 };
 
 /**
@@ -1447,7 +1448,7 @@ class Runtime extends EventEmitter {
             this.monitorBlocks :
             target.blocks;
 
-        thread.pushStack(id);
+        thread.pushStack(id, opts.stackClick ? 'vm_report_stack_click' : opts.updateMonitor ? 'vm_report_monitor' : 'vm_end_of_thread');
         this.threads.push(thread);
         return thread;
     }
@@ -1493,9 +1494,7 @@ class Runtime extends EventEmitter {
      */
     isActiveThread (thread) {
         return (
-            (
-                thread.stack.length > 0 &&
-                thread.status !== Thread.STATUS_DONE) &&
+            (thread.status !== Thread.STATUS_DONE) &&
             this.threads.indexOf(thread) > -1);
     }
 
