@@ -23,12 +23,6 @@ const defaultParams = Object.create(null);
 class _StackFrame {
     constructor () {
         /**
-         * Whether this level of the stack is a loop.
-         * @type {boolean}
-         */
-        this.isLoop = false;
-
-        /**
          * Whether this level is in warp mode. Set to true by the sequencer for
          * some procedures.
          *
@@ -56,6 +50,12 @@ class _StackFrame {
         this.executionContext = {};
 
         /**
+         * The block id the thread should step to if a block's next is null.
+         * @type {string}
+         */
+        this.endBlockId = null;
+
+        /**
          * Has this frame changed and need a reset?
          * @type {boolean}
          */
@@ -67,7 +67,6 @@ class _StackFrame {
      * @return {_StackFrame} this
      */
     reset () {
-        this.isLoop = false;
         this.executionContext = {};
         this.needsReset = false;
 
@@ -77,13 +76,15 @@ class _StackFrame {
     /**
      * Create or recycle a stack frame object.
      * @param {_StackFrame} parent Parent frame to copy "immutable" values.
-     * @returns {_StackFrame} The clean stack frame with correct warpMode
-     *   setting.
+     * @param {string} endBlockId Execute this block id when the stack would
+     *   otherwise be null.
+     * @returns {_StackFrame} The clean stack frame with correct warpMode setting.
      */
-    static create (parent) {
+    static create (parent, endBlockId) {
         const stackFrame = _stackFrameFreeList.pop() || new _StackFrame();
         stackFrame.warpMode = parent.warpMode;
         stackFrame.params = parent.params;
+        stackFrame.endBlockId = endBlockId;
         return stackFrame;
     }
 
@@ -259,18 +260,20 @@ class Thread {
     /**
      * Push stack and update stack frames appropriately.
      * @param {string} blockId Block ID to push to stack.
+     * @param {string} endBlockId BlocK ID to run after the last block.
      */
-    pushStack (blockId) {
+    pushStack (blockId, endBlockId) {
+        endBlockId = endBlockId || 'vm_end_of_thread';
         if (this.stackFrame === null) {
             this.pointer = blockId;
-            this.stackFrame = _StackFrame.create(initialStackFrame);
+            this.stackFrame = _StackFrame.create(initialStackFrame, endBlockId);
         } else {
             this.stack.push(this.pointer);
             this.pointer = blockId;
 
             const parent = this.stackFrame;
             this.stackFrames.push(parent);
-            this.stackFrame = _StackFrame.create(parent);
+            this.stackFrame = _StackFrame.create(parent, endBlockId);
         }
     }
 
