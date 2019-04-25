@@ -25,6 +25,8 @@ class Scratch3VMBlocks {
             vm_end_of_loop_branch: this.endOfLoopBranch,
             vm_end_of_branch: this.endOfBranch,
             vm_cast_string: this.castString,
+            vm_may_continue: this.mayContinue,
+            vm_go_next: this.goNext,
             vm_reenter_promise: this.reenterFromPromise,
             vm_report_hat: this.reportHat,
             vm_report_stack_click: this.reportStackClick,
@@ -61,8 +63,25 @@ class Scratch3VMBlocks {
         return Cast.toString(args.VALUE);
     }
 
+    mayContinue (args, {thread}) {
+        if (
+            thread.continuous && thread.status === Thread.STATUS_RUNNING &&
+            thread.pointer === args.EXPECT_STACK
+        ) {
+            thread.reuseStackForNextBlock(args.NEXT_STACK);
+        } else if (thread.status === Thread.STATUS_RUNNING) {
+            thread.status = Thread.STATUS_INTERRUPT;
+        }
+    }
+
+    goNext (args, {thread}) {
+        if (thread.continuous && thread.status === Thread.STATUS_RUNNING) {
+            thread.goToNextBlock();
+        }
+    }
+
     _getBlockCached (sequencer, thread, currentBlockId) {
-        let blockCached = (
+        const blockCached = (
             BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId) ||
             BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId) ||
             BlocksExecuteCache.getCached(sequencer.runtime.flyoutBlocks, currentBlockId)
@@ -84,7 +103,6 @@ class Scratch3VMBlocks {
         if (blockCached === null) return;
 
         const ops = blockCached._ops;
-        const length = ops.length;
         let i = 0;
 
         const reported = thread.reported;
@@ -135,15 +153,17 @@ class Scratch3VMBlocks {
         thread.reporting = null;
         thread.reported = null;
 
-        const allOps = ops;
-        blockCached._ops = blockCached._ops.slice(i);
+        const allOps = blockCached._allOps;
+        blockCached._ops = ops.slice(i);
+        blockCached._allOps = allOps.slice(i);
 
         const continuous = thread.continuous;
         thread.continuous = false;
         execute(sequencer, thread);
         thread.continuous = continuous;
 
-        blockCached._ops = allOps;
+        blockCached._ops = ops;
+        blockCached._allOps = allOps;
 
         if (thread.reported) {
             thread.reported = reported.concat(thread.reported);
@@ -166,7 +186,6 @@ class Scratch3VMBlocks {
         if (blockCached === null) return;
 
         const opcode = blockCached.opcode;
-        const isHat = blockCached._isHat;
 
         const resolvedValue = args.VALUE;
 

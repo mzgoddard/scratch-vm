@@ -212,6 +212,17 @@ class Thread {
     }
 
     /**
+     * Thread status for interrupting executing thread.
+     * This is for breaking out of a block execution loop because an assumption
+     * was broken during execution. Breaking the assumption is ok but means
+     * that the assumptions need to be rebuilt to new values.
+     * @const
+     */
+    static get STATUS_INTERRUPT () {
+        return -1;
+    }
+
+    /**
      * Thread status for initialized or running thread.
      * This is the default state for a thread - execution should run normally,
      * stepping from block to block.
