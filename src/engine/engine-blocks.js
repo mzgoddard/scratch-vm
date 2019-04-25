@@ -24,6 +24,9 @@ class Scratch3VMBlocks {
             vm_end_of_procedure: this.endOfProcedure,
             vm_end_of_loop_branch: this.endOfLoopBranch,
             vm_end_of_branch: this.endOfBranch,
+            vm_cast_string: this.castString,
+            vm_may_continue: this.mayContinue,
+            vm_go_next: this.goNext,
             vm_reenter_promise: this.reenterFromPromise,
             vm_report_hat: this.reportHat,
             vm_report_stack_click: this.reportStackClick,
@@ -54,6 +57,27 @@ class Scratch3VMBlocks {
     endOfBranch (args, {thread}) {
         thread.popStack();
         thread.goToNextBlock();
+    }
+
+    castString (args) {
+        return Cast.toString(args.VALUE);
+    }
+
+    mayContinue (args, {thread}) {
+        if (
+            thread.continuous && thread.status === Thread.STATUS_RUNNING &&
+            thread.pointer === args.EXPECT_STACK
+        ) {
+            thread.reuseStackForNextBlock(args.NEXT_STACK);
+        } else if (thread.status === Thread.STATUS_RUNNING) {
+            thread.status = Thread.STATUS_INTERRUPT;
+        }
+    }
+
+    goNext (args, {thread}) {
+        if (thread.continuous && thread.status === Thread.STATUS_RUNNING) {
+            thread.goToNextBlock();
+        }
     }
 
     _getBlockCached (sequencer, thread, currentBlockId) {
