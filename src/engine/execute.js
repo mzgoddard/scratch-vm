@@ -32,12 +32,23 @@ let blockFunctionProfilerId = -1;
  * @param {*} value Value to check for a Promise.
  * @return {boolean} True if the value appears to be a Promise.
  */
+// const isPromise = function (value) {
+//     return (
+//         typeof value === 'object' &&
+//         value !== null &&
+//         typeof value.then === 'function'
+//     );
+// };
+
 const isPromise = function (value) {
-    return (
+    if (
         typeof value === 'object' &&
         value !== null &&
         typeof value.then === 'function'
-    );
+    ) {
+        blockUtility.thread.status = Thread.STATUS_PROMISE_WAIT;
+    }
+    return value;
 };
 
 /**
@@ -73,7 +84,7 @@ const handlePromise = (primitiveReportedValue, thread, blockCached) => {
     thread.justReported = null;
     const ops = blockCached._ops;
     thread.reporting = blockCached.id;
-    thread.reported = ops.slice(0, ops.length - 1).map(reportedCached => {
+    thread.reported = ops.slice(0, ops.indexOf(blockCached)).map(reportedCached => {
         const inputName = reportedCached._parentKey;
         const reportedValues = reportedCached._parentValues;
         return {
@@ -100,6 +111,8 @@ const handlePromise = (primitiveReportedValue, thread, blockCached) => {
  */
 class BlockCached {
     constructor (blockContainer, cached) {
+        this.blockContainer = blockContainer;
+
         /**
          * Block id in its parent set of blocks.
          * @type {string}
@@ -212,6 +225,8 @@ class BlockCached {
          */
         this._parentValues = {};
 
+        this._returnValue = null;
+
         /**
          * A sequence of shadow value operations that can be performed in any
          * order and are easier to perform given that they are static.
@@ -242,9 +257,20 @@ class BlockCached {
             // unbound.call(context) than to call unbound.bind(context)().
             this._blockFunctionUnbound = this._blockFunction._function || this._blockFunction;
             this._blockFunctionContext = this._blockFunction._context;
+
+            // const unbound = this._blockFunctionUnbound;
+            // const context = this._blockFunctionContext;
+            // this.call = function () {
+            //     return this._parentValues[this._parentKey] =
+            //         unbound.call(context, this._argValues, blockUtility);
+            // };
         } else {
             this._blockFunctionUnbound = null;
             this._blockFunctionContext = null;
+        }
+
+        if (opcode.startsWith('vm_')) {
+            this.call = this._callvm;
         }
 
         // Store the current shadow value if there is a shadow value.
@@ -340,6 +366,48 @@ class BlockCached {
                 inputCached._parentKey = inputName;
                 inputCached._parentValues = this._argValues;
 
+                // if (inputCached._definedBlockFunction) {
+                //     const unbound = inputCached._blockFunctionUnbound;
+                //     const context = inputCached._blockFunctionContext;
+                //     const argValues = inputCached._argValues;
+                //     const parentKey = inputCached._parentKey;
+                //     const parentValues = inputCached._parentValues;
+                //     inputCached.call = function () {
+                //         return parentValues[parentKey] =
+                //             unbound.call(context, argValues, blockUtility);
+                //     };
+                // }
+
+                if (inputCached._definedBlockFunction) {
+                    if (inputName === 'input0') {
+                        inputCached.call = inputCached._callinput0;
+                    } else if (inputName === 'CONDITION') {
+                        inputCached.call = inputCached._callCONDITION;
+                    } else if (inputName === 'COSTUME') {
+                        inputCached.call = inputCached._callCOSTUME;
+                    } else if (inputName === 'NUM') {
+                        inputCached.call = inputCached._callNUM;
+                    } else if (inputName === 'NUM1') {
+                        inputCached.call = inputCached._callNUM1;
+                    } else if (inputName === 'NUM2') {
+                        inputCached.call = inputCached._callNUM2;
+                    } else if (inputName === 'OPERAND') {
+                        inputCached.call = inputCached._callOPERAND;
+                    } else if (inputName === 'OPERAND1') {
+                        inputCached.call = inputCached._callOPERAND1;
+                    } else if (inputName === 'OPERAND2') {
+                        inputCached.call = inputCached._callOPERAND2;
+                    } else if (inputName === 'VALUE') {
+                        inputCached.call = inputCached._callVALUE;
+                    } else if (inputName === 'X') {
+                        inputCached.call = inputCached._callX;
+                    } else if (inputName === 'Y') {
+                        inputCached.call = inputCached._callY;
+                    } else {
+                        console.log(inputName);
+                    }
+                }
+
                 // Shadow values are static and do not change, go ahead and
                 // store their value on args.
                 if (inputCached._isShadowBlock) {
@@ -372,63 +440,264 @@ class BlockCached {
 
         this._allOps = this._ops;
 
-        if (this.opcode !== 'vm_may_continue') {
-            const nextId = blockContainer ?
-                blockContainer.getNextBlock(this.id) :
-                null;
-            const nextCached = blockContainer ? BlocksExecuteCache.getCached(
-                blockContainer, nextId, BlockCached
-            ) : null;
+        this._isCommandBlock = false;
 
-            this._next = nextCached;
+        this._next = null;
+    }
 
-            if (nextCached) {
-                if (!nextCached._next) {
-                    // If we step the thread with a block we must step the
-                    // thread in every following thread including the last in
-                    // the sequence. The last block doesn't know though if it is
-                    // last or if it is a reporter so the block before it will
-                    // finish its configuration. If the last block is alone in
-                    // the stack, the normal step behaviour outside of the block
-                    // sequence will step us.
-                    const mayStepFromLastCached = new BlockCached(null, {
-                        id: 'vm_may_continue',
-                        opcode: 'vm_may_continue',
-                        fields: {},
-                        inputs: {},
-                        mutation: null
-                    });
+    call () {
+        return this._parentValues[this._parentKey] =
+            this._blockFunctionUnbound.call(
+                this._blockFunctionContext,
+                this._argValues, blockUtility
+            );
+        // if (blockUtility.thread.status === Thread.STATUS_RUNNING) return this._chain.call(i + 1);
+        // return i;
+    }
 
-                    mayStepFromLastCached._argValues = {
-                        EXPECT_STACK: nextCached.id,
-                        NEXT_STACK: null
-                    };
+    _callvm () {
+        this._blockFunctionUnbound.call(
+            this._blockFunctionContext,
+            this._argValues, blockUtility
+        );
+    }
 
-                    nextCached._ops.push(mayStepFromLastCached);
-                }
+    _callinput0 () {
+        return this._parentValues.input0 =
+            this._blockFunctionUnbound.call(
+                this._blockFunctionContext,
+                this._argValues, blockUtility
+            );
+    }
 
-                const mayContinueCached = new BlockCached(null, {
-                    id: 'vm_may_continue',
-                    opcode: 'vm_may_continue',
-                    fields: {},
-                    inputs: {},
-                    mutation: null
-                });
+    _callCONDITION () {
+        return this._parentValues.CONDITION =
+            this._blockFunctionUnbound.call(
+                this._blockFunctionContext,
+                this._argValues, blockUtility
+            );
+    }
 
-                mayContinueCached._argValues = {
-                    EXPECT_STACK: this.id,
-                    NEXT_STACK: nextId
-                };
+    _callCOSTUME () {
+        return this._parentValues.COSTUME =
+            this._blockFunctionUnbound.call(
+                this._blockFunctionContext,
+                this._argValues, blockUtility
+            );
+    }
 
-                this._ops.push(mayContinueCached);
-                this._allOps = [
-                    ...this._ops,
-                    ...nextCached._allOps
-                ];
-            }
-        }
+    _callNUM () {
+        return this._parentValues.NUM =
+            this._blockFunctionUnbound.call(
+                this._blockFunctionContext,
+                this._argValues, blockUtility
+            );
+    }
+
+    _callNUM1 () {
+        return this._parentValues.NUM1 =
+            this._blockFunctionUnbound.call(
+                this._blockFunctionContext,
+                this._argValues, blockUtility
+            );
+    }
+
+    _callNUM2 () {
+        return this._parentValues.NUM2 =
+            this._blockFunctionUnbound.call(
+                this._blockFunctionContext,
+                this._argValues, blockUtility
+            );
+    }
+
+    _callOPERAND () {
+        return this._parentValues.OPERAND =
+            this._blockFunctionUnbound.call(
+                this._blockFunctionContext,
+                this._argValues, blockUtility
+            );
+    }
+
+    _callOPERAND1 () {
+        return this._parentValues.OPERAND1 =
+            this._blockFunctionUnbound.call(
+                this._blockFunctionContext,
+                this._argValues, blockUtility
+            );
+    }
+
+    _callOPERAND2 () {
+        return this._parentValues.OPERAND2 =
+            this._blockFunctionUnbound.call(
+                this._blockFunctionContext,
+                this._argValues, blockUtility
+            );
+    }
+
+    _callVALUE () {
+        return this._parentValues.VALUE =
+            this._blockFunctionUnbound.call(
+                this._blockFunctionContext,
+                this._argValues, blockUtility
+            );
+    }
+
+    _callX () {
+        return this._parentValues.X =
+            this._blockFunctionUnbound.call(
+                this._blockFunctionContext,
+                this._argValues, blockUtility
+            );
+    }
+
+    _callY () {
+        return this._parentValues.Y =
+            this._blockFunctionUnbound.call(
+                this._blockFunctionContext,
+                this._argValues, blockUtility
+            );
     }
 }
+
+const ACTIVE_BLOCK_REF = {
+    BLOCK: null
+};
+
+const endOfChain = {
+    call (i) {
+        return i;
+    }
+};
+
+class CommandBlockCached extends BlockCached {
+    constructor (blockContainer, cached) {
+        super(blockContainer, cached);
+
+        this._isCommandBlock = true;
+
+        this._jumpToId = null;
+        this._jumpTo = NULL_JUMP;
+
+        const nextId = blockContainer ?
+            blockContainer.getNextBlock(this.id) :
+            null;
+
+        const continueOpcode = nextId === null ?
+            'vm_last_continue' : 'vm_may_continue';
+        const mayContinueCached = new BlockCached(null, {
+            id: continueOpcode,
+            opcode: continueOpcode,
+            fields: {},
+            inputs: {},
+            mutation: null
+        });
+
+        mayContinueCached._argValues = {
+            ACTIVE_BLOCK_REF,
+            EXPECT_STACK: this.id,
+            NEXT_STACK: nextId
+        };
+
+        this._ops.push(mayContinueCached);
+
+        const nextCached = blockContainer ? BlocksExecuteCache.getCached(
+            blockContainer, nextId, CommandBlockCached
+        ) : null;
+
+        this._next = nextCached;
+
+        if (nextCached) {
+            this._allOps = [...this._ops, ...nextCached._allOps];
+        }
+
+        for (let i = 0; i < this._ops; i++) {
+            this._ops[i]._chain = this._ops[i + 1] || (
+                nextCached ? nextCached._ops[0] : endOfChain
+            );
+        }
+    }
+
+    call () {
+        return this._returnValue = this._blockFunctionUnbound.call(
+            this._blockFunctionContext,
+            this._argValues, blockUtility
+        );
+    }
+}
+
+/**
+ * Execute a block.
+ * @param {!Sequencer} sequencer Which sequencer is executing.
+ * @param {!Thread} thread Thread which to read and execute.
+ */
+const executeProfile = function (sequencer, thread, blockCached) {
+    const runtime = sequencer.runtime;
+
+    const ops = blockCached._allOps;
+    let i = -1;
+
+    let reportedValue;
+
+    while (thread.status === STATUS_RUNNING) {
+        const opCached = ops[++i];
+
+        const {profiler} = runtime;
+
+        if (blockFunctionProfilerId === -1) {
+            blockFunctionProfilerId = profiler.idByName(blockFunctionProfilerFrame);
+        }
+
+        const opcode = opCached.opcode;
+        // The method commented below has its code inlined
+        // underneath to reduce the bias recorded for the profiler's
+        // calls in this time sensitive execute function.
+        //
+        // profiler.start(blockFunctionProfilerId, opcode);
+        opCached.profileOpcode && profiler.records.push(
+            profiler.START, blockFunctionProfilerId, opcode, 0);
+
+        isPromise(opCached.call());
+        // reportedValue = opCached.call();
+        // opCached._parentValues[opCached._parentKey] = reportedValue =
+        //     opCached._blockFunctionUnbound.call(
+        //         opCached._blockFunctionContext,
+        //         opCached._argValues, blockUtility
+        //     );
+
+        // profiler.stop(blockFunctionProfilerId);
+        opCached.profileOpcode && profiler.records.push(profiler.STOP, 0);
+
+        // // If it's a promise, wait until promise resolves.
+        // // if (isPromise(reportedValue)) {
+        // if (
+        //     reportedValue !== null &&
+        //     typeof reportedValue === 'object' &&
+        //     typeof reportedValue.then === 'function'
+        // ) {
+        //     // We are waiting for a promise. Set the status to a non-running
+        //     // state and store the arg values for the executed operations.
+        //     handlePromise(reportedValue, thread, opCached);
+        // }
+    }
+
+    if (thread.status === Thread.STATUS_PROMISE_WAIT) {
+        handlePromise(opCached._returnValue || opCached._parentValues[opCached._parentKey], thread, ops[i]);
+    }
+
+    if (thread.status === Thread.STATUS_INTERRUPT) {
+        thread.status = STATUS_RUNNING;
+    }
+};
+
+const NULL_JUMP = {
+    id: null,
+};
+
+const INITIAL_BLOCK_CACHED = Object.freeze({
+    id: null,
+    _jumpToId: null,
+    _jumpTo: NULL_JUMP
+});
 
 /**
  * Execute a block.
@@ -445,8 +714,6 @@ const execute = function (sequencer, thread) {
         thread.requestScriptGlowInFrame = true;
     }
 
-    let currentBlockId;
-
     // Store old sequencer and thread and reset them after execution.
     const _lastSequencer = blockUtility.sequencer;
     const _lastThread = blockUtility.thread;
@@ -456,77 +723,94 @@ const execute = function (sequencer, thread) {
     blockUtility.sequencer = sequencer;
     blockUtility.thread = thread;
 
+    let lastBlockCached;
+    let blockCached = INITIAL_BLOCK_CACHED;
+
     do {
-        // On a second iteration, step the thread if it has not experienced
-        // control flow.
-        if (thread.pointer === currentBlockId) {
-            thread.goToNextBlock();
-        }
-
         // Current block to execute is the one on the top of the stack.
-        currentBlockId = thread.pointer || thread.peekStackFrame().endBlockId;
+        const currentBlockId = thread.pointer || thread.peekStackFrame().endBlockId;
 
-        const blockCached = (
-            BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, BlockCached) ||
-            BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId, BlockCached) ||
-            BlocksExecuteCache.getCached(runtime.flyoutBlocks, currentBlockId, BlockCached)
-        );
-        if (blockCached === null) {
-            // No block found: stop the thread; script no longer exists.
-            sequencer.retireThread(thread);
-            break;
+        if (blockCached._jumpToId === currentBlockId) {
+            // window.JUMP = (window.JUMP || 0) + 1;
+            blockCached = blockCached._jumpTo;
+        } else {
+            // window.LOOKUP = (window.LOOKUP || 0) + 1;
+            lastBlockCached = blockCached;
+            blockCached = (
+                BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, CommandBlockCached) ||
+                BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId, CommandBlockCached) ||
+                BlocksExecuteCache.getCached(runtime.flyoutBlocks, currentBlockId, CommandBlockCached)
+            );
+
+            if (blockCached === null) {
+                // No block found: stop the thread; script no longer exists.
+                sequencer.retireThread(thread);
+                break;
+            }
+
+            if (lastBlockCached !== INITIAL_BLOCK_CACHED) {
+                if (
+                    lastBlockCached._jumpTo === NULL_JUMP &&
+                    blockCached.blockContainer === sequencer.blocks
+                ) {
+                    // window.JUMP_SEQUENCE = (window.JUMP_SEQUENCE || 0) + 1;
+                    blockCached = new CommandBlockCached(sequencer.blocks, blockCached);
+                }
+
+                // window.SET_JUMP = (window.SET_JUMP || 0) + 1;
+                lastBlockCached._jumpToId = currentBlockId;
+                lastBlockCached._jumpTo = blockCached;
+            }
         }
 
-        const isNotProfiling = runtime.profiler === null || !blockCached.profileOpcode;
+        // ACTIVE_BLOCK_REF.BLOCK = blockCached;
+
+        if (runtime.profiler !== null) {
+            executeProfile(sequencer, thread, blockCached);
+            continue;
+        }
 
         const ops = blockCached._allOps;
-        const length = ops.length;
-        let i = 0;
+
+        let i = -1;
 
         let reportedValue;
         let opCached;
 
-        for (; i < length && thread.status === STATUS_RUNNING; i++) {
-            opCached = ops[i];
+        // i = ops[0].call(0);
 
-            if (isNotProfiling) {
-                opCached._parentValues[opCached._parentKey] = reportedValue =
-                    opCached._blockFunctionUnbound.call(
-                        opCached._blockFunctionContext,
-                        opCached._argValues, blockUtility
-                    );
-            } else {
-                const {profiler} = runtime;
+        while (thread.status === STATUS_RUNNING) {
+            // opCached = ops[i++];
 
-                if (blockFunctionProfilerId === -1) {
-                    blockFunctionProfilerId = profiler.idByName(blockFunctionProfilerFrame);
-                }
+            isPromise(ops[++i].call());
+            // reportedValue = opCached.call();
+            // opCached._parentValues[opCached._parentKey] =
+            //     isPromise(
+            //     // reportedValue =
+            //     opCached._blockFunctionUnbound.call(
+            //         opCached._blockFunctionContext,
+            //         opCached._argValues, blockUtility
+            //     )
+            //     )
+            //     ;
 
-                const opcode = opCached.opcode;
-                // The method commented below has its code inlined
-                // underneath to reduce the bias recorded for the profiler's
-                // calls in this time sensitive execute function.
-                //
-                // profiler.start(blockFunctionProfilerId, opcode);
-                profiler.records.push(
-                    profiler.START, blockFunctionProfilerId, opcode, 0);
+            // // // If it's a promise, wait until promise resolves.
+            // // // if (isPromise(reportedValue)) {
+            // if (
+            //     reportedValue !== null &&
+            //     typeof reportedValue === 'object' &&
+            //     typeof reportedValue.then === 'function'
+            // ) {
+            //     // We are waiting for a promise. Set the status to a non-running
+            //     // state and store the arg values for the executed operations.
+            //     handlePromise(reportedValue, thread, opCached);
+            // } else {
+            //     opCached._parentValues[opCached._parentKey] = reportedValue;
+            // }
+        }
 
-                opCached._parentValues[opCached._parentKey] = reportedValue =
-                    opCached._blockFunctionUnbound.call(
-                        opCached._blockFunctionContext,
-                        opCached._argValues, blockUtility
-                    );
-
-                // profiler.stop(blockFunctionProfilerId);
-                profiler.records.push(profiler.STOP, 0);
-            }
-
-            // If it's a promise, wait until promise resolves.
-            if (isPromise(reportedValue)) {
-                // We are waiting for a promise. Set the status to a non-running
-                // state and store the arg values for the executed operations.
-                handlePromise(reportedValue, thread, opCached);
-            }
+        if (thread.status === Thread.STATUS_PROMISE_WAIT) {
+            handlePromise(opCached._returnValue || opCached._parentValues[opCached._parentKey], thread, ops[i]);
         }
 
         if (thread.status === Thread.STATUS_INTERRUPT) {

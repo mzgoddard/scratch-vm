@@ -26,6 +26,7 @@ class Scratch3VMBlocks {
             vm_end_of_branch: this.endOfBranch,
             vm_cast_string: this.castString,
             vm_may_continue: this.mayContinue,
+            vm_last_continue: this.lastContinue,
             vm_reenter_promise: this.reenterFromPromise,
             vm_report_hat: this.reportHat,
             vm_report_stack_click: this.reportStackClick,
@@ -63,18 +64,18 @@ class Scratch3VMBlocks {
     }
 
     mayContinue (args, {thread}) {
-        if (
-            thread.continuous && thread.status === Thread.STATUS_RUNNING &&
-            thread.pointer === args.EXPECT_STACK
-        ) {
-            if (args.NEXT_STACK) {
-                thread.reuseStackForNextBlock(args.NEXT_STACK);
-            } else {
-                thread.goToNextBlock();
-            }
-        } else if (thread.status === Thread.STATUS_RUNNING) {
+        if (thread.continuous && thread.pointer === args.EXPECT_STACK) {
+            thread.reuseStackForNextBlock(args.NEXT_STACK);
+        } else {
             thread.status = Thread.STATUS_INTERRUPT;
         }
+    }
+
+    lastContinue (args, {thread}) {
+        if (thread.continuous && thread.pointer === args.EXPECT_STACK) {
+            thread.reuseStackForNextBlock(args.NEXT_STACK);
+        }
+        thread.status = Thread.STATUS_INTERRUPT;
     }
 
     _getBlockCached (sequencer, thread, currentBlockId) {
@@ -150,17 +151,19 @@ class Scratch3VMBlocks {
         thread.reporting = null;
         thread.reported = null;
 
-        const allOps = blockCached._allOps;
-        blockCached._ops = ops.slice(i);
-        blockCached._allOps = allOps.slice(i);
+        if ((ops.length - i) > 0) {
+            const allOps = blockCached._allOps;
+            blockCached._ops = ops.slice(i);
+            blockCached._allOps = allOps.slice(i);
 
-        const continuous = thread.continuous;
-        thread.continuous = false;
-        execute(sequencer, thread);
-        thread.continuous = continuous;
+            const continuous = thread.continuous;
+            thread.continuous = false;
+            execute(sequencer, thread);
+            thread.continuous = continuous;
 
-        blockCached._ops = ops;
-        blockCached._allOps = allOps;
+            blockCached._ops = ops;
+            blockCached._allOps = allOps;
+        }
 
         if (
             thread.status === Thread.STATUS_RUNNING &&
