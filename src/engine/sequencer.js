@@ -206,7 +206,7 @@ class Sequencer {
                 // before the next iteration of all threads.
                 if (activeThread.status === Thread.STATUS_RUNNING) {
                     activeThreads = true;
-                } else if (activeThread.status === Thread.STATUS_DONE) {
+                } else if (activeThread.stack.length === 0 || activeThread.status === Thread.STATUS_DONE) {
                     // Finished with this thread.
                     stoppedThread = true;
                 }
@@ -234,6 +234,10 @@ class Sequencer {
                 this.runtime.threads.length = nextActiveThread;
             }
         }
+        // console.log(this.runtime.threads.length > 0,
+        //        activeThreads,
+        //        this.timer.timeElapsed() < WORK_TIME,
+        //        (this.runtime.turboMode || !this.runtime.redrawRequested));
 
         return doneThreads;
     }
@@ -249,6 +253,7 @@ class Sequencer {
         }
 
         if (thread.peekStackFrame().warpMode && !thread.warpTimer) {
+            // console.log('init warpTimer');
             // Initialize warp-mode timer if it hasn't been already.
             // This will start counting the thread toward `Sequencer.WARP_TIME`.
             thread.warpTimer = new Timer();
@@ -291,6 +296,7 @@ class Sequencer {
                 thread.peekStackFrame().warpMode &&
                 thread.warpTimer.timeElapsed() <= Sequencer.WARP_TIME
             ) {
+                // console.log('warp running');
                 // Mark as running for next iteration.
                 thread.status = Thread.STATUS_RUNNING;
             } else if (
@@ -354,6 +360,7 @@ class Sequencer {
         // In known warp-mode threads, only yield when time is up.
         if (thread.peekStackFrame().warpMode &&
             thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME) {
+                // console.log('warp limit');
             thread.status = Thread.STATUS_YIELD;
         } else {
             // Look for warp-mode flag on definition, and set the thread
@@ -374,6 +381,7 @@ class Sequencer {
                 thread.peekStackFrame().warpMode = true;
 
                 if (!thread.warpTimer) {
+                    // console.log('init warpTimer');
                     // Initialize warp-mode timer if it hasn't been already.
                     // This will start counting the thread toward
                     // `Sequencer.WARP_TIME`.
@@ -381,6 +389,7 @@ class Sequencer {
                     thread.warpTimer.start();
                 }
             } else if (isRecursive) {
+                // console.log('isRecursive');
                 // In normal-mode threads, yield any time we have a recursive call.
                 thread.status = Thread.STATUS_YIELD;
             }

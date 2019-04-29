@@ -50,8 +50,10 @@ class Scratch3VMBlocks {
     }
 
     endOfLoopBranch (args, {thread}) {
+        // console.log('endOfLoopBranch', thread.stackFrame.warpMode);
         thread.popStack();
         thread.status = Thread.STATUS_YIELD;
+        // console.log('yield');
     }
 
     endOfBranch (args, {thread}) {
@@ -64,6 +66,9 @@ class Scratch3VMBlocks {
     }
 
     mayContinue (args, {thread}) {
+        if (thread.status !== Thread.STATUS_RUNNING) {
+            throw new Error('non running status')
+        }
         if (thread.continuous && thread.pointer === args.EXPECT_STACK) {
             thread.reuseStackForNextBlock(args.NEXT_STACK);
         } else {
@@ -72,6 +77,9 @@ class Scratch3VMBlocks {
     }
 
     lastContinue (args, {thread}) {
+        if (thread.status !== Thread.STATUS_RUNNING) {
+            throw new Error('non running status')
+        }
         if (thread.continuous && thread.pointer === args.EXPECT_STACK) {
             thread.reuseStackForNextBlock(args.NEXT_STACK);
         }
@@ -155,6 +163,7 @@ class Scratch3VMBlocks {
             const allOps = blockCached._allOps;
             blockCached._ops = ops.slice(i);
             blockCached._allOps = allOps.slice(i);
+            blockCached._firstLink._chain = ops[i];
 
             const continuous = thread.continuous;
             thread.continuous = false;
@@ -163,6 +172,7 @@ class Scratch3VMBlocks {
 
             blockCached._ops = ops;
             blockCached._allOps = allOps;
+            blockCached._firstLink._chain = ops[i];
         }
 
         if (

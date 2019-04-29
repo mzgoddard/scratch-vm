@@ -433,35 +433,35 @@ class InputBlockCached extends BlockCached {
                 //     };
                 // }
 
-                // if (inputCached._definedBlockFunction) {
-                //     if (inputName === 'input0') {
-                //         inputCached.call = inputCached._callinput0;
-                //     } else if (inputName === 'CONDITION') {
-                //         inputCached.call = inputCached._callCONDITION;
-                //     } else if (inputName === 'COSTUME') {
-                //         inputCached.call = inputCached._callCOSTUME;
-                //     } else if (inputName === 'NUM') {
-                //         inputCached.call = inputCached._callNUM;
-                //     } else if (inputName === 'NUM1') {
-                //         inputCached.call = inputCached._callNUM1;
-                //     } else if (inputName === 'NUM2') {
-                //         inputCached.call = inputCached._callNUM2;
-                //     } else if (inputName === 'OPERAND') {
-                //         inputCached.call = inputCached._callOPERAND;
-                //     } else if (inputName === 'OPERAND1') {
-                //         inputCached.call = inputCached._callOPERAND1;
-                //     } else if (inputName === 'OPERAND2') {
-                //         inputCached.call = inputCached._callOPERAND2;
-                //     } else if (inputName === 'VALUE') {
-                //         inputCached.call = inputCached._callVALUE;
-                //     } else if (inputName === 'X') {
-                //         inputCached.call = inputCached._callX;
-                //     } else if (inputName === 'Y') {
-                //         inputCached.call = inputCached._callY;
-                //     } else {
-                //         console.log(inputName);
-                //     }
-                // }
+                if (inputCached._definedBlockFunction) {
+                    if (inputName === 'input0') {
+                        inputCached.call = inputCached._callinput0;
+                    } else if (inputName === 'CONDITION') {
+                        inputCached.call = inputCached._callCONDITION;
+                    } else if (inputName === 'COSTUME') {
+                        inputCached.call = inputCached._callCOSTUME;
+                    } else if (inputName === 'NUM') {
+                        inputCached.call = inputCached._callNUM;
+                    } else if (inputName === 'NUM1') {
+                        inputCached.call = inputCached._callNUM1;
+                    } else if (inputName === 'NUM2') {
+                        inputCached.call = inputCached._callNUM2;
+                    } else if (inputName === 'OPERAND') {
+                        inputCached.call = inputCached._callOPERAND;
+                    } else if (inputName === 'OPERAND1') {
+                        inputCached.call = inputCached._callOPERAND1;
+                    } else if (inputName === 'OPERAND2') {
+                        inputCached.call = inputCached._callOPERAND2;
+                    } else if (inputName === 'VALUE') {
+                        inputCached.call = inputCached._callVALUE;
+                    } else if (inputName === 'X') {
+                        inputCached.call = inputCached._callX;
+                    } else if (inputName === 'Y') {
+                        inputCached.call = inputCached._callY;
+                    } else {
+                        // console.log(inputName);
+                    }
+                }
 
                 // Shadow values are static and do not change, go ahead and
                 // store their value on args.
@@ -698,12 +698,12 @@ class CommandBlockCached extends InputBlockCached {
         this._firstLink._chain = this._ops[0];
     }
 
-    // call () {
-    //     return this._returnValue = this._blockFunctionUnbound.call(
-    //         this._blockFunctionContext,
-    //         this._argValues, blockUtility
-    //     );
-    // }
+    call () {
+        return this._returnValue = this._blockFunctionUnbound.call(
+            this._blockFunctionContext,
+            this._argValues, blockUtility
+        );
+    }
 }
 
 /**
@@ -797,6 +797,8 @@ const getBlockCached = function (sequencer, thread, currentBlockId, lastBlockCac
  * @param {!Thread} thread Thread which to read and execute.
  */
 const execute = function (sequencer, thread) {
+    thread.continuous = false;
+
     const runtime = sequencer.runtime;
 
     // Blocks should glow when a script is starting, not after it has finished
@@ -838,15 +840,16 @@ const execute = function (sequencer, thread) {
         };
 
         if (lastBlockCached._jumpToId === currentBlockId) {
-            window.JUMP = (window.JUMP || 0) + 1;
+            // window.JUMP = (window.JUMP || 0) + 1;
             blockCached = lastBlockCached._jumpTo;
         } else
         if (typeof lastBlockCached._jumpGroup[currentBlockId] !== 'undefined') {
-            window.JUMP_SLOW = (window.JUMP_SLOW || 0) + 1;
+            // window.JUMP_SLOW = (window.JUMP_SLOW || 0) + 1;
+            // window.SLOW = Object.assign(window.SLOW || {}, {[currentBlockId]: (window.SLOW && window.SLOW[currentBlockId] || 0) + 1});
             lastBlockCached._jumpToId = currentBlockId;
             blockCached = lastBlockCached._jumpTo = lastBlockCached._jumpGroup[currentBlockId];
         } else {
-            window.LOOKUP = (window.LOOKUP || 0) + 1;
+            // window.LOOKUP = (window.LOOKUP || 0) + 1;
             blockCached = (
                 BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, CommandBlockCached) ||
                 BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId, CommandBlockCached)
@@ -860,14 +863,14 @@ const execute = function (sequencer, thread) {
 
             if (
                 // lastBlockCached !== INITIAL_BLOCK_CACHED &&
-                lastBlockCached._jumpTo === NULL_JUMP &&
+                typeof lastBlockCached._jumpGroup[currentBlockId] === 'undefined' &&
                 blockCached.blockContainer === sequencer.blocks
             ) {
                 // window.JUMP_SEQUENCE = (window.JUMP_SEQUENCE || 0) + 1;
                 blockCached = new CommandBlockCached(sequencer.blocks, blockCached);
             }
 
-            window.SET_JUMP = (window.SET_JUMP || 0) + 1;
+            // window.SET_JUMP = (window.SET_JUMP || 0) + 1;
             lastBlockCached._jumpToId = currentBlockId;
             lastBlockCached._jumpTo = blockCached;
             lastBlockCached._jumpGroup[currentBlockId] = blockCached;
@@ -884,10 +887,16 @@ const execute = function (sequencer, thread) {
             opCached = executeProfile(sequencer, thread, opCached);
         }
 
+        // thread.status > Thread.STATUS_RUNNING && console.log(thread.status, opCached.opcode);
+
         lastBlockCached = opCached;
 
-        if (thread.status === Thread.STATUS_PROMISE_WAIT) {
-            handlePromise(opCached._returnValue || opCached._parentValues[opCached._parentKey], thread, opCached);
+        if (thread.status === Thread.STATUS_PROMISE_WAIT && thread.reporting === null) {
+            handlePromise(
+                opCached._returnValue || opCached._parentValues[opCached._parentKey],
+                thread,
+                opCached
+            );
         } else if (thread.status === Thread.STATUS_INTERRUPT) {
             thread.status = STATUS_RUNNING;
             if (thread.continuous) continue;
