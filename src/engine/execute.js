@@ -652,10 +652,6 @@ class InputBlockCached extends BlockCached {
     }
 }
 
-const ACTIVE_BLOCK_REF = {
-    BLOCK: null
-};
-
 const endOfChain = new BlockCached(null, NULL_CACHED);
 
 const chainCallable = new BlockCached(null, NULL_CACHED);
@@ -683,9 +679,9 @@ class CommandBlockCached extends InputBlockCached {
         });
 
         mayContinueCached._argValues = {
-            ACTIVE_BLOCK_REF,
             EXPECT_STACK: this.id,
-            NEXT_STACK: nextId
+            NEXT_STACK: nextId,
+            END_STACK: null
         };
 
         this._ops.push(mayContinueCached);
