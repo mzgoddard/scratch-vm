@@ -40,15 +40,41 @@ let blockFunctionProfilerId = -1;
 //     );
 // };
 
+// const isPromise = function (value) {
+//     if (
+//         typeof value === 'object' &&
+//         value !== null &&
+//         typeof value.then === 'function'
+//     ) {
+//         blockUtility.thread.status = Thread.STATUS_PROMISE_WAIT;
+//     }
+//     return value;
+// };
+
 const isPromise = function (value) {
+    typeof value === 'object' &&
+        value !== null &&
+        typeof value.then === 'function' &&
+        (blockUtility.thread.status = Thread.STATUS_PROMISE_WAIT);
+    return value;
+};
+
+const callBlock = function (blockCached) {
+    const value = blockCached._parentValues[blockCached._parentKey] =
+        blockCached._blockFunctionUnbound.call(
+            blockCached._blockFunctionContext,
+            blockCached._argValues, blockUtility
+        )
+        ;
+
     if (
         typeof value === 'object' &&
         value !== null &&
         typeof value.then === 'function'
     ) {
+        executeState.lastBlock = blockCached;
         blockUtility.thread.status = Thread.STATUS_PROMISE_WAIT;
     }
-    return value;
 };
 
 /**
@@ -94,6 +120,14 @@ const handlePromise = (primitiveReportedValue, thread, blockCached) => {
     });
 };
 
+const executeState = {
+    lastBlock: null
+};
+
+// const chainCallable = {
+//     call () {}
+// };
+
 /**
  * A execute.js internal representation of a block to reduce the time spent in
  * execute as the same blocks are called the most.
@@ -129,7 +163,7 @@ class BlockCached {
          * Some opcodes (vm_*) should not be measured by the profiler.
          * @type {boolean}
          */
-        this.profileOpcode = !cached.opcode.startsWith('vm_');
+        this.profileOpcode = cached.opcode && !cached.opcode.startsWith('vm_');
 
         /**
          * Original block object containing argument values for static fields.
@@ -244,6 +278,27 @@ class BlockCached {
          */
         this._ops = [];
 
+        this._allOps = [];
+
+        this._next = null;
+
+        this._chain = null;
+
+        this._firstLink = null;
+
+        this._jumpToId = '';
+        this._jumpTo = null;
+        this._jumpGroup = null;
+    }
+
+    call () {
+    }
+}
+
+class InputBlockCached extends BlockCached {
+    constructor (blockContainer, cached) {
+        super(blockContainer, cached);
+
         const {runtime} = blockUtility.sequencer;
 
         const {opcode, fields, inputs} = this;
@@ -269,9 +324,9 @@ class BlockCached {
             this._blockFunctionContext = null;
         }
 
-        if (opcode.startsWith('vm_')) {
-            this.call = this._callvm;
-        }
+        // if (opcode.startsWith('vm_')) {
+        //     this.call = this._callvm;
+        // }
 
         // Store the current shadow value if there is a shadow value.
         const fieldKeys = Object.keys(fields);
@@ -337,7 +392,7 @@ class BlockCached {
                 // it would normally be placed. This lets us produce this value
                 // dynamically without having special case handling later in the
                 // runtime execute function.
-                const inputCached = new BlockCached(runtime.sequencer.blocks, {
+                const inputCached = new InputBlockCached(runtime.sequencer.blocks, {
                     id: 'vm_cast_string',
                     opcode: 'vm_cast_string',
                     fields: {},
@@ -355,7 +410,7 @@ class BlockCached {
                 inputCached._parentKey = 'name';
                 inputCached._parentValues = this._argValues.BROADCAST_OPTION;
             } else if (input.block) {
-                const inputCached = BlocksExecuteCache.getCached(blockContainer, input.block, BlockCached);
+                const inputCached = BlocksExecuteCache.getCached(blockContainer, input.block, InputBlockCached);
 
                 if (inputCached._isHat) {
                     continue;
@@ -378,35 +433,35 @@ class BlockCached {
                 //     };
                 // }
 
-                if (inputCached._definedBlockFunction) {
-                    if (inputName === 'input0') {
-                        inputCached.call = inputCached._callinput0;
-                    } else if (inputName === 'CONDITION') {
-                        inputCached.call = inputCached._callCONDITION;
-                    } else if (inputName === 'COSTUME') {
-                        inputCached.call = inputCached._callCOSTUME;
-                    } else if (inputName === 'NUM') {
-                        inputCached.call = inputCached._callNUM;
-                    } else if (inputName === 'NUM1') {
-                        inputCached.call = inputCached._callNUM1;
-                    } else if (inputName === 'NUM2') {
-                        inputCached.call = inputCached._callNUM2;
-                    } else if (inputName === 'OPERAND') {
-                        inputCached.call = inputCached._callOPERAND;
-                    } else if (inputName === 'OPERAND1') {
-                        inputCached.call = inputCached._callOPERAND1;
-                    } else if (inputName === 'OPERAND2') {
-                        inputCached.call = inputCached._callOPERAND2;
-                    } else if (inputName === 'VALUE') {
-                        inputCached.call = inputCached._callVALUE;
-                    } else if (inputName === 'X') {
-                        inputCached.call = inputCached._callX;
-                    } else if (inputName === 'Y') {
-                        inputCached.call = inputCached._callY;
-                    } else {
-                        console.log(inputName);
-                    }
-                }
+                // if (inputCached._definedBlockFunction) {
+                //     if (inputName === 'input0') {
+                //         inputCached.call = inputCached._callinput0;
+                //     } else if (inputName === 'CONDITION') {
+                //         inputCached.call = inputCached._callCONDITION;
+                //     } else if (inputName === 'COSTUME') {
+                //         inputCached.call = inputCached._callCOSTUME;
+                //     } else if (inputName === 'NUM') {
+                //         inputCached.call = inputCached._callNUM;
+                //     } else if (inputName === 'NUM1') {
+                //         inputCached.call = inputCached._callNUM1;
+                //     } else if (inputName === 'NUM2') {
+                //         inputCached.call = inputCached._callNUM2;
+                //     } else if (inputName === 'OPERAND') {
+                //         inputCached.call = inputCached._callOPERAND;
+                //     } else if (inputName === 'OPERAND1') {
+                //         inputCached.call = inputCached._callOPERAND1;
+                //     } else if (inputName === 'OPERAND2') {
+                //         inputCached.call = inputCached._callOPERAND2;
+                //     } else if (inputName === 'VALUE') {
+                //         inputCached.call = inputCached._callVALUE;
+                //     } else if (inputName === 'X') {
+                //         inputCached.call = inputCached._callX;
+                //     } else if (inputName === 'Y') {
+                //         inputCached.call = inputCached._callY;
+                //     } else {
+                //         console.log(inputName);
+                //     }
+                // }
 
                 // Shadow values are static and do not change, go ahead and
                 // store their value on args.
@@ -424,7 +479,7 @@ class BlockCached {
             this._ops.push(this);
 
             if (this._isHat) {
-                const reportCached = new BlockCached(null, {
+                const reportCached = new InputBlockCached(null, {
                     id: 'vm_report_hat',
                     opcode: 'vm_report_hat',
                     fields: {},
@@ -440,9 +495,25 @@ class BlockCached {
 
         this._allOps = this._ops;
 
-        this._isCommandBlock = false;
-
         this._next = null;
+
+        this._chain = chainCallable;
+
+        // this._firstLink = {
+        //     _chain: this
+        // };
+        this._firstLink = new BlockCached(blockContainer, {
+            id: null,
+            opcode: null,
+            fields: null,
+            inputs: null,
+            mutation: null
+        });
+        this._firstLink._chain = this;
+
+        this._jumpToId = '';
+        this._jumpTo = NULL_JUMP;
+        this._jumpGroup = {};
     }
 
     call () {
@@ -451,8 +522,6 @@ class BlockCached {
                 this._blockFunctionContext,
                 this._argValues, blockUtility
             );
-        // if (blockUtility.thread.status === Thread.STATUS_RUNNING) return this._chain.call(i + 1);
-        // return i;
     }
 
     _callvm () {
@@ -563,20 +632,29 @@ const ACTIVE_BLOCK_REF = {
     BLOCK: null
 };
 
-const endOfChain = {
-    call (i) {
-        return i;
-    }
-};
+const endOfChain = new BlockCached(null, {
+    id: null,
+    opcode: null,
+    fields: {},
+    inputs: {},
+    mutation: null
+});
 
-class CommandBlockCached extends BlockCached {
+const chainCallable = new BlockCached(null, {
+    id: null,
+    opcode: null,
+    fields: {},
+    inputs: {},
+    mutation: null
+});
+
+class CommandBlockCached extends InputBlockCached {
     constructor (blockContainer, cached) {
         super(blockContainer, cached);
 
-        this._isCommandBlock = true;
-
-        this._jumpToId = null;
+        this._jumpToId = '';
         this._jumpTo = NULL_JUMP;
+        this._jumpGroup = {};
 
         const nextId = blockContainer ?
             blockContainer.getNextBlock(this.id) :
@@ -584,7 +662,7 @@ class CommandBlockCached extends BlockCached {
 
         const continueOpcode = nextId === null ?
             'vm_last_continue' : 'vm_may_continue';
-        const mayContinueCached = new BlockCached(null, {
+        const mayContinueCached = new InputBlockCached(null, {
             id: continueOpcode,
             opcode: continueOpcode,
             fields: {},
@@ -610,19 +688,22 @@ class CommandBlockCached extends BlockCached {
             this._allOps = [...this._ops, ...nextCached._allOps];
         }
 
-        for (let i = 0; i < this._ops; i++) {
+        // debugger;
+        for (let i = 0; i < this._ops.length; i++) {
             this._ops[i]._chain = this._ops[i + 1] || (
                 nextCached ? nextCached._ops[0] : endOfChain
             );
         }
+
+        this._firstLink._chain = this._ops[0];
     }
 
-    call () {
-        return this._returnValue = this._blockFunctionUnbound.call(
-            this._blockFunctionContext,
-            this._argValues, blockUtility
-        );
-    }
+    // call () {
+    //     return this._returnValue = this._blockFunctionUnbound.call(
+    //         this._blockFunctionContext,
+    //         this._argValues, blockUtility
+    //     );
+    // }
 }
 
 /**
@@ -630,74 +711,85 @@ class CommandBlockCached extends BlockCached {
  * @param {!Sequencer} sequencer Which sequencer is executing.
  * @param {!Thread} thread Thread which to read and execute.
  */
-const executeProfile = function (sequencer, thread, blockCached) {
+const executeProfile = function (sequencer, thread, opCached) {
     const runtime = sequencer.runtime;
 
-    const ops = blockCached._allOps;
-    let i = -1;
-
-    let reportedValue;
-
     while (thread.status === STATUS_RUNNING) {
-        const opCached = ops[++i];
+        opCached = opCached._chain;
 
-        const {profiler} = runtime;
+        if (opCached.profileOpcode) {
+            const {profiler} = runtime;
 
-        if (blockFunctionProfilerId === -1) {
-            blockFunctionProfilerId = profiler.idByName(blockFunctionProfilerFrame);
+            if (blockFunctionProfilerId === -1) {
+                blockFunctionProfilerId = profiler.idByName(blockFunctionProfilerFrame);
+            }
+
+            const opcode = opCached.opcode;
+            // The method commented below has its code inlined
+            // underneath to reduce the bias recorded for the profiler's
+            // calls in this time sensitive execute function.
+            //
+            // profiler.start(blockFunctionProfilerId, opcode);
+            profiler.records.push(
+                profiler.START, blockFunctionProfilerId, opcode, 0);
+
+            isPromise(opCached.call());
+
+            // profiler.stop(blockFunctionProfilerId);
+            profiler.records.push(profiler.STOP, 0);
+        } else {
+            isPromise(opCached.call());
         }
-
-        const opcode = opCached.opcode;
-        // The method commented below has its code inlined
-        // underneath to reduce the bias recorded for the profiler's
-        // calls in this time sensitive execute function.
-        //
-        // profiler.start(blockFunctionProfilerId, opcode);
-        opCached.profileOpcode && profiler.records.push(
-            profiler.START, blockFunctionProfilerId, opcode, 0);
-
-        isPromise(opCached.call());
-        // reportedValue = opCached.call();
-        // opCached._parentValues[opCached._parentKey] = reportedValue =
-        //     opCached._blockFunctionUnbound.call(
-        //         opCached._blockFunctionContext,
-        //         opCached._argValues, blockUtility
-        //     );
-
-        // profiler.stop(blockFunctionProfilerId);
-        opCached.profileOpcode && profiler.records.push(profiler.STOP, 0);
-
-        // // If it's a promise, wait until promise resolves.
-        // // if (isPromise(reportedValue)) {
-        // if (
-        //     reportedValue !== null &&
-        //     typeof reportedValue === 'object' &&
-        //     typeof reportedValue.then === 'function'
-        // ) {
-        //     // We are waiting for a promise. Set the status to a non-running
-        //     // state and store the arg values for the executed operations.
-        //     handlePromise(reportedValue, thread, opCached);
-        // }
     }
-
-    if (thread.status === Thread.STATUS_PROMISE_WAIT) {
-        handlePromise(opCached._returnValue || opCached._parentValues[opCached._parentKey], thread, ops[i]);
-    }
-
-    if (thread.status === Thread.STATUS_INTERRUPT) {
-        thread.status = STATUS_RUNNING;
-    }
+    return opCached;
 };
 
-const NULL_JUMP = {
+// const NULL_JUMP = {
+//     id: null,
+// };
+const NULL_JUMP = new BlockCached(null, {
     id: null,
-};
+    opcode: null,
+    fields: {},
+    inputs: {},
+    mutation: null
+});
 
-const INITIAL_BLOCK_CACHED = Object.freeze({
+const INITIAL_BLOCK_CACHED = {
     id: null,
     _jumpToId: null,
-    _jumpTo: NULL_JUMP
-});
+    _jumpTo: NULL_JUMP,
+    _jumpGroup: {}
+};
+
+const FIRST_LINK = {
+    _chain: null,
+    call () {}
+};
+
+const getBlockCached = function (sequencer, thread, currentBlockId, lastBlockCached) {
+    let blockCached = (
+        BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, CommandBlockCached) ||
+        BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId, CommandBlockCached) ||
+        BlocksExecuteCache.getCached(runtime.flyoutBlocks, currentBlockId, CommandBlockCached)
+    );
+
+    if (lastBlockCached !== INITIAL_BLOCK_CACHED) {
+        if (
+            lastBlockCached._jumpTo === NULL_JUMP &&
+            blockCached.blockContainer === sequencer.blocks
+        ) {
+            // window.JUMP_SEQUENCE = (window.JUMP_SEQUENCE || 0) + 1;
+            blockCached = new CommandBlockCached(sequencer.blocks, blockCached);
+        }
+
+        // window.SET_JUMP = (window.SET_JUMP || 0) + 1;
+        lastBlockCached._jumpToId = currentBlockId;
+        lastBlockCached._jumpTo = blockCached;
+    }
+
+    return blockCached;
+};
 
 /**
  * Execute a block.
@@ -723,23 +815,41 @@ const execute = function (sequencer, thread) {
     blockUtility.sequencer = sequencer;
     blockUtility.thread = thread;
 
-    let lastBlockCached;
-    let blockCached = INITIAL_BLOCK_CACHED;
+    let lastBlockCached = thread.blockContainer._cache._executeEntryMap;
+    if (lastBlockCached === null) {
+        lastBlockCached = thread.blockContainer._cache._executeEntryMap = new BlockCached(null, {
+            id: null,
+            opcode: null,
+            fields: null,
+            inputs: null,
+            mutation: null,
+        });
+        lastBlockCached._jumpGroup = {};
+    }
+    let blockCached = null;
 
-    do {
+    const isProfiling = runtime.profiler === null;
+
+     while (true) {
         // Current block to execute is the one on the top of the stack.
-        const currentBlockId = thread.pointer || thread.peekStackFrame().endBlockId;
+        let currentBlockId = thread.pointer;
+        if (currentBlockId === null) {
+            currentBlockId = thread.stackFrame.endBlockId;
+        };
 
-        if (blockCached._jumpToId === currentBlockId) {
-            // window.JUMP = (window.JUMP || 0) + 1;
-            blockCached = blockCached._jumpTo;
+        if (lastBlockCached._jumpToId === currentBlockId) {
+            window.JUMP = (window.JUMP || 0) + 1;
+            blockCached = lastBlockCached._jumpTo;
+        } else
+        if (typeof lastBlockCached._jumpGroup[currentBlockId] !== 'undefined') {
+            window.JUMP_SLOW = (window.JUMP_SLOW || 0) + 1;
+            lastBlockCached._jumpToId = currentBlockId;
+            blockCached = lastBlockCached._jumpTo = lastBlockCached._jumpGroup[currentBlockId];
         } else {
-            // window.LOOKUP = (window.LOOKUP || 0) + 1;
-            lastBlockCached = blockCached;
+            window.LOOKUP = (window.LOOKUP || 0) + 1;
             blockCached = (
                 BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, CommandBlockCached) ||
-                BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId, CommandBlockCached) ||
-                BlocksExecuteCache.getCached(runtime.flyoutBlocks, currentBlockId, CommandBlockCached)
+                BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId, CommandBlockCached)
             );
 
             if (blockCached === null) {
@@ -748,75 +858,44 @@ const execute = function (sequencer, thread) {
                 break;
             }
 
-            if (lastBlockCached !== INITIAL_BLOCK_CACHED) {
-                if (
-                    lastBlockCached._jumpTo === NULL_JUMP &&
-                    blockCached.blockContainer === sequencer.blocks
-                ) {
-                    // window.JUMP_SEQUENCE = (window.JUMP_SEQUENCE || 0) + 1;
-                    blockCached = new CommandBlockCached(sequencer.blocks, blockCached);
-                }
-
-                // window.SET_JUMP = (window.SET_JUMP || 0) + 1;
-                lastBlockCached._jumpToId = currentBlockId;
-                lastBlockCached._jumpTo = blockCached;
+            if (
+                // lastBlockCached !== INITIAL_BLOCK_CACHED &&
+                lastBlockCached._jumpTo === NULL_JUMP &&
+                blockCached.blockContainer === sequencer.blocks
+            ) {
+                // window.JUMP_SEQUENCE = (window.JUMP_SEQUENCE || 0) + 1;
+                blockCached = new CommandBlockCached(sequencer.blocks, blockCached);
             }
+
+            window.SET_JUMP = (window.SET_JUMP || 0) + 1;
+            lastBlockCached._jumpToId = currentBlockId;
+            lastBlockCached._jumpTo = blockCached;
+            lastBlockCached._jumpGroup[currentBlockId] = blockCached;
         }
 
-        // ACTIVE_BLOCK_REF.BLOCK = blockCached;
+        let opCached = blockCached._firstLink;
+        if (isProfiling) {
+            while (thread.status === STATUS_RUNNING) {
+                opCached = opCached._chain;
 
-        if (runtime.profiler !== null) {
-            executeProfile(sequencer, thread, blockCached);
-            continue;
+                isPromise(opCached.call());
+            }
+        } else {
+            opCached = executeProfile(sequencer, thread, opCached);
         }
 
-        const ops = blockCached._allOps;
-
-        let i = -1;
-
-        let reportedValue;
-        let opCached;
-
-        // i = ops[0].call(0);
-
-        while (thread.status === STATUS_RUNNING) {
-            // opCached = ops[i++];
-
-            isPromise(ops[++i].call());
-            // reportedValue = opCached.call();
-            // opCached._parentValues[opCached._parentKey] =
-            //     isPromise(
-            //     // reportedValue =
-            //     opCached._blockFunctionUnbound.call(
-            //         opCached._blockFunctionContext,
-            //         opCached._argValues, blockUtility
-            //     )
-            //     )
-            //     ;
-
-            // // // If it's a promise, wait until promise resolves.
-            // // // if (isPromise(reportedValue)) {
-            // if (
-            //     reportedValue !== null &&
-            //     typeof reportedValue === 'object' &&
-            //     typeof reportedValue.then === 'function'
-            // ) {
-            //     // We are waiting for a promise. Set the status to a non-running
-            //     // state and store the arg values for the executed operations.
-            //     handlePromise(reportedValue, thread, opCached);
-            // } else {
-            //     opCached._parentValues[opCached._parentKey] = reportedValue;
-            // }
-        }
+        lastBlockCached = opCached;
 
         if (thread.status === Thread.STATUS_PROMISE_WAIT) {
-            handlePromise(opCached._returnValue || opCached._parentValues[opCached._parentKey], thread, ops[i]);
-        }
-
-        if (thread.status === Thread.STATUS_INTERRUPT) {
+            handlePromise(opCached._returnValue || opCached._parentValues[opCached._parentKey], thread, opCached);
+        } else if (thread.status === Thread.STATUS_INTERRUPT) {
             thread.status = STATUS_RUNNING;
+            if (thread.continuous) continue;
+        } else if (thread.continuous && thread.status === STATUS_RUNNING) {
+            continue;
         }
-    } while (thread.continuous && thread.status === STATUS_RUNNING);
+        break;
+    }
 
     thread.blockGlowInFrame = thread.pointer;
 

@@ -69,6 +69,8 @@ class Blocks {
              */
             _executeCached: {},
 
+            _executeEntryMap: null,
+
             /**
              * A cache of block IDs and targets to start threads on as they are
              * actively monitored.
@@ -508,6 +510,7 @@ class Blocks {
         this._cache.procedureParamNames = {};
         this._cache.procedureDefinitions = {};
         this._cache._executeCached = {};
+        this._cache._executeEntryMap = null;
         this._cache._monitored = null;
     }
 
