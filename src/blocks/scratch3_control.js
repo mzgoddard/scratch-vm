@@ -116,8 +116,6 @@ class Scratch3ControlBlocks {
             util.yield();
         } else if (!util.stackTimerFinished()) {
             util.yield();
-        } else {
-            console.log('wait done', args.DURATION);
         }
     }
 

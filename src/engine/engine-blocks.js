@@ -25,8 +25,11 @@ class Scratch3VMBlocks {
             vm_end_of_loop_branch: this.endOfLoopBranch,
             vm_end_of_branch: this.endOfBranch,
             vm_cast_string: this.castString,
+            vm_cached_end_of_procedure: this.cachedEndOfProcedure,
+            vm_cached_end_of_branch: this.cachedEndOfBranch,
             vm_may_continue: this.mayContinue,
             vm_last_continue: this.lastContinue,
+            vm_interrupt: this.interrupt,
             vm_reenter_promise: this.reenterFromPromise,
             vm_report_hat: this.reportHat,
             vm_report_stack_click: this.reportStackClick,
@@ -65,24 +68,46 @@ class Scratch3VMBlocks {
         return Cast.toString(args.VALUE);
     }
 
-    mayContinue (args, {thread}) {
-        if (thread.status !== Thread.STATUS_RUNNING) {
-            throw new Error('non running status')
-        }
-        if (thread.continuous && thread.pointer === args.EXPECT_STACK) {
+    cachedEndOfProcedure (args, {thread}) {
+        thread.popStack();
+        if (thread.pointer === args.EXPECT_STACK) {
             thread.reuseStackForNextBlock(args.NEXT_STACK);
         } else {
+            thread.goToNextBlock();
+        }
+    }
+
+    cachedEndOfBranch (args, {thread}) {
+        thread.popStack();
+        if (thread.pointer === args.EXPECT_STACK) {
+            thread.reuseStackForNextBlock(args.NEXT_STACK);
+        } else {
+            thread.goToNextBlock();
+        }
+    }
+
+    mayContinue (args, {thread}) {
+        if (thread.continuous && thread.pointer === args.EXPECT_STACK) {
+            window.MAY = (window.MAY || 0) + 1
+            thread.reuseStackForNextBlock(args.NEXT_STACK);
+        } else {
+            window.MAY_NOT = (window.MAY_NOT || 0) + 1
             thread.status = Thread.STATUS_INTERRUPT;
         }
     }
 
     lastContinue (args, {thread}) {
-        if (thread.status !== Thread.STATUS_RUNNING) {
-            throw new Error('non running status')
-        }
         if (thread.continuous && thread.pointer === args.EXPECT_STACK) {
+            window.LAST = (window.LAST || 0) + 1
             thread.reuseStackForNextBlock(args.NEXT_STACK);
+
+            if (thread.stackFrame.endBlockId === args.EXPECT_END) return;
         }
+
+        thread.status = Thread.STATUS_INTERRUPT;
+    }
+
+    interrupt (args, {thread}) {
         thread.status = Thread.STATUS_INTERRUPT;
     }
 
@@ -163,7 +188,9 @@ class Scratch3VMBlocks {
             const allOps = blockCached._allOps;
             blockCached._ops = ops.slice(i);
             blockCached._allOps = allOps.slice(i);
-            blockCached._firstLink._chain = ops[i];
+            // blockCached._firstLink._chain = ops[i];
+            // blockCached._firstLink._mini._chain = ops[i]._mini;
+            blockCached._firstLink._chain = ops[i]._mini;
 
             const continuous = thread.continuous;
             thread.continuous = false;
@@ -172,7 +199,9 @@ class Scratch3VMBlocks {
 
             blockCached._ops = ops;
             blockCached._allOps = allOps;
-            blockCached._firstLink._chain = ops[i];
+            // blockCached._firstLink._chain = ops[0];
+            // blockCached._firstLink._mini._chain = ops[0]._mini;
+            blockCached._firstLink._chain = ops[0]._mini;
         }
 
         if (

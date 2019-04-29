@@ -128,6 +128,20 @@ const executeState = {
 //     call () {}
 // };
 
+class MiniCached {
+    constructor (full) {
+        this._full = full;
+        this._chain = full._chain._mini;
+        this._parentValues = full._parentValues;
+        this._parentKey = full._parentKey;
+        this._blockFunctionUnbound = full._blockFunctionUnbound;
+        this._blockFunctionContext = full._blockFunctionContext;
+        this._argValues = full._argValues;
+    }
+}
+
+class JumpGroup {}
+
 /**
  * A execute.js internal representation of a block to reduce the time spent in
  * execute as the same blocks are called the most.
@@ -289,11 +303,23 @@ class BlockCached {
         this._jumpToId = '';
         this._jumpTo = null;
         this._jumpGroup = null;
+
+        this.call = this.call;
+
+        this._mini = null;
     }
 
     call () {
     }
 }
+
+const NULL_CACHED = {
+    id: null,
+    opcode: null,
+    fields: null,
+    inputs: null,
+    mutation: null
+};
 
 class InputBlockCached extends BlockCached {
     constructor (blockContainer, cached) {
@@ -502,18 +528,16 @@ class InputBlockCached extends BlockCached {
         // this._firstLink = {
         //     _chain: this
         // };
-        this._firstLink = new BlockCached(blockContainer, {
-            id: null,
-            opcode: null,
-            fields: null,
-            inputs: null,
-            mutation: null
-        });
-        this._firstLink._chain = this;
+        // this._firstLink = new BlockCached(blockContainer, NULL_CACHED);
+        // this._firstLink._chain = this;
+        const firstFull = new BlockCached(blockContainer, NULL_CACHED);
+        firstFull._chain = this;
+        // this._firstLink._mini = new MiniCached(this._firstLink);
+        this._firstLink = new MiniCached(firstFull);
 
         this._jumpToId = '';
         this._jumpTo = NULL_JUMP;
-        this._jumpGroup = {};
+        this._jumpGroup = new JumpGroup();
     }
 
     call () {
@@ -632,21 +656,9 @@ const ACTIVE_BLOCK_REF = {
     BLOCK: null
 };
 
-const endOfChain = new BlockCached(null, {
-    id: null,
-    opcode: null,
-    fields: {},
-    inputs: {},
-    mutation: null
-});
+const endOfChain = new BlockCached(null, NULL_CACHED);
 
-const chainCallable = new BlockCached(null, {
-    id: null,
-    opcode: null,
-    fields: {},
-    inputs: {},
-    mutation: null
-});
+const chainCallable = new BlockCached(null, NULL_CACHED);
 
 class CommandBlockCached extends InputBlockCached {
     constructor (blockContainer, cached) {
@@ -654,7 +666,7 @@ class CommandBlockCached extends InputBlockCached {
 
         this._jumpToId = '';
         this._jumpTo = NULL_JUMP;
-        this._jumpGroup = {};
+        this._jumpGroup = new JumpGroup();
 
         const nextId = blockContainer ?
             blockContainer.getNextBlock(this.id) :
@@ -689,13 +701,16 @@ class CommandBlockCached extends InputBlockCached {
         }
 
         // debugger;
-        for (let i = 0; i < this._ops.length; i++) {
+        for (let i = this._ops.length - 1; i >= 0; i--) {
             this._ops[i]._chain = this._ops[i + 1] || (
                 nextCached ? nextCached._ops[0] : endOfChain
             );
+            this._ops[i]._mini = new MiniCached(this._ops[i]);
         }
 
-        this._firstLink._chain = this._ops[0];
+        // this._firstLink._chain = this._ops[0];
+        // this._firstLink._mini._chain = this._ops[0]._mini;
+        this._firstLink._chain = this._ops[0]._mini;
     }
 
     call () {
@@ -711,20 +726,18 @@ class CommandBlockCached extends InputBlockCached {
  * @param {!Sequencer} sequencer Which sequencer is executing.
  * @param {!Thread} thread Thread which to read and execute.
  */
-const executeProfile = function (sequencer, thread, opCached) {
-    const runtime = sequencer.runtime;
-
+const executeProfile = function (runtime, thread, opCached) {
     while (thread.status === STATUS_RUNNING) {
         opCached = opCached._chain;
 
-        if (opCached.profileOpcode) {
+        if (opCached._full.profileOpcode) {
             const {profiler} = runtime;
 
             if (blockFunctionProfilerId === -1) {
                 blockFunctionProfilerId = profiler.idByName(blockFunctionProfilerFrame);
             }
 
-            const opcode = opCached.opcode;
+            const opcode = opCached._full.opcode;
             // The method commented below has its code inlined
             // underneath to reduce the bias recorded for the profiler's
             // calls in this time sensitive execute function.
@@ -733,50 +746,81 @@ const executeProfile = function (sequencer, thread, opCached) {
             profiler.records.push(
                 profiler.START, blockFunctionProfilerId, opcode, 0);
 
-            isPromise(opCached.call());
+            // isPromise(opCached.call());
+            isPromise(opCached._parentValues[opCached._parentKey] =
+                // opCached._blockFunction(
+                //     opCached._argValues, blockUtility
+                opCached._blockFunctionUnbound.call(
+                    opCached._blockFunctionContext,
+                    opCached._argValues, blockUtility
+                ));
 
             // profiler.stop(blockFunctionProfilerId);
             profiler.records.push(profiler.STOP, 0);
         } else {
-            isPromise(opCached.call());
+            // isPromise(opCached.call());
+
+            isPromise(opCached._parentValues[opCached._parentKey] =
+                // opCached._blockFunction(
+                //     opCached._argValues, blockUtility
+                opCached._blockFunctionUnbound.call(
+                    opCached._blockFunctionContext,
+                    opCached._argValues, blockUtility
+                ));
         }
     }
     return opCached;
 };
 
-// const NULL_JUMP = {
-//     id: null,
-// };
-const NULL_JUMP = new BlockCached(null, {
-    id: null,
-    opcode: null,
-    fields: {},
-    inputs: {},
-    mutation: null
-});
+const NULL_JUMP = new BlockCached(null, NULL_CACHED);
+NULL_JUMP._firstLink = new BlockCached(null, NULL_CACHED);
+NULL_JUMP._firstLink._chain = NULL_JUMP;
 
-const INITIAL_BLOCK_CACHED = {
-    id: null,
-    _jumpToId: null,
-    _jumpTo: NULL_JUMP,
-    _jumpGroup: {}
+const executeStandard = function (thread, opCached) {
+    while (thread.status === STATUS_RUNNING) {
+        opCached = opCached._chain;
+
+        isPromise(opCached._parentValues[opCached._parentKey] =
+            opCached._blockFunctionUnbound.call(
+                opCached._blockFunctionContext,
+                opCached._argValues, blockUtility
+            ));
+    }
+
+    return opCached;
 };
 
-const FIRST_LINK = {
-    _chain: null,
-    call () {}
-};
+const jumpToNext = function (thread, sequencer, lastBlockCached) {
+    // Current block to execute is the one on the top of the stack.
+    let currentBlockId = thread.pointer === null ?
+        thread.stackFrame.endBlockId :
+        thread.pointer;
 
-const getBlockCached = function (sequencer, thread, currentBlockId, lastBlockCached) {
-    let blockCached = (
-        BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, CommandBlockCached) ||
-        BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId, CommandBlockCached) ||
-        BlocksExecuteCache.getCached(runtime.flyoutBlocks, currentBlockId, CommandBlockCached)
-    );
+    let blockCached = lastBlockCached;
 
-    if (lastBlockCached !== INITIAL_BLOCK_CACHED) {
+    if (lastBlockCached._jumpToId === currentBlockId) {
+        // window.JUMP = (window.JUMP || 0) + 1;
+        blockCached = lastBlockCached._jumpTo;
+    } else if (typeof lastBlockCached._jumpGroup[currentBlockId] !== 'undefined') {
+        // window.JUMP_SLOW = (window.JUMP_SLOW || 0) + 1;
+        // window.SLOW = Object.assign(window.SLOW || {}, {[currentBlockId]: (window.SLOW && window.SLOW[currentBlockId] || 0) + 1});
+        lastBlockCached._jumpToId = currentBlockId;
+        blockCached = lastBlockCached._jumpTo = lastBlockCached._jumpGroup[currentBlockId];
+    } else {
+        // window.LOOKUP = (window.LOOKUP || 0) + 1;
+        blockCached = (
+            BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, CommandBlockCached) ||
+            BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId, CommandBlockCached)
+        );
+
+        if (blockCached === null) {
+            // No block found: stop the thread; script no longer exists.
+            sequencer.retireThread(thread);
+            return NULL_JUMP;
+        }
+
         if (
-            lastBlockCached._jumpTo === NULL_JUMP &&
+            typeof lastBlockCached._jumpGroup[currentBlockId] === 'undefined' &&
             blockCached.blockContainer === sequencer.blocks
         ) {
             // window.JUMP_SEQUENCE = (window.JUMP_SEQUENCE || 0) + 1;
@@ -786,6 +830,7 @@ const getBlockCached = function (sequencer, thread, currentBlockId, lastBlockCac
         // window.SET_JUMP = (window.SET_JUMP || 0) + 1;
         lastBlockCached._jumpToId = currentBlockId;
         lastBlockCached._jumpTo = blockCached;
+        lastBlockCached._jumpGroup[currentBlockId] = blockCached;
     }
 
     return blockCached;
@@ -797,8 +842,6 @@ const getBlockCached = function (sequencer, thread, currentBlockId, lastBlockCac
  * @param {!Thread} thread Thread which to read and execute.
  */
 const execute = function (sequencer, thread) {
-    thread.continuous = false;
-
     const runtime = sequencer.runtime;
 
     // Blocks should glow when a script is starting, not after it has finished
@@ -819,91 +862,39 @@ const execute = function (sequencer, thread) {
 
     let lastBlockCached = thread.blockContainer._cache._executeEntryMap;
     if (lastBlockCached === null) {
-        lastBlockCached = thread.blockContainer._cache._executeEntryMap = new BlockCached(null, {
-            id: null,
-            opcode: null,
-            fields: null,
-            inputs: null,
-            mutation: null,
-        });
-        lastBlockCached._jumpGroup = {};
+        lastBlockCached = thread.blockContainer._cache._executeEntryMap = new BlockCached(null, NULL_CACHED);
+        lastBlockCached._jumpGroup = new JumpGroup();
     }
-    let blockCached = null;
 
-    const isProfiling = runtime.profiler === null;
+    const isNotProfiling = runtime.profiler === null;
 
-     while (true) {
-        // Current block to execute is the one on the top of the stack.
-        let currentBlockId = thread.pointer;
-        if (currentBlockId === null) {
-            currentBlockId = thread.stackFrame.endBlockId;
-        };
-
-        if (lastBlockCached._jumpToId === currentBlockId) {
-            // window.JUMP = (window.JUMP || 0) + 1;
-            blockCached = lastBlockCached._jumpTo;
-        } else
-        if (typeof lastBlockCached._jumpGroup[currentBlockId] !== 'undefined') {
-            // window.JUMP_SLOW = (window.JUMP_SLOW || 0) + 1;
-            // window.SLOW = Object.assign(window.SLOW || {}, {[currentBlockId]: (window.SLOW && window.SLOW[currentBlockId] || 0) + 1});
-            lastBlockCached._jumpToId = currentBlockId;
-            blockCached = lastBlockCached._jumpTo = lastBlockCached._jumpGroup[currentBlockId];
-        } else {
-            // window.LOOKUP = (window.LOOKUP || 0) + 1;
-            blockCached = (
-                BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, CommandBlockCached) ||
-                BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId, CommandBlockCached)
-            );
-
-            if (blockCached === null) {
-                // No block found: stop the thread; script no longer exists.
-                sequencer.retireThread(thread);
-                break;
-            }
-
-            if (
-                // lastBlockCached !== INITIAL_BLOCK_CACHED &&
-                typeof lastBlockCached._jumpGroup[currentBlockId] === 'undefined' &&
-                blockCached.blockContainer === sequencer.blocks
-            ) {
-                // window.JUMP_SEQUENCE = (window.JUMP_SEQUENCE || 0) + 1;
-                blockCached = new CommandBlockCached(sequencer.blocks, blockCached);
-            }
-
-            // window.SET_JUMP = (window.SET_JUMP || 0) + 1;
-            lastBlockCached._jumpToId = currentBlockId;
-            lastBlockCached._jumpTo = blockCached;
-            lastBlockCached._jumpGroup[currentBlockId] = blockCached;
-        }
+    while (thread.status === STATUS_RUNNING) {
+        const blockCached = jumpToNext(thread, sequencer, lastBlockCached);
 
         let opCached = blockCached._firstLink;
-        if (isProfiling) {
-            while (thread.status === STATUS_RUNNING) {
-                opCached = opCached._chain;
-
-                isPromise(opCached.call());
-            }
+        if (isNotProfiling) {
+            opCached = executeStandard(thread, opCached);
         } else {
-            opCached = executeProfile(sequencer, thread, opCached);
+            opCached = executeProfile(runtime, thread, opCached);
         }
 
-        // thread.status > Thread.STATUS_RUNNING && console.log(thread.status, opCached.opcode);
+        lastBlockCached = opCached._full;
 
-        lastBlockCached = opCached;
-
-        if (thread.status === Thread.STATUS_PROMISE_WAIT && thread.reporting === null) {
-            handlePromise(
-                opCached._returnValue || opCached._parentValues[opCached._parentKey],
-                thread,
-                opCached
-            );
-        } else if (thread.status === Thread.STATUS_INTERRUPT) {
+        if (thread.status === Thread.STATUS_INTERRUPT && thread.continuous) {
             thread.status = STATUS_RUNNING;
-            if (thread.continuous) continue;
-        } else if (thread.continuous && thread.status === STATUS_RUNNING) {
-            continue;
+        } else if (thread.status === STATUS_RUNNING && !thread.continuous) {
+            thread.status = Thread.STATUS_INTERRUPT;
         }
-        break;
+    }
+
+    if (thread.status === Thread.STATUS_INTERRUPT) {
+        thread.status = STATUS_RUNNING;
+    } else if (thread.status === Thread.STATUS_PROMISE_WAIT && thread.reporting === null) {
+        handlePromise(
+            lastBlockCached._parentValues[lastBlockCached._parentKey],
+            thread,
+            lastBlockCached
+        );
     }
 
     thread.blockGlowInFrame = thread.pointer;
