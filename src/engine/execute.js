@@ -32,49 +32,11 @@ let blockFunctionProfilerId = -1;
  * @param {*} value Value to check for a Promise.
  * @return {boolean} True if the value appears to be a Promise.
  */
-// const isPromise = function (value) {
-//     return (
-//         typeof value === 'object' &&
-//         value !== null &&
-//         typeof value.then === 'function'
-//     );
-// };
-
-// const isPromise = function (value) {
-//     if (
-//         typeof value === 'object' &&
-//         value !== null &&
-//         typeof value.then === 'function'
-//     ) {
-//         blockUtility.thread.status = Thread.STATUS_PROMISE_WAIT;
-//     }
-//     return value;
-// };
-
 const isPromise = function (value) {
     typeof value === 'object' &&
         value !== null &&
         typeof value.then === 'function' &&
         (blockUtility.thread.status = Thread.STATUS_PROMISE_WAIT);
-    return value;
-};
-
-const callBlock = function (blockCached) {
-    const value = blockCached._parentValues[blockCached._parentKey] =
-        blockCached._blockFunctionUnbound.call(
-            blockCached._blockFunctionContext,
-            blockCached._argValues, blockUtility
-        )
-        ;
-
-    if (
-        typeof value === 'object' &&
-        value !== null &&
-        typeof value.then === 'function'
-    ) {
-        executeState.lastBlock = blockCached;
-        blockUtility.thread.status = Thread.STATUS_PROMISE_WAIT;
-    }
 };
 
 /**
@@ -120,14 +82,6 @@ const handlePromise = (primitiveReportedValue, thread, blockCached) => {
     });
 };
 
-const executeState = {
-    lastBlock: null
-};
-
-// const chainCallable = {
-//     call () {}
-// };
-
 class MiniCached {
     constructor (full) {
         this._full = full;
@@ -141,6 +95,36 @@ class MiniCached {
 }
 
 class JumpGroup {}
+
+class ArgValues {
+    constructor (values) {
+        this.mutation = values.mutation;
+
+        this.CLONE_OPTION = '';
+        this.CONDITION = false;
+        this.COSTUME = '';
+        this.DIRECTION = 0;
+        this.DX = 0;
+        this.FROM = 0;
+        this.input0 = 0;
+        this.NUM = 0;
+        this.NUM1 = 0;
+        this.NUM2 = 0;
+        this.OPERAND = false;
+        this.OPERAND1 = false;
+        this.OPERAND2 = false;
+        this.SIZE = 0;
+        this.TIMES = 0;
+        this.TO = 0;
+        this.VALUE = 0;
+        this.X = 0;
+        this.Y = 0;
+    }
+
+    static key (values, key) {
+        return Object.keys(values).find(_key => _key === key);
+    }
+}
 
 /**
  * A execute.js internal representation of a block to reduce the time spent in
@@ -256,24 +240,22 @@ class BlockCached {
          * specific block will use this objecct.
          * @type {object}
          */
-        this._argValues = {
+        this._argValues = new ArgValues({
             mutation: this.mutation
-        };
-
-        /**
-         * The inputs key the parent refers to this BlockCached by.
-         * @type {string}
-         */
-        this._parentKey = 'VALUE';
+        });
 
         /**
          * The target object where the parent wants the resulting value stored
          * with _parentKey as the key.
          * @type {object}
          */
-        this._parentValues = {};
+        this._parentValues = new ArgValues({});
 
-        this._returnValue = null;
+        /**
+         * The inputs key the parent refers to this BlockCached by.
+         * @type {string}
+         */
+        this._parentKey = ArgValues.key(this._parentValues, 'VALUE');
 
         /**
          * A sequence of shadow value operations that can be performed in any
@@ -304,12 +286,7 @@ class BlockCached {
         this._jumpTo = null;
         this._jumpGroup = null;
 
-        this.call = this.call;
-
         this._mini = null;
-    }
-
-    call () {
     }
 }
 
@@ -338,21 +315,7 @@ class InputBlockCached extends BlockCached {
             // unbound.call(context) than to call unbound.bind(context)().
             this._blockFunctionUnbound = this._blockFunction._function || this._blockFunction;
             this._blockFunctionContext = this._blockFunction._context;
-
-            // const unbound = this._blockFunctionUnbound;
-            // const context = this._blockFunctionContext;
-            // this.call = function () {
-            //     return this._parentValues[this._parentKey] =
-            //         unbound.call(context, this._argValues, blockUtility);
-            // };
-        } else {
-            this._blockFunctionUnbound = null;
-            this._blockFunctionContext = null;
         }
-
-        // if (opcode.startsWith('vm_')) {
-        //     this.call = this._callvm;
-        // }
 
         // Store the current shadow value if there is a shadow value.
         const fieldKeys = Object.keys(fields);
@@ -444,50 +407,8 @@ class InputBlockCached extends BlockCached {
 
                 this._shadowOps.push(...inputCached._shadowOps);
                 this._ops.push(...inputCached._ops);
-                inputCached._parentKey = inputName;
+                inputCached._parentKey = ArgValues.key(this._argValues, inputName);
                 inputCached._parentValues = this._argValues;
-
-                // if (inputCached._definedBlockFunction) {
-                //     const unbound = inputCached._blockFunctionUnbound;
-                //     const context = inputCached._blockFunctionContext;
-                //     const argValues = inputCached._argValues;
-                //     const parentKey = inputCached._parentKey;
-                //     const parentValues = inputCached._parentValues;
-                //     inputCached.call = function () {
-                //         return parentValues[parentKey] =
-                //             unbound.call(context, argValues, blockUtility);
-                //     };
-                // }
-
-                if (inputCached._definedBlockFunction) {
-                    if (inputName === 'input0') {
-                        inputCached.call = inputCached._callinput0;
-                    } else if (inputName === 'CONDITION') {
-                        inputCached.call = inputCached._callCONDITION;
-                    } else if (inputName === 'COSTUME') {
-                        inputCached.call = inputCached._callCOSTUME;
-                    } else if (inputName === 'NUM') {
-                        inputCached.call = inputCached._callNUM;
-                    } else if (inputName === 'NUM1') {
-                        inputCached.call = inputCached._callNUM1;
-                    } else if (inputName === 'NUM2') {
-                        inputCached.call = inputCached._callNUM2;
-                    } else if (inputName === 'OPERAND') {
-                        inputCached.call = inputCached._callOPERAND;
-                    } else if (inputName === 'OPERAND1') {
-                        inputCached.call = inputCached._callOPERAND1;
-                    } else if (inputName === 'OPERAND2') {
-                        inputCached.call = inputCached._callOPERAND2;
-                    } else if (inputName === 'VALUE') {
-                        inputCached.call = inputCached._callVALUE;
-                    } else if (inputName === 'X') {
-                        inputCached.call = inputCached._callX;
-                    } else if (inputName === 'Y') {
-                        inputCached.call = inputCached._callY;
-                    } else {
-                        // console.log(inputName);
-                    }
-                }
 
                 // Shadow values are static and do not change, go ahead and
                 // store their value on args.
@@ -514,7 +435,7 @@ class InputBlockCached extends BlockCached {
                 });
 
                 this._ops = [...this._ops, ...reportCached._ops];
-                this._parentKey = 'VALUE';
+                this._parentKey = ArgValues.key(reportCached._argValues, 'VALUE');
                 this._parentValues = reportCached._argValues;
             }
         }
@@ -523,138 +444,19 @@ class InputBlockCached extends BlockCached {
 
         this._next = null;
 
-        this._chain = chainCallable;
+        this._chain = endOfChain;
 
-        // this._firstLink = {
-        //     _chain: this
-        // };
-        // this._firstLink = new BlockCached(blockContainer, NULL_CACHED);
-        // this._firstLink._chain = this;
         const firstFull = new BlockCached(blockContainer, NULL_CACHED);
         firstFull._chain = this;
-        // this._firstLink._mini = new MiniCached(this._firstLink);
         this._firstLink = new MiniCached(firstFull);
 
         this._jumpToId = '';
         this._jumpTo = NULL_JUMP;
         this._jumpGroup = new JumpGroup();
     }
-
-    call () {
-        return this._parentValues[this._parentKey] =
-            this._blockFunctionUnbound.call(
-                this._blockFunctionContext,
-                this._argValues, blockUtility
-            );
-    }
-
-    _callvm () {
-        this._blockFunctionUnbound.call(
-            this._blockFunctionContext,
-            this._argValues, blockUtility
-        );
-    }
-
-    _callinput0 () {
-        return this._parentValues.input0 =
-            this._blockFunctionUnbound.call(
-                this._blockFunctionContext,
-                this._argValues, blockUtility
-            );
-    }
-
-    _callCONDITION () {
-        return this._parentValues.CONDITION =
-            this._blockFunctionUnbound.call(
-                this._blockFunctionContext,
-                this._argValues, blockUtility
-            );
-    }
-
-    _callCOSTUME () {
-        return this._parentValues.COSTUME =
-            this._blockFunctionUnbound.call(
-                this._blockFunctionContext,
-                this._argValues, blockUtility
-            );
-    }
-
-    _callNUM () {
-        return this._parentValues.NUM =
-            this._blockFunctionUnbound.call(
-                this._blockFunctionContext,
-                this._argValues, blockUtility
-            );
-    }
-
-    _callNUM1 () {
-        return this._parentValues.NUM1 =
-            this._blockFunctionUnbound.call(
-                this._blockFunctionContext,
-                this._argValues, blockUtility
-            );
-    }
-
-    _callNUM2 () {
-        return this._parentValues.NUM2 =
-            this._blockFunctionUnbound.call(
-                this._blockFunctionContext,
-                this._argValues, blockUtility
-            );
-    }
-
-    _callOPERAND () {
-        return this._parentValues.OPERAND =
-            this._blockFunctionUnbound.call(
-                this._blockFunctionContext,
-                this._argValues, blockUtility
-            );
-    }
-
-    _callOPERAND1 () {
-        return this._parentValues.OPERAND1 =
-            this._blockFunctionUnbound.call(
-                this._blockFunctionContext,
-                this._argValues, blockUtility
-            );
-    }
-
-    _callOPERAND2 () {
-        return this._parentValues.OPERAND2 =
-            this._blockFunctionUnbound.call(
-                this._blockFunctionContext,
-                this._argValues, blockUtility
-            );
-    }
-
-    _callVALUE () {
-        return this._parentValues.VALUE =
-            this._blockFunctionUnbound.call(
-                this._blockFunctionContext,
-                this._argValues, blockUtility
-            );
-    }
-
-    _callX () {
-        return this._parentValues.X =
-            this._blockFunctionUnbound.call(
-                this._blockFunctionContext,
-                this._argValues, blockUtility
-            );
-    }
-
-    _callY () {
-        return this._parentValues.Y =
-            this._blockFunctionUnbound.call(
-                this._blockFunctionContext,
-                this._argValues, blockUtility
-            );
-    }
 }
 
 const endOfChain = new BlockCached(null, NULL_CACHED);
-
-const chainCallable = new BlockCached(null, NULL_CACHED);
 
 class CommandBlockCached extends InputBlockCached {
     constructor (blockContainer, cached) {
@@ -696,24 +498,25 @@ class CommandBlockCached extends InputBlockCached {
             this._allOps = [...this._ops, ...nextCached._allOps];
         }
 
-        // debugger;
-        for (let i = this._ops.length - 1; i >= 0; i--) {
+        // Link and create mini cached items. We want to create the mini items
+        // in the order they will execute for the oppurtunity that their order
+        // in memory matches and may allow for faster lookups depending on how
+        // VMs manage this info.
+        for (let i = 0; i < this._ops.length; i++) {
             this._ops[i]._chain = this._ops[i + 1] || (
                 nextCached ? nextCached._ops[0] : endOfChain
             );
             this._ops[i]._mini = new MiniCached(this._ops[i]);
         }
+        // Link the mini cache items. Since we are creating them in execution
+        // order when they are created their link target doesn't exist yet.
+        for (let i = 0; i < this._ops.length; i++) {
+            this._ops[i]._mini._chain = this._ops[i]._chain._mini;
+        }
 
         // this._firstLink._chain = this._ops[0];
         // this._firstLink._mini._chain = this._ops[0]._mini;
         this._firstLink._chain = this._ops[0]._mini;
-    }
-
-    call () {
-        return this._returnValue = this._blockFunctionUnbound.call(
-            this._blockFunctionContext,
-            this._argValues, blockUtility
-        );
     }
 }
 
@@ -722,6 +525,25 @@ class CommandBlockCached extends InputBlockCached {
  * @param {!Sequencer} sequencer Which sequencer is executing.
  * @param {!Thread} thread Thread which to read and execute.
  */
+
+const NULL_JUMP = new BlockCached(null, NULL_CACHED);
+NULL_JUMP._firstLink = new BlockCached(null, NULL_CACHED);
+NULL_JUMP._firstLink._chain = NULL_JUMP;
+
+const executeStandard = function (thread, opCached) {
+    while (thread.status === STATUS_RUNNING) {
+        opCached = opCached._chain;
+
+        isPromise(opCached._parentValues[opCached._parentKey] =
+            opCached._blockFunctionUnbound.call(
+                opCached._blockFunctionContext,
+                opCached._argValues, blockUtility
+            ));
+    }
+
+    return opCached;
+};
+
 const executeProfile = function (runtime, thread, opCached) {
     while (thread.status === STATUS_RUNNING) {
         opCached = opCached._chain;
@@ -742,10 +564,7 @@ const executeProfile = function (runtime, thread, opCached) {
             profiler.records.push(
                 profiler.START, blockFunctionProfilerId, opcode, 0);
 
-            // isPromise(opCached.call());
             isPromise(opCached._parentValues[opCached._parentKey] =
-                // opCached._blockFunction(
-                //     opCached._argValues, blockUtility
                 opCached._blockFunctionUnbound.call(
                     opCached._blockFunctionContext,
                     opCached._argValues, blockUtility
@@ -754,35 +573,13 @@ const executeProfile = function (runtime, thread, opCached) {
             // profiler.stop(blockFunctionProfilerId);
             profiler.records.push(profiler.STOP, 0);
         } else {
-            // isPromise(opCached.call());
-
             isPromise(opCached._parentValues[opCached._parentKey] =
-                // opCached._blockFunction(
-                //     opCached._argValues, blockUtility
                 opCached._blockFunctionUnbound.call(
                     opCached._blockFunctionContext,
                     opCached._argValues, blockUtility
                 ));
         }
     }
-    return opCached;
-};
-
-const NULL_JUMP = new BlockCached(null, NULL_CACHED);
-NULL_JUMP._firstLink = new BlockCached(null, NULL_CACHED);
-NULL_JUMP._firstLink._chain = NULL_JUMP;
-
-const executeStandard = function (thread, opCached) {
-    while (thread.status === STATUS_RUNNING) {
-        opCached = opCached._chain;
-
-        isPromise(opCached._parentValues[opCached._parentKey] =
-            opCached._blockFunctionUnbound.call(
-                opCached._blockFunctionContext,
-                opCached._argValues, blockUtility
-            ));
-    }
-
     return opCached;
 };
 
@@ -795,15 +592,11 @@ const jumpToNext = function (thread, sequencer, lastBlockCached) {
     let blockCached = lastBlockCached;
 
     if (lastBlockCached._jumpToId === currentBlockId) {
-        // window.JUMP = (window.JUMP || 0) + 1;
         blockCached = lastBlockCached._jumpTo;
     } else if (typeof lastBlockCached._jumpGroup[currentBlockId] !== 'undefined') {
-        // window.JUMP_SLOW = (window.JUMP_SLOW || 0) + 1;
-        // window.SLOW = Object.assign(window.SLOW || {}, {[currentBlockId]: (window.SLOW && window.SLOW[currentBlockId] || 0) + 1});
         lastBlockCached._jumpToId = currentBlockId;
         blockCached = lastBlockCached._jumpTo = lastBlockCached._jumpGroup[currentBlockId];
     } else {
-        // window.LOOKUP = (window.LOOKUP || 0) + 1;
         blockCached = (
             BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, CommandBlockCached) ||
             BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId, CommandBlockCached)
@@ -819,11 +612,9 @@ const jumpToNext = function (thread, sequencer, lastBlockCached) {
             typeof lastBlockCached._jumpGroup[currentBlockId] === 'undefined' &&
             blockCached.blockContainer === sequencer.blocks
         ) {
-            // window.JUMP_SEQUENCE = (window.JUMP_SEQUENCE || 0) + 1;
             blockCached = new CommandBlockCached(sequencer.blocks, blockCached);
         }
 
-        // window.SET_JUMP = (window.SET_JUMP || 0) + 1;
         lastBlockCached._jumpToId = currentBlockId;
         lastBlockCached._jumpTo = blockCached;
         lastBlockCached._jumpGroup[currentBlockId] = blockCached;
