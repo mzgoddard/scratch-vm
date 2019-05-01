@@ -186,11 +186,10 @@ class Scratch3VMBlocks {
 
         if ((ops.length - i) > 0) {
             const allOps = blockCached._allOps;
+            const miniOps = blockCached._miniOps;
             blockCached._ops = ops.slice(i);
             blockCached._allOps = allOps.slice(i);
-            // blockCached._firstLink._chain = ops[i];
-            // blockCached._firstLink._mini._chain = ops[i]._mini;
-            blockCached._firstLink._chain = ops[i]._mini;
+            blockCached._miniOps = miniOps.slice(i);
 
             const continuous = thread.continuous;
             thread.continuous = false;
@@ -199,9 +198,7 @@ class Scratch3VMBlocks {
 
             blockCached._ops = ops;
             blockCached._allOps = allOps;
-            // blockCached._firstLink._chain = ops[0];
-            // blockCached._firstLink._mini._chain = ops[0]._mini;
-            blockCached._firstLink._chain = ops[0]._mini;
+            blockCached._miniOps = miniOps;
         }
 
         if (
