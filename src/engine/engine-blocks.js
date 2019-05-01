@@ -25,11 +25,14 @@ class Scratch3VMBlocks {
             vm_end_of_loop_branch: this.endOfLoopBranch,
             vm_end_of_branch: this.endOfBranch,
             vm_cast_string: this.castString,
+            vm_set_key: this.setKey,
+            vm_set_value_key: this.setValueKey,
             vm_cached_end_of_procedure: this.cachedEndOfProcedure,
             vm_cached_end_of_branch: this.cachedEndOfBranch,
             vm_may_continue: this.mayContinue,
             vm_last_continue: this.lastContinue,
             vm_interrupt: this.interrupt,
+            vm_check_promise: this.checkPromise,
             vm_reenter_promise: this.reenterFromPromise,
             vm_report_hat: this.reportHat,
             vm_report_stack_click: this.reportStackClick,
@@ -66,6 +69,14 @@ class Scratch3VMBlocks {
 
     castString (args) {
         return Cast.toString(args.VALUE);
+    }
+
+    setKey (args) {
+        args.DESTINATION[args.KEY] = args.SOURCE._lastValue;
+    }
+
+    setValueKey (args) {
+        args.DESTINATION.VALUE = args.SOURCE._lastValue;
     }
 
     cachedEndOfProcedure (args, {thread}) {
@@ -124,6 +135,54 @@ class Scratch3VMBlocks {
         return blockCached;
     }
 
+    checkPromise (args, {thread}) {
+        const value = args.SOURCE._lastValue;
+
+        if (
+            typeof value === 'object' &&
+            value !== null &&
+            typeof value.then === 'function'
+        ) {
+            if (thread.status === Thread.STATUS_RUNNING) {
+                // Primitive returned a promise; automatically yield thread.
+                thread.status = Thread.STATUS_PROMISE_WAIT;
+            }
+
+            const primitiveReportedValue = value;
+            args.SOURCE._lastValue = null;
+
+            // Promise handlers
+            primitiveReportedValue.then(resolvedValue => {
+                thread.pushReportedValue(resolvedValue);
+                thread.status = Thread.STATUS_RUNNING;
+                thread.pushStack('vm_reenter_promise');
+            }, rejectionReason => {
+                // Promise rejected: the primitive had some error. Log it and proceed.
+                log.warn('Primitive rejected promise: ', rejectionReason);
+                thread.status = Thread.STATUS_RUNNING;
+                thread.popStack();
+            });
+
+            const blockCached = args.FULL;
+
+            // Store the already reported values. They will be thawed into the
+            // future versions of the same operations by block id. The reporting
+            // operation if it is promise waiting will set its parent value at
+            // that time.
+            thread.justReported = null;
+            const ops = blockCached._ops;
+            thread.reporting = blockCached.id;
+            thread.reported = ops.slice(0, ops.indexOf(blockCached)).map(reportedCached => {
+                return {
+                    opCached: reportedCached.id,
+                    inputValue: reportedCached._lastValue
+                };
+            });
+        }
+
+        return value;
+    }
+
     reenterFromPromise (args, {sequencer, thread}) {
         thread.popStack();
 
@@ -144,9 +203,7 @@ class Scratch3VMBlocks {
             const opCached = ops.find(op => op.id === oldOpCached);
 
             if (opCached) {
-                const inputName = opCached._parentKey;
-                const argValues = opCached._parentValues;
-                argValues[inputName] = inputValue;
+                opCached._lastValue = inputValue;
             }
         }
 
@@ -174,9 +231,7 @@ class Scratch3VMBlocks {
 
             thread.justReported = null;
 
-            const inputName = opCached._parentKey;
-            const argValues = opCached._parentValues;
-            argValues[inputName] = inputValue;
+            opCached._lastValue = inputValue;
         }
 
         i += 1;

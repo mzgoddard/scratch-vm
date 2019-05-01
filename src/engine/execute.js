@@ -49,7 +49,8 @@ const handlePromise = (thread, blockCached) => {
         thread.status = Thread.STATUS_PROMISE_WAIT;
     }
 
-    const primitiveReportedValue = blockCached._parentValues[blockCached._parentKey];
+    // const primitiveReportedValue = blockCached._parentValues[blockCached._parentKey];
+    const primitiveReportedValue = blockCached._lastValue;
 
     // Promise handlers
     primitiveReportedValue.then(resolvedValue => {
@@ -71,11 +72,9 @@ const handlePromise = (thread, blockCached) => {
     const ops = blockCached._ops;
     thread.reporting = blockCached.id;
     thread.reported = ops.slice(0, ops.indexOf(blockCached)).map(reportedCached => {
-        const inputName = reportedCached._parentKey;
-        const reportedValues = reportedCached._parentValues;
         return {
             opCached: reportedCached.id,
-            inputValue: reportedValues[inputName]
+            inputValue: reportedCached._lastValue
         };
     });
 };
@@ -86,21 +85,20 @@ class MiniCached {
         this.opcode = full.opcode;
         /** @type {boolean} */
         this._profileOpcode = full._profileOpcode;
-        /** @type {ArgValues} */
-        this._parentValues = full._parentValues;
-        /** @type {string} */
-        this._parentKey = full._parentKey;
         /** @type {function} */
         this._blockFunctionUnbound = full._blockFunctionUnbound;
         /** @type {object} */
         this._blockFunctionContext = full._blockFunctionContext;
         /** @type {ArgValues} */
         this._argValues = full._argValues;
+
+        this._lastValue = 0;
     }
 }
 
 const call = function (opCached) {
-    return opCached._parentValues[opCached._parentKey] =
+    // return opCached._parentValues[opCached._parentKey] =
+    opCached._lastValue =
         opCached._blockFunctionUnbound.call(
             opCached._blockFunctionContext,
             opCached._argValues, blockUtility
@@ -294,19 +292,6 @@ class BlockCached {
         });
 
         /**
-         * The target object where the parent wants the resulting value stored
-         * with _parentKey as the key.
-         * @type {object}
-         */
-        this._parentValues = ({});
-
-        /**
-         * The inputs key the parent refers to this BlockCached by.
-         * @type {string}
-         */
-        this._parentKey = ArgValues.key(this._parentValues, 'VALUE');
-
-        /**
          * A sequence of shadow value operations that can be performed in any
          * order and are easier to perform given that they are static.
          * @type {Array<BlockCached>}
@@ -333,6 +318,14 @@ class BlockCached {
 
         this._miniOps = [];
     }
+
+    get _lastValue () {
+        return this._mini._lastValue;
+    }
+
+    set _lastValue (value) {
+        return this._mini._lastValue = value;
+    }
 }
 
 const NULL_CACHED = {
@@ -344,6 +337,10 @@ const NULL_CACHED = {
 };
 
 const NULL_BLOCK = new BlockCached(null, NULL_CACHED);
+
+const supportedKeys = {
+    VALUE: 'vm_set_value_key'
+};
 
 class InputBlockCached extends BlockCached {
     constructor (blockContainer, cached) {
@@ -389,6 +386,8 @@ class InputBlockCached extends BlockCached {
             }
         }
 
+        this._mini = new MiniCached(this);
+
         // Remove custom_block. It is not part of block execution.
         delete this._inputs.custom_block;
 
@@ -417,6 +416,8 @@ class InputBlockCached extends BlockCached {
             }
         }
 
+        const collectArgOps = [];
+
         // Cache all input children blocks in the operation lists. The
         // operations can later be run in the order they appear in correctly
         // executing the operations quickly in a flat loop instead of needing to
@@ -428,7 +429,7 @@ class InputBlockCached extends BlockCached {
                 // it would normally be placed. This lets us produce this value
                 // dynamically without having special case handling later in the
                 // runtime execute function.
-                const inputCached = new InputBlockCached(runtime.sequencer.blocks, {
+                const inputCached = new InputBlockCached(null, {
                     id: 'vm_cast_string',
                     opcode: 'vm_cast_string',
                     fields: {},
@@ -443,8 +444,24 @@ class InputBlockCached extends BlockCached {
 
                 this._shadowOps.push(...inputCached._shadowOps);
                 this._ops.push(...inputCached._ops);
-                inputCached._parentKey = 'name';
-                inputCached._parentValues = this._argValues.BROADCAST_OPTION;
+
+                if (inputCached._ops.length > 0) {
+                    const setKeyCached = new InputBlockCached(null, {
+                        id: 'vm_set_key',
+                        // opcode: supportedKeys[inputName] || 'vm_set_key',
+                        opcode: 'vm_set_key',
+                        fields: {},
+                        inputs: {},
+                        mutation: null
+                    });
+
+                    collectArgOps.push(...setKeyCached._ops);
+                    setKeyCached._mini._argValues = setKeyCached._argValues = {
+                        KEY: 'name',
+                        SOURCE: inputCached._mini,
+                        DESTINATION: this._argValues.BROADCAST_OPTION
+                    };
+                }
             } else if (input.block) {
                 const inputCached = BlocksExecuteCache.getCached(blockContainer, input.block, InputBlockCached);
 
@@ -454,8 +471,24 @@ class InputBlockCached extends BlockCached {
 
                 this._shadowOps.push(...inputCached._shadowOps);
                 this._ops.push(...inputCached._ops);
-                inputCached._parentKey = ArgValues.key(this._argValues, inputName);
-                inputCached._parentValues = this._argValues;
+
+                if (inputCached._ops.length > 0) {
+                    const setKeyCached = new InputBlockCached(null, {
+                        id: 'vm_set_key',
+                        // opcode: supportedKeys[inputName] || 'vm_set_key',
+                        opcode: 'vm_set_key',
+                        fields: {},
+                        inputs: {},
+                        mutation: null
+                    });
+
+                    collectArgOps.push(...setKeyCached._ops);
+                    setKeyCached._mini._argValues = setKeyCached._argValues = {
+                        KEY: ArgValues.key(this._argValues, inputName),
+                        SOURCE: inputCached._mini,
+                        DESTINATION: this._argValues
+                    };
+                }
 
                 // Shadow values are static and do not change, go ahead and
                 // store their value on args.
@@ -465,6 +498,8 @@ class InputBlockCached extends BlockCached {
             }
         }
 
+        this._ops.push(...collectArgOps);
+
         // The final operation is this block itself. At the top most block is a
         // command block or a block that is being run as a monitor.
         if (!this._isHat && this._isShadowBlock) {
@@ -473,6 +508,14 @@ class InputBlockCached extends BlockCached {
             this._ops.push(this);
 
             if (this._isHat) {
+                const setKeyCached = new InputBlockCached(null, {
+                    id: 'vm_set_key',
+                    opcode: 'vm_set_key',
+                    fields: {},
+                    inputs: {},
+                    mutation: null
+                });
+
                 const reportCached = new InputBlockCached(null, {
                     id: 'vm_report_hat',
                     opcode: 'vm_report_hat',
@@ -481,9 +524,28 @@ class InputBlockCached extends BlockCached {
                     mutation: null
                 });
 
-                this._ops = [...this._ops, ...reportCached._ops];
-                this._parentKey = ArgValues.key(reportCached._argValues, 'VALUE');
-                this._parentValues = reportCached._argValues;
+                setKeyCached._mini._argValues = setKeyCached._argValues = {
+                    KEY: 'VALUE',
+                    SOURCE: this._mini,
+                    DESTINATION: reportCached._argValues
+                };
+
+                this._ops = [...this._ops, ...setKeyCached._ops, ...reportCached._ops];
+            } else if (blockContainer !== null) {
+                // const checkPromiseCached = new InputBlockCached(null, {
+                //     id: 'vm_check_promise',
+                //     opcode: 'vm_check_promise',
+                //     fields: {},
+                //     inputs: {},
+                //     mutation: null
+                // });
+                //
+                // checkPromiseCached._mini._argValues = checkPromiseCached._argValues = {
+                //     FULL: this,
+                //     SOURCE: this._mini
+                // };
+                //
+                // this._ops.push(checkPromiseCached);
             }
         }
 
@@ -515,7 +577,7 @@ class CommandBlockCached extends InputBlockCached {
             mutation: null
         });
 
-        mayContinueCached._argValues = {
+        mayContinueCached._mini._argValues = mayContinueCached._argValues = {
             EXPECT_STACK: this.id,
             NEXT_STACK: nextId,
             END_STACK: null
@@ -538,7 +600,7 @@ class CommandBlockCached extends InputBlockCached {
         // in memory matches and may allow for faster lookups depending on how
         // VMs manage this info.
         for (let i = 0; i < this._ops.length; i++) {
-            this._ops[i]._mini = new MiniCached(this._ops[i]);
+            // this._ops[i]._mini = new MiniCached(this._ops[i]);
         }
 
         this._miniOps = this._allOps.map(op => op._mini);
@@ -558,6 +620,7 @@ const executeStandard = function (runtime, thread, blockCached) {
     while (thread.status === STATUS_RUNNING) {
         const opCached = miniOps[++i];
 
+        // call(opCached);
         if (isPromise(call(opCached))) {
             handlePromise(thread, blockCached._allOps[i]);
         }
@@ -589,14 +652,7 @@ const executeProfile = function (runtime, thread, blockCached) {
             profiler.records.push(
                 profiler.START, blockFunctionProfilerId, opcode, 0);
 
-            // const value = opCached._parentValues[opCached._parentKey] =
-            //     opCached._blockFunctionUnbound.call(
-            //         opCached._blockFunctionContext,
-            //         opCached._argValues, blockUtility
-            //     );
-            // const value = call(opCached);
-            // const value = opCached.call();
-
+            // call(opCached);
             if (isPromise(call(opCached))) {
                 handlePromise(thread, blockCached._allOps[i]);
             }
@@ -604,18 +660,7 @@ const executeProfile = function (runtime, thread, blockCached) {
             // profiler.stop(blockFunctionProfilerId);
             profiler.records.push(profiler.STOP, 0);
         } else {
-            // const value = opCached._parentValues[opCached._parentKey] =
-            //     opCached._blockFunctionUnbound.call(
-            //         opCached._blockFunctionContext,
-            //         opCached._argValues, blockUtility
-            //     );
-            //
-            // if (
-            //     typeof value === 'object' && value !== null &&
-            //     typeof value.then === 'function'
-            // ) {
-            //     handlePromise(thread, blockCached._allOps[i]);
-            // }
+            // call(opCached);
             if (isPromise(call(opCached))) {
                 handlePromise(thread, blockCached._allOps[i]);
             }
