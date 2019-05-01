@@ -31,11 +31,10 @@ let blockFunctionProfilerId = -1;
  * Utility function to determine if a value is a Promise.
  * @param {*} value Value to check for a Promise.
  */
-const savePromise = function (value) {
-    typeof value === 'object' && value !== null &&
-        typeof value.then === 'function' &&
-        blockUtility.thread.status === STATUS_RUNNING &&
-        (blockUtility.thread.status = Thread.STATUS_PROMISE_WAIT);
+const isPromise = function (value) {
+    return typeof value === 'object' &&
+        value !== null &&
+        typeof value.then === 'function';
 };
 
 /**
@@ -100,6 +99,14 @@ class MiniCached {
     }
 }
 
+const call = function (opCached) {
+    return opCached._parentValues[opCached._parentKey] =
+        opCached._blockFunctionUnbound.call(
+            opCached._blockFunctionContext,
+            opCached._argValues, blockUtility
+        );
+};
+
 class JumpGroup {
     constructor () {
         this._nextId = '';
@@ -112,29 +119,59 @@ class ArgValues {
     constructor (values) {
         this.mutation = values.mutation;
 
+        this.BACKDROP = '';
+        this.CHANGE = 0;
         this.CLONE_OPTION = '';
+        this.COLOR = '';
         this.CONDITION = false;
         this.COSTUME = '';
+        this.DEGREES = 0;
         this.DIRECTION = 0;
+        this.DURATION = 0;
         this.DX = 0;
+        this.DY = 0;
         this.FROM = 0;
+        this.HUE = '';
+        this.INDEX = 0;
         this.input0 = 0;
+        this.input1 = 0;
+        this.input2 = 0;
+        this.input3 = 0;
+        this.input4 = 0;
+        this.input5 = 0;
+        this.input6 = 0;
+        this.input7 = 0;
+        this.input8 = 0;
+        this.input9 = 0;
+        this.ITEM = 0;
+        this.KEY_OPTION = '';
+        this.LETTER = '';
         this.NUM = 0;
         this.NUM1 = 0;
         this.NUM2 = 0;
+        this.OBJECT = '';
         this.OPERAND = false;
         this.OPERAND1 = false;
         this.OPERAND2 = false;
+        this.SHADE = '';
         this.SIZE = 0;
+        this.SOUND_MENU = '';
+        this.STEPS = 0;
+        this.STRING = '';
+        this.STRING1 = '';
+        this.STRING2 = '';
         this.TIMES = 0;
         this.TO = 0;
+        this.TOUCHINGOBJECTMENU = '';
+        this.TOWARDS = '';
         this.VALUE = 0;
+        this.VOLUME = 0;
         this.X = 0;
         this.Y = 0;
     }
 
     static key (values, key) {
-        return Object.keys(values).find(_key => _key === key);
+        return Object.keys(values).find(_key => _key === key) || key;
     }
 }
 
@@ -252,7 +289,7 @@ class BlockCached {
          * specific block will use this objecct.
          * @type {object}
          */
-        this._argValues = new ArgValues({
+        this._argValues = ({
             mutation: this.mutation
         });
 
@@ -261,7 +298,7 @@ class BlockCached {
          * with _parentKey as the key.
          * @type {object}
          */
-        this._parentValues = new ArgValues({});
+        this._parentValues = ({});
 
         /**
          * The inputs key the parent refers to this BlockCached by.
@@ -521,20 +558,12 @@ const executeStandard = function (runtime, thread, blockCached) {
     while (thread.status === STATUS_RUNNING) {
         const opCached = miniOps[++i];
 
-        const value = opCached._parentValues[opCached._parentKey] =
-            opCached._blockFunctionUnbound.call(
-                opCached._blockFunctionContext,
-                opCached._argValues, blockUtility
-            );
-
-        if (typeof value === 'object' && value !== null &&
-            typeof value.then === 'function' &&
-            thread.status === STATUS_RUNNING) {
-            (thread.status = Thread.STATUS_PROMISE_WAIT);
+        if (isPromise(call(opCached))) {
+            handlePromise(thread, blockCached._allOps[i]);
         }
     }
 
-    return blockCached._allOps[i];
+    return blockCached._allOps[i]._jumpGroup;
 };
 
 const executeProfile = function (runtime, thread, blockCached) {
@@ -560,36 +589,40 @@ const executeProfile = function (runtime, thread, blockCached) {
             profiler.records.push(
                 profiler.START, blockFunctionProfilerId, opcode, 0);
 
-            const value = opCached._parentValues[opCached._parentKey] =
-                opCached._blockFunctionUnbound.call(
-                    opCached._blockFunctionContext,
-                    opCached._argValues, blockUtility
-                );
+            // const value = opCached._parentValues[opCached._parentKey] =
+            //     opCached._blockFunctionUnbound.call(
+            //         opCached._blockFunctionContext,
+            //         opCached._argValues, blockUtility
+            //     );
+            // const value = call(opCached);
+            // const value = opCached.call();
 
-            if (typeof value === 'object' && value !== null &&
-                typeof value.then === 'function' &&
-                thread.status === STATUS_RUNNING) {
-                (thread.status = Thread.STATUS_PROMISE_WAIT);
+            if (isPromise(call(opCached))) {
+                handlePromise(thread, blockCached._allOps[i]);
             }
 
             // profiler.stop(blockFunctionProfilerId);
             profiler.records.push(profiler.STOP, 0);
         } else {
-            const value = opCached._parentValues[opCached._parentKey] =
-                opCached._blockFunctionUnbound.call(
-                    opCached._blockFunctionContext,
-                    opCached._argValues, blockUtility
-                );
-
-            if (typeof value === 'object' && value !== null &&
-                typeof value.then === 'function' &&
-                thread.status === STATUS_RUNNING) {
-                (thread.status = Thread.STATUS_PROMISE_WAIT);
+            // const value = opCached._parentValues[opCached._parentKey] =
+            //     opCached._blockFunctionUnbound.call(
+            //         opCached._blockFunctionContext,
+            //         opCached._argValues, blockUtility
+            //     );
+            //
+            // if (
+            //     typeof value === 'object' && value !== null &&
+            //     typeof value.then === 'function'
+            // ) {
+            //     handlePromise(thread, blockCached._allOps[i]);
+            // }
+            if (isPromise(call(opCached))) {
+                handlePromise(thread, blockCached._allOps[i]);
             }
         }
     }
 
-    return blockCached._allOps[i];
+    return blockCached._allOps[i]._jumpGroup;
 };
 
 const jumpToNext = function (thread, sequencer, jumpGroup) {
@@ -661,15 +694,12 @@ const execute = function (sequencer, thread) {
         jumpGroup = thread.blockContainer._cache._executeEntryMap = new JumpGroup();
     }
 
-    let lastBlock = NULL_BLOCK;
-
     const _execute = runtime.profiler === null ? executeStandard : executeProfile;
 
     while (thread.status === STATUS_RUNNING) {
         const blockCached = jumpToNext(thread, sequencer, jumpGroup);
 
-        lastBlock = _execute(runtime, thread, blockCached);
-        jumpGroup = lastBlock._jumpGroup;
+        jumpGroup = _execute(runtime, thread, blockCached);
 
         if (thread.status === Thread.STATUS_INTERRUPT && thread.continuous) {
             thread.status = STATUS_RUNNING;
@@ -680,8 +710,6 @@ const execute = function (sequencer, thread) {
 
     if (thread.status === Thread.STATUS_INTERRUPT) {
         thread.status = STATUS_RUNNING;
-    } else if (thread.status === Thread.STATUS_PROMISE_WAIT && thread.reporting === null) {
-        handlePromise(thread, lastBlock);
     }
 
     thread.blockGlowInFrame = thread.pointer;
