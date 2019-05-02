@@ -80,12 +80,67 @@ const handlePromise = (thread, blockCached) => {
     });
 };
 
+class ProfileCounter {
+    constructor (opcode, summarize) {
+        this.opcode = opcode;
+        this.summarize = summarize;
+        this.subcounters = [];
+    }
+
+    get count () {
+        let sum = 0;
+        for (let i = 0; i < this.subcounters.length; i++) {
+            sum += this.subcounters[i].count;
+        }
+        return sum;
+    }
+}
+
+class ProfileFunctions {
+    constructor () {
+        this.counters = [];
+        this.hash = {};
+    }
+
+    addCounter (key, summarize, counter) {
+        this.getCounter(key, summarize).subcounters.push(counter);
+    }
+
+    getCounter (key, summarize) {
+        if (!this.hash[key]) {
+            this.counters.push(this.hash[key] = new ProfileCounter(key, summarize));
+        }
+        return this.hash[key];
+    }
+
+    getSummary () {
+        const summary = {
+            total: 0
+        };
+
+        for (let i = 0; i < this.counters.length; i++) {
+            const {opcode, summarize, count} = this.counters[i];
+            summary[opcode] = count;
+            if (summarize) {
+                summary.total += count;
+            }
+        }
+
+        return summary;
+    }
+}
+
+window.PROFILE_FUNCTIONS = new ProfileFunctions();
+
 class MiniCached {
     constructor (full) {
-        /** @type {string} */
-        this.opcode = full.opcode;
-        /** @type {boolean} */
-        this._profileOpcode = full._profileOpcode;
+        // /** @type {string} */
+        // this.opcode = full.opcode;
+        // /** @type {boolean} */
+        // this._profileOpcode = full._profileOpcode;
+        this.count = 0;
+        PROFILE_FUNCTIONS.addCounter(full.opcode, full._profileOpcode, this);
+        // this._profileCounter = PROFILE_FUNCTIONS.getCounter(full.opcode, full._profileOpcode);
         /** @type {ArgValues} */
         this._parentValues = full._parentValues;
         /** @type {string} */
@@ -570,24 +625,26 @@ const executeProfile = function (runtime, thread, blockCached) {
     let i = -1;
     const miniOps = blockCached._miniOps;
 
+    window.BLOCK_FUNCTIONS |= 0;
+
     while (thread.status === STATUS_RUNNING) {
         const opCached = miniOps[++i];
 
-        if (opCached._profileOpcode) {
-            const {profiler} = runtime;
+        // if (opCached._profileOpcode) {
+            // const {profiler} = runtime;
 
-            if (blockFunctionProfilerId === -1) {
-                blockFunctionProfilerId = profiler.idByName(blockFunctionProfilerFrame);
-            }
+            // if (blockFunctionProfilerId === -1) {
+            //     blockFunctionProfilerId = profiler.idByName(blockFunctionProfilerFrame);
+            // }
 
-            const opcode = opCached.opcode;
+            // const opcode = opCached.opcode;
             // The method commented below has its code inlined
             // underneath to reduce the bias recorded for the profiler's
             // calls in this time sensitive execute function.
             //
             // profiler.start(blockFunctionProfilerId, opcode);
-            profiler.records.push(
-                profiler.START, blockFunctionProfilerId, opcode, 0);
+            // profiler.records.push(
+            //     profiler.START, blockFunctionProfilerId, opcode, 0);
 
             // const value = opCached._parentValues[opCached._parentKey] =
             //     opCached._blockFunctionUnbound.call(
@@ -597,29 +654,42 @@ const executeProfile = function (runtime, thread, blockCached) {
             // const value = call(opCached);
             // const value = opCached.call();
 
+            // window.BLOCK_FUNCTIONS += opCached._profileOpcode ? 1 : 0;
+            opCached.count += 1;
             if (isPromise(call(opCached))) {
                 handlePromise(thread, blockCached._allOps[i]);
             }
 
-            // profiler.stop(blockFunctionProfilerId);
-            profiler.records.push(profiler.STOP, 0);
-        } else {
             // const value = opCached._parentValues[opCached._parentKey] =
             //     opCached._blockFunctionUnbound.call(
             //         opCached._blockFunctionContext,
             //         opCached._argValues, blockUtility
             //     );
-            //
-            // if (
-            //     typeof value === 'object' && value !== null &&
-            //     typeof value.then === 'function'
-            // ) {
-            //     handlePromise(thread, blockCached._allOps[i]);
+            // if (typeof value === 'object' &&
+            //     value !== null &&
+            //     typeof value.then === 'function') {
+            //         handlePromise(thread, blockCached._allOps[i]);
             // }
-            if (isPromise(call(opCached))) {
-                handlePromise(thread, blockCached._allOps[i]);
-            }
-        }
+
+            // profiler.stop(blockFunctionProfilerId);
+            // profiler.records.push(profiler.STOP, 0);
+        // } else {
+        //     // const value = opCached._parentValues[opCached._parentKey] =
+        //     //     opCached._blockFunctionUnbound.call(
+        //     //         opCached._blockFunctionContext,
+        //     //         opCached._argValues, blockUtility
+        //     //     );
+        //     //
+        //     // if (
+        //     //     typeof value === 'object' && value !== null &&
+        //     //     typeof value.then === 'function'
+        //     // ) {
+        //     //     handlePromise(thread, blockCached._allOps[i]);
+        //     // }
+        //     if (isPromise(call(opCached))) {
+        //         handlePromise(thread, blockCached._allOps[i]);
+        //     }
+        // }
     }
 
     return blockCached._allOps[i]._jumpGroup;

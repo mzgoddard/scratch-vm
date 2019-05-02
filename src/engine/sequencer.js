@@ -164,7 +164,9 @@ class Sequencer {
                 if (stepThreadsInnerProfilerId === -1) {
                     stepThreadsInnerProfilerId = this.runtime.profiler.idByName(stepThreadsInnerProfilerFrame);
                 }
-                this.runtime.profiler.start(stepThreadsInnerProfilerId);
+                // this.runtime.profiler.start(stepThreadsInnerProfilerId);
+                this.runtime.profiler.records.push(
+                    this.runtime.profiler.START, stepThreadsInnerProfilerId, null, 0);
             }
 
             activeThreads = false;
@@ -181,11 +183,11 @@ class Sequencer {
                         if (stepThreadProfilerId === -1) {
                             stepThreadProfilerId = this.runtime.profiler.idByName(stepThreadProfilerFrame);
                         }
-                        this.runtime.profiler.start(stepThreadProfilerId);
+                        // this.runtime.profiler.start(stepThreadProfilerId);
 
                         this.stepThread(activeThread);
 
-                        this.runtime.profiler.stop();
+                        // this.runtime.profiler.stop();
                     }
                 } else if (activeThread.status === Thread.STATUS_YIELD_TICK &&
                     !ranFirstTick) {
@@ -216,7 +218,9 @@ class Sequencer {
             ranFirstTick = true;
 
             if (this.runtime.profiler !== null) {
-                this.runtime.profiler.stop();
+                // this.runtime.profiler.stop();
+                this.runtime.profiler.records.push(
+                    this.runtime.profiler.STOP, 0);
             }
 
             // Filter inactive threads from `this.runtime.threads`.
