@@ -156,8 +156,9 @@ class MiniCached {
 
 const call = function (opCached) {
     return opCached._parentValues[opCached._parentKey] =
-        opCached._blockFunctionUnbound.call(
-            opCached._blockFunctionContext,
+        // opCached._blockFunctionUnbound.call(
+        //     opCached._blockFunctionContext,
+        opCached._blockFunctionUnbound(
             opCached._argValues, blockUtility
         );
 };
@@ -417,6 +418,20 @@ class InputBlockCached extends BlockCached {
             // unbound.call(context) than to call unbound.bind(context)().
             this._blockFunctionUnbound = this._blockFunction._function || this._blockFunction;
             this._blockFunctionContext = this._blockFunction._context;
+
+            const unboundString = this._blockFunctionUnbound.toString();
+            const alreadyBound = unboundString.indexOf('native') !== -1;
+            const contextSensitive = unboundString.indexOf('this') !== -1;
+            const promiselessBlock = (
+                opcode.startsWith('operator') ||
+                opcode.startsWith('data') ||
+                opcode.startsWith('argument') ||
+                opcode.startsWith('procedure') ||
+                opcode.startsWith('control')
+            );
+            if (contextSensitive) {
+                this._blockFunctionUnbound = this._blockFunction;
+            }
         }
 
         // Store the current shadow value if there is a shadow value.
@@ -613,9 +628,14 @@ const executeStandard = function (runtime, thread, blockCached) {
     while (thread.status === STATUS_RUNNING) {
         const opCached = miniOps[++i];
 
-        if (isPromise(call(opCached))) {
-            handlePromise(thread, blockCached._allOps[i]);
-        }
+        opCached._parentValues[opCached._parentKey] =
+            opCached._blockFunctionUnbound(
+                opCached._argValues, blockUtility
+            );
+
+        // if (isPromise(call(opCached))) {
+        //     handlePromise(thread, blockCached._allOps[i]);
+        // }
     }
 
     return blockCached._allOps[i]._jumpGroup;
@@ -625,70 +645,17 @@ const executeProfile = function (runtime, thread, blockCached) {
     let i = -1;
     const miniOps = blockCached._miniOps;
 
-    window.BLOCK_FUNCTIONS |= 0;
-
     while (thread.status === STATUS_RUNNING) {
         const opCached = miniOps[++i];
 
-        // if (opCached._profileOpcode) {
-            // const {profiler} = runtime;
+        opCached.count += 1;
+        opCached._parentValues[opCached._parentKey] =
+            opCached._blockFunctionUnbound(
+                opCached._argValues, blockUtility
+            );
 
-            // if (blockFunctionProfilerId === -1) {
-            //     blockFunctionProfilerId = profiler.idByName(blockFunctionProfilerFrame);
-            // }
-
-            // const opcode = opCached.opcode;
-            // The method commented below has its code inlined
-            // underneath to reduce the bias recorded for the profiler's
-            // calls in this time sensitive execute function.
-            //
-            // profiler.start(blockFunctionProfilerId, opcode);
-            // profiler.records.push(
-            //     profiler.START, blockFunctionProfilerId, opcode, 0);
-
-            // const value = opCached._parentValues[opCached._parentKey] =
-            //     opCached._blockFunctionUnbound.call(
-            //         opCached._blockFunctionContext,
-            //         opCached._argValues, blockUtility
-            //     );
-            // const value = call(opCached);
-            // const value = opCached.call();
-
-            // window.BLOCK_FUNCTIONS += opCached._profileOpcode ? 1 : 0;
-            opCached.count += 1;
-            if (isPromise(call(opCached))) {
-                handlePromise(thread, blockCached._allOps[i]);
-            }
-
-            // const value = opCached._parentValues[opCached._parentKey] =
-            //     opCached._blockFunctionUnbound.call(
-            //         opCached._blockFunctionContext,
-            //         opCached._argValues, blockUtility
-            //     );
-            // if (typeof value === 'object' &&
-            //     value !== null &&
-            //     typeof value.then === 'function') {
-            //         handlePromise(thread, blockCached._allOps[i]);
-            // }
-
-            // profiler.stop(blockFunctionProfilerId);
-            // profiler.records.push(profiler.STOP, 0);
-        // } else {
-        //     // const value = opCached._parentValues[opCached._parentKey] =
-        //     //     opCached._blockFunctionUnbound.call(
-        //     //         opCached._blockFunctionContext,
-        //     //         opCached._argValues, blockUtility
-        //     //     );
-        //     //
-        //     // if (
-        //     //     typeof value === 'object' && value !== null &&
-        //     //     typeof value.then === 'function'
-        //     // ) {
-        //     //     handlePromise(thread, blockCached._allOps[i]);
-        //     // }
-        //     if (isPromise(call(opCached))) {
-        //         handlePromise(thread, blockCached._allOps[i]);
-        //     }
+        // if (isPromise(call(opCached))) {
+        //     handlePromise(thread, blockCached._allOps[i]);
         // }
     }
 
