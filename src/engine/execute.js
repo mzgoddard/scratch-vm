@@ -7,7 +7,7 @@ const Thread = require('./thread');
  * Thread status value when it is actively running.
  * @const {number}
  */
-const STATUS_RUNNING = Thread.STATUS_RUNNING;
+const STATUS_RUNNING = 0;
 
 /**
  * Single BlockUtility instance reused by execute for every pritimive ran.
@@ -621,45 +621,75 @@ class CommandBlockCached extends InputBlockCached {
  * @param {!Thread} thread Thread which to read and execute.
  */
 
-const executeStandard = function (runtime, thread, blockCached) {
-    let i = -1;
-    const miniOps = blockCached._miniOps;
+const executeStandard = function (runtime, thread, jumpGroup) {
+    // const executeStandard = function (thread, threadPointer) {
+    //     const ops = threadPointer.ops;
+    //
+    //     while (thread.status === STATUS_RUNNING) {
+    //         const opCached = ops[++threadPointer.index];
+    //
+    //         opCached._parentValues[opCached._parentKey] =
+    //             opCached._blockFunctionUnbound(opCached._argValues, blockUtility);
+    //     }
+
+    const sequencer = runtime.sequencer;
 
     while (thread.status === STATUS_RUNNING) {
-        const opCached = miniOps[++i];
+        const blockCached = jumpToNext(thread, sequencer, jumpGroup);
 
-        opCached._parentValues[opCached._parentKey] =
-            opCached._blockFunctionUnbound(
-                opCached._argValues, blockUtility
-            );
+        let i = -1;
+        const miniOps = blockCached._miniOps;
 
-        // if (isPromise(call(opCached))) {
-        //     handlePromise(thread, blockCached._allOps[i]);
-        // }
+        while (thread.status === STATUS_RUNNING) {
+            const opCached = miniOps[++i];
+
+            opCached._parentValues[opCached._parentKey] =
+                opCached._blockFunctionUnbound(
+                    opCached._argValues, blockUtility
+                );
+
+            // if (isPromise(call(opCached))) {
+            //     handlePromise(thread, blockCached._allOps[i]);
+            // }
+        }
+
+        if (thread.status === Thread.STATUS_INTERRUPT && thread.continuous) {
+            thread.status = STATUS_RUNNING;
+
+            jumpGroup = blockCached._allOps[i]._jumpGroup;
+        }
     }
-
-    return blockCached._allOps[i]._jumpGroup;
 };
 
-const executeProfile = function (runtime, thread, blockCached) {
-    let i = -1;
-    const miniOps = blockCached._miniOps;
+const executeProfile = function (runtime, thread, jumpGroup) {
+    const sequencer = runtime.sequencer;
 
     while (thread.status === STATUS_RUNNING) {
-        const opCached = miniOps[++i];
+        const blockCached = jumpToNext(thread, sequencer, jumpGroup);
 
-        opCached.count += 1;
-        opCached._parentValues[opCached._parentKey] =
-            opCached._blockFunctionUnbound(
-                opCached._argValues, blockUtility
-            );
+        let i = -1;
+        const miniOps = blockCached._miniOps;
 
-        // if (isPromise(call(opCached))) {
-        //     handlePromise(thread, blockCached._allOps[i]);
-        // }
+        while (thread.status === STATUS_RUNNING) {
+            const opCached = miniOps[++i];
+
+            opCached.count += 1;
+            opCached._parentValues[opCached._parentKey] =
+                opCached._blockFunctionUnbound(
+                    opCached._argValues, blockUtility
+                );
+
+            // if (isPromise(call(opCached))) {
+            //     handlePromise(thread, blockCached._allOps[i]);
+            // }
+        }
+
+        if (thread.status === Thread.STATUS_INTERRUPT && thread.continuous) {
+            thread.status = STATUS_RUNNING;
+
+            jumpGroup = blockCached._allOps[i]._jumpGroup;
+        }
     }
-
-    return blockCached._allOps[i]._jumpGroup;
 };
 
 const jumpToNext = function (thread, sequencer, jumpGroup) {
@@ -731,18 +761,10 @@ const execute = function (sequencer, thread) {
         jumpGroup = thread.blockContainer._cache._executeEntryMap = new JumpGroup();
     }
 
-    const _execute = runtime.profiler === null ? executeStandard : executeProfile;
-
-    while (thread.status === STATUS_RUNNING) {
-        const blockCached = jumpToNext(thread, sequencer, jumpGroup);
-
-        jumpGroup = _execute(runtime, thread, blockCached);
-
-        if (thread.status === Thread.STATUS_INTERRUPT && thread.continuous) {
-            thread.status = STATUS_RUNNING;
-        } else if (thread.status === STATUS_RUNNING && !thread.continuous) {
-            thread.status = Thread.STATUS_INTERRUPT;
-        }
+    if (runtime.profiler === null) {
+        executeStandard(runtime, thread, jumpGroup);
+    } else {
+        executeProfile(runtime, thread, jumpGroup);
     }
 
     if (thread.status === Thread.STATUS_INTERRUPT) {
