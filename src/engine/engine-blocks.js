@@ -27,6 +27,7 @@ class Scratch3VMBlocks {
             vm_cast_string: this.castString,
             vm_may_continue: this.mayContinue,
             vm_reenter_promise: this.reenterFromPromise,
+            vm_check_promise: this.checkPromise,
             vm_report_hat: this.reportHat,
             vm_report_stack_click: this.reportStackClick,
             vm_report_monitor: this.reportMonitor
@@ -163,6 +164,13 @@ class Scratch3VMBlocks {
             thread.peekStack() === currentBlockId
         ) {
             thread.goToNextBlock();
+        }
+    }
+
+    checkPromise ({BLOCK}, {thread}) {
+        const value = BLOCK._parentValues[BLOCK._parentKey];
+        if (typeof value === 'object' && value !== null && typeof value.then === 'function') {
+            thread.status = Thread.STATUS_PROMISE_WAIT;
         }
     }
 

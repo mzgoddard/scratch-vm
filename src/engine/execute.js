@@ -67,7 +67,9 @@ const call = function (opCached) {
  * @param {!string} blockCached cached block of data used by execute.
  */
 const handlePromise = (thread, blockCached) => {
+    blockCached = blockCached._argValues.BLOCK;
     const reportedValue = blockCached._parentValues[blockCached._parentKey];
+    blockCached._parentValues[blockCached._parentKey] = null;
 
     if (thread.status === STATUS_RUNNING) {
         // Primitive returned a promise; automatically yield thread.
@@ -178,6 +180,8 @@ class BlockCached {
          */
         this._blockFunctionUnbound = null;
 
+        this._blockFunctionUnboundInner = null;
+
         /**
          * The bound block opcode context.
          * @type {?object}
@@ -277,6 +281,13 @@ class InputBlockCached extends BlockCached {
             // unbound.call(context) than to call unbound.bind(context)().
             this._blockFunctionUnbound = this._blockFunction._function || this._blockFunction;
             this._blockFunctionContext = this._blockFunction._context;
+
+            const functionSource = this._blockFunctionUnbound.toString();
+            const supportThis = /this/.test(functionSource) && !/native/.test(functionSource);
+
+            if (supportThis) {
+                this._blockFunctionUnbound = this._blockFunction;
+            }
         } else {
             this._blockFunctionUnbound = null;
             this._blockFunctionContext = null;
@@ -402,6 +413,23 @@ class InputBlockCached extends BlockCached {
                 this._ops = [...this._ops, ...reportCached._ops];
                 this._parentKey = 'VALUE';
                 this._parentValues = reportCached._argValues;
+            }
+        }
+
+        if (this._definedBlockFunction) {
+            const supportPromise = !/^(vm|data|control|operator|argument|procedure)/.test(opcode);
+            if (supportPromise) {
+                const checkPromise = new InputBlockCached(null, {
+                    id: cached.id,
+                    opcode: 'vm_check_promise',
+                    fields: {},
+                    inputs: {},
+                    mutation: null
+                });
+                checkPromise._argValues = {
+                    BLOCK: this
+                };
+                this._ops.push(checkPromise);
             }
         }
 
@@ -531,7 +559,9 @@ const execute = function (sequencer, thread) {
             const opCached = ops[++i];
 
             opCached.count += 1;
-            if (isPromise(call(opCached))) thread.status = Thread.STATUS_PROMISE_WAIT;
+            opCached._parentValues[opCached._parentKey] =
+                opCached._blockFunctionUnbound(opCached._argValues, blockUtility);
+            // if (isPromise(call(opCached))) thread.status = Thread.STATUS_PROMISE_WAIT;
         }
 
         if (thread.status === Thread.STATUS_INTERRUPT && thread.continuous) {
