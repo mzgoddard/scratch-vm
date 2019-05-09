@@ -8,7 +8,7 @@ const Profiler = require('./profiler');
  * Thread status value when it is actively running.
  * @const {number}
  */
-const STATUS_RUNNING = Thread.STATUS_RUNNING;
+const STATUS_RUNNING = 0; // Thread.STATUS_RUNNING
 
 /**
  * Single BlockUtility instance reused by execute for every pritimive ran.
@@ -69,7 +69,7 @@ const call = function (opCached) {
 const handlePromise = (thread, blockCached) => {
     const reportedValue = blockCached._parentValues[blockCached._parentKey];
 
-    if (thread.status === Thread.STATUS_RUNNING) {
+    if (thread.status === STATUS_RUNNING) {
         // Primitive returned a promise; automatically yield thread.
         thread.status = Thread.STATUS_PROMISE_WAIT;
     }
@@ -77,12 +77,12 @@ const handlePromise = (thread, blockCached) => {
     // Promise handlers
     reportedValue.then(resolvedValue => {
         thread.pushReportedValue(resolvedValue);
-        thread.status = Thread.STATUS_RUNNING;
+        thread.status = STATUS_RUNNING;
         thread.pushStack('vm_reenter_promise');
     }, rejectionReason => {
         // Promise rejected: the primitive had some error. Log it and proceed.
         log.warn('Primitive rejected promise: ', rejectionReason);
-        thread.status = Thread.STATUS_RUNNING;
+        thread.status = STATUS_RUNNING;
         thread.popStack();
     });
 
