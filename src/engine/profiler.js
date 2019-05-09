@@ -112,6 +112,8 @@ class ProfilerFrame {
          * @type {number}
          */
         this.count = 0;
+
+        this.subframes = [];
     }
 }
 
@@ -202,6 +204,13 @@ class Profiler {
         return newCounter;
     }
 
+    addSubframe (id, arg, subframe) {
+        const frame = this.frame(id, arg);
+        if (frame.subframes.indexOf(subframe) === -1) {
+            frame.subframes.push(subframe);
+        }
+    }
+
     /**
      * Decode records and report all frames to `this.onFrame`.
      */
@@ -278,6 +287,10 @@ class Profiler {
         }
 
         for (let k = 0; k < this.counters.length; k++) {
+            for (let l = 0; l < this.counters[k].subframes.length; l++) {
+                this.counters[k].count += this.counters[k].subframes[l].count;
+                this.counters[k].subframes[l].count = 0;
+            }
             this.onFrame(this.counters[k]);
             this.counters[k].count = 0;
         }

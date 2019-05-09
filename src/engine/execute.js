@@ -255,6 +255,8 @@ class BlockCached {
 
         this._next = null;
         this._allOps = this._ops;
+
+        this.count = 0;
     }
 }
 
@@ -417,9 +419,11 @@ class InputBlockCached extends BlockCached {
         const ops = this._allOps;
         for (let i = 0; i < ops.length; i++) {
             if (ops[i].profileOpcode) {
+                profiler.addSubframe(blockFunctionProfilerId, ops[i].opcode, ops[i]);
+                ops[i].count = 0;
                 ops[i].profilerFrame = profiler.frame(blockFunctionProfilerId, ops[i].opcode);
-            } else {
-                ops[i].profilerFrame = Profiler.NULL_FRAME;
+            // } else {
+            //     ops[i].profilerFrame = Profiler.NULL_FRAME;
             }
         }
     }
@@ -491,32 +495,12 @@ const getCached = function (sequencer, thread, currentBlockId) {
     return blockCached;
 };
 
-const executeOps = function (thread, ops) {
-    let i = -1;
-
-    while (thread.status === STATUS_RUNNING) {
-        const opCached = ops[++i];
-
-        opCached.profilerFrame.count += 1;
-        if (isPromise(call(opCached))) handlePromise(thread, opCached);
-    }
-
-    thread.blockGlowInFrame = ops[i].id;
-};
-
 /**
  * Execute a block.
  * @param {!Sequencer} sequencer Which sequencer is executing.
  * @param {!Thread} thread Thread which to read and execute.
  */
 const execute = function (sequencer, thread) {
-    // Blocks should glow when a script is starting, not after it has finished
-    // (see #1404). Only blocks in blockContainers that don't forceNoGlow should
-    // request a glow.
-    if (!thread.blockContainer.forceNoGlow) {
-        thread.requestScriptGlowInFrame = true;
-    }
-
     // Store old sequencer and thread and reset them after execution.
     const _lastSequencer = blockUtility.sequencer;
     const _lastThread = blockUtility.thread;
@@ -527,6 +511,7 @@ const execute = function (sequencer, thread) {
     blockUtility.thread = thread;
 
     const isProfiling = sequencer.runtime.profiler !== null;
+    let lastBlock = NULL_BLOCK;
 
     while (thread.status === STATUS_RUNNING) {
         // Current block to execute is the one on the top of the stack.
@@ -539,15 +524,35 @@ const execute = function (sequencer, thread) {
             blockCached.connectProfiler(sequencer.runtime.profiler);
         }
 
-        executeOps(thread, blockCached._allOps);
+        const ops = blockCached._allOps;
+        let i = -1;
+
+        while (thread.status === STATUS_RUNNING) {
+            const opCached = ops[++i];
+
+            opCached.count += 1;
+            if (isPromise(call(opCached))) thread.status = Thread.STATUS_PROMISE_WAIT;
+        }
 
         if (thread.status === Thread.STATUS_INTERRUPT && thread.continuous) {
             thread.status = STATUS_RUNNING;
+        } else if (thread.status !== STATUS_RUNNING) {
+            lastBlock = ops[i];
         }
     }
 
     if (thread.status === Thread.STATUS_INTERRUPT) {
         thread.status = STATUS_RUNNING;
+    } else if (thread.status === Thread.STATUS_PROMISE_WAIT && thread.reported === null) {
+        handlePromise(thread, lastBlock);
+    }
+
+    // Blocks should glow when a script is starting, not after it has finished
+    // (see #1404). Only blocks in blockContainers that don't forceNoGlow should
+    // request a glow.
+    if (!thread.blockContainer.forceNoGlow) {
+        thread.requestScriptGlowInFrame = true;
+        thread.blockGlowInFrame = lastBlock.id;
     }
 
     blockUtility.sequencer = _lastSequencer;
