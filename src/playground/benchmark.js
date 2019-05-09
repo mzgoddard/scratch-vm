@@ -361,6 +361,7 @@ class Frames {
     }
 
     update (id, selfTime, totalTime) {
+        if (id < 0) return;
         if (!this.frames[id]) {
             this.frames[id] = new StatView(this.profiler.nameById(id));
         }
@@ -405,8 +406,11 @@ class FramesTable extends StatTable {
     }
 
     isSlow (key, frame) {
-        return (trackSlowFrames.indexOf(key) > 0 &&
-        frame.selfTime / frame.totalTime > SLOW);
+        // return (
+        //     trackSlowFrames.indexOf(key) > 0 &&
+        //     frame.selfTime / frame.totalTime > SLOW
+        // );
+        return false;
     }
 }
 
@@ -494,13 +498,17 @@ class ProfilerRun {
         });
 
         const stepId = profiler.idByName('Runtime._step');
-        profiler.onFrame = ({id, selfTime, totalTime, arg}) => {
+        profiler.onFrame = ({id, selfTime, totalTime, arg, count}) => {
             if (id === stepId) {
                 runningStatsView.render();
             }
-            runningStats.update(id, selfTime, totalTime, arg);
-            opcodes.update(id, selfTime, totalTime, arg);
-            frames.update(id, selfTime, totalTime, arg);
+            selfTime /= count;
+            totalTime /= count;
+            for (let i = 0; i < count; i++) {
+                runningStats.update(id, selfTime, totalTime, arg);
+                opcodes.update(id, selfTime, totalTime, arg);
+                frames.update(id, selfTime, totalTime, arg);
+            }
         };
     }
 
