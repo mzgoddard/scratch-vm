@@ -260,8 +260,8 @@ class StatView {
         this.totalTime = 0;
     }
 
-    update (selfTime, totalTime) {
-        this.executions++;
+    update (selfTime, totalTime, count) {
+        this.executions += count;
         this.selfTime += selfTime;
         this.totalTime += totalTime;
     }
@@ -311,13 +311,13 @@ class RunningStats {
         };
     }
 
-    update (id, selfTime, totalTime) {
+    update (id, selfTime, totalTime, count) {
         if (id === this.stpeThreadsId) {
             this.recordedTime += totalTime;
         } else if (id === this.stepThreadsInnerId) {
-            this.executed.steps++;
+            this.executed.steps += count;
         } else if (id === this.blockFunctionId) {
-            this.executed.blocks++;
+            this.executed.blocks += count;
         }
     }
 }
@@ -360,12 +360,12 @@ class Frames {
         this.frames = [];
     }
 
-    update (id, selfTime, totalTime) {
+    update (id, selfTime, totalTime, count) {
         if (id < 0) return;
         if (!this.frames[id]) {
             this.frames[id] = new StatView(this.profiler.nameById(id));
         }
-        this.frames[id].update(selfTime, totalTime);
+        this.frames[id].update(selfTime, totalTime, count);
     }
 }
 
@@ -376,7 +376,8 @@ const frameOrder = [
     'Sequencer.stepThreads#inner',
     'Sequencer.stepThreads',
     'RenderWebGL.draw',
-    'Runtime._step'
+    'Runtime._step',
+    'Profiler.reportFrames'
 ];
 
 const trackSlowFrames = [
@@ -421,12 +422,12 @@ class Opcodes {
         this.opcodes = {};
     }
 
-    update (id, selfTime, totalTime, arg) {
+    update (id, selfTime, totalTime, count, arg) {
         if (id === this.blockFunctionId) {
             if (!this.opcodes[arg]) {
                 this.opcodes[arg] = new StatView(arg);
             }
-            this.opcodes[arg].update(selfTime, totalTime);
+            this.opcodes[arg].update(selfTime, totalTime, count);
         }
     }
 }
@@ -502,13 +503,9 @@ class ProfilerRun {
             if (id === stepId) {
                 runningStatsView.render();
             }
-            selfTime /= count;
-            totalTime /= count;
-            for (let i = 0; i < count; i++) {
-                runningStats.update(id, selfTime, totalTime, arg);
-                opcodes.update(id, selfTime, totalTime, arg);
-                frames.update(id, selfTime, totalTime, arg);
-            }
+            runningStats.update(id, selfTime, totalTime, count, arg);
+            opcodes.update(id, selfTime, totalTime, count, arg);
+            frames.update(id, selfTime, totalTime, count, arg);
         };
     }
 
