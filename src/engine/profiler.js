@@ -136,8 +136,6 @@ class Profiler {
 
         this.counters = [];
 
-        this.nullFrame = new ProfilerFrame(-1);
-
         /**
          * A cache of ProfilerFrames to reuse when reporting the recorded
          * frames in records.
@@ -356,5 +354,7 @@ Profiler.START = START;
  * @const {number}
  */
 Profiler.STOP = STOP;
+
+Profiler.NULL_FRAME = new ProfilerFrame(-1);
 
 module.exports = Profiler;
