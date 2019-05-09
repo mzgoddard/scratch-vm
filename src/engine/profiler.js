@@ -106,6 +106,12 @@ class ProfilerFrame {
          * @type {number}
          */
         this.depth = depth;
+
+        /**
+         * A summarized count of the number of calls to this frame.
+         * @type {number}
+         */
+        this.count = 0;
     }
 }
 
@@ -125,6 +131,12 @@ class Profiler {
          * @type {Array.<*>}
          */
         this.records = [];
+
+        this.increments = [];
+
+        this.counters = [];
+
+        this.nullFrame = new ProfilerFrame(-1);
 
         /**
          * A cache of ProfilerFrames to reuse when reporting the recorded
@@ -168,6 +180,28 @@ class Profiler {
      */
     stop () {
         this.records.push(STOP, performance.now());
+    }
+
+    increment (id) {
+        if (!this.increments[id]) {
+            this.increments[id] = new ProfilerFrame(-1);
+            this.increments[id].id = id;
+        }
+        this.increments[id].count += 1;
+    }
+
+    frame (id, arg) {
+        for (let i = 0; i < this.counters.length; i++) {
+            if (this.counters[i].id === id && this.counters[i].arg === arg) {
+                return this.counters[i];
+            }
+        }
+
+        const newCounter = new ProfilerFrame(-1);
+        newCounter.id = id;
+        newCounter.arg = arg;
+        this.counters.push(newCounter);
+        return newCounter;
     }
 
     /**
@@ -226,6 +260,9 @@ class Profiler {
                 // Remove this frames totalTime from the parent's selfTime.
                 stack[depth - 1].selfTime -= frame.totalTime;
 
+                // This frame occured once.
+                frame.count = 1;
+
                 this.onFrame(frame);
 
                 i += STOP_SIZE;
@@ -233,6 +270,18 @@ class Profiler {
                 this.records.length = 0;
                 throw new Error('Unable to decode Profiler records.');
             }
+        }
+
+        for (let j = 0; j < this.increments.length; j++) {
+            if (this.increments[j]) {
+                this.onFrame(this.increments[j]);
+                this.increments[j].count = 0;
+            }
+        }
+
+        for (let k = 0; k < this.counters.length; k++) {
+            this.onFrame(this.counters[k]);
+            this.counters[k].count = 0;
         }
 
         this.records.length = 0;

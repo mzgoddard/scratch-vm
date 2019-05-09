@@ -191,11 +191,12 @@ class Sequencer {
                         if (stepThreadProfilerId === -1) {
                             stepThreadProfilerId = this.runtime.profiler.idByName(stepThreadProfilerFrame);
                         }
-                        this.runtime.profiler.start(stepThreadProfilerId);
+                        // this.runtime.profiler.start(stepThreadProfilerId);
+                        this.runtime.profiler.increment(stepThreadProfilerId);
                     }
                     this.stepThread(activeThread);
                     if (this.runtime.profiler !== null) {
-                        this.runtime.profiler.stop();
+                        // this.runtime.profiler.stop();
                     }
                     activeThread.warpTimer = null;
                     if (activeThread.isKilled) {
