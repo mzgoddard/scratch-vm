@@ -283,15 +283,16 @@ class Sequencer {
                 // time sensitive stepThread method.
                 //
                 // this.runtime.profiler.start(executeProfilerId, null);
-                this.runtime.profiler.records.push(
-                    this.runtime.profiler.START, executeProfilerId, null, 0);
+                // this.runtime.profiler.records.push(
+                //     this.runtime.profiler.START, executeProfilerId, null, 0);
+                this.runtime.profiler.increment(executeProfilerId);
 
                 thread.continuous = true;
                 execute(this, thread);
                 thread.continuous = false;
 
                 // this.runtime.profiler.stop();
-                this.runtime.profiler.records.push(this.runtime.profiler.STOP, 0);
+                // this.runtime.profiler.records.push(this.runtime.profiler.STOP, 0);
             }
 
             // If the thread has yielded or is waiting, yield to other threads.

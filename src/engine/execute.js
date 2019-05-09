@@ -2,6 +2,7 @@ const BlockUtility = require('./block-utility');
 const BlocksExecuteCache = require('./blocks-execute-cache');
 const log = require('../util/log');
 const Thread = require('./thread');
+const Profiler = require('./profiler');
 
 /**
  * Thread status value when it is actively running.
@@ -34,10 +35,28 @@ let blockFunctionProfilerId = -1;
  */
 const isPromise = function (value) {
     return (
+        // Most values will be strings, numbers and booleans. Since they are not
+        // objects test that first to shortcut out of isPromise as quickly as
+        // possible.
         typeof value === 'object' &&
+        // Strings, numbers, and booleans are not null, so this test will be
+        // true for most values. Test this after testing if its an object to
+        // shortcut isPromise faster.
         value !== null &&
+        // At this point it is very likely value is a promise, check if it has a
+        // then to at least determine it is a thenable. We can't exhaustiviely
+        // test if value is a promise since promises are an interface and not a
+        // specific type.
         typeof value.then === 'function'
     );
+};
+
+const call = function (opCached) {
+    return opCached._parentValues[opCached._parentKey] =
+        opCached._blockFunctionUnbound.call(
+            opCached._blockFunctionContext,
+            opCached._argValues, blockUtility
+        );
 };
 
 /**
@@ -47,7 +66,9 @@ const isPromise = function (value) {
  * @param {!Thread} thread Thread containing the primitive.
  * @param {!string} blockCached cached block of data used by execute.
  */
-const handlePromise = (reportedValue, thread, blockCached) => {
+const handlePromise = (thread, blockCached) => {
+    const reportedValue = blockCached._parentValues[blockCached._parentKey];
+
     if (thread.status === Thread.STATUS_RUNNING) {
         // Primitive returned a promise; automatically yield thread.
         thread.status = Thread.STATUS_PROMISE_WAIT;
@@ -72,7 +93,7 @@ const handlePromise = (reportedValue, thread, blockCached) => {
     thread.justReported = null;
     const ops = blockCached._ops;
     thread.reporting = blockCached.id;
-    thread.reported = ops.slice(0, ops.length - 1).map(reportedCached => {
+    thread.reported = ops.slice(0, ops.indexOf(blockCached)).map(reportedCached => {
         const inputName = reportedCached._parentKey;
         const reportedValues = reportedCached._parentValues;
         return {
@@ -111,11 +132,15 @@ class BlockCached {
          */
         this.opcode = cached.opcode;
 
+        this.profiler = null;
+
         /**
          * Some opcodes (vm_*) should not be measured by the profiler.
          * @type {boolean}
          */
         this.profileOpcode = !cached.opcode.startsWith('vm_');
+
+        this.profilerFrame = Profiler.NULL_FRAME;
 
         /**
          * Original block object containing argument values for static fields.
@@ -228,6 +253,15 @@ class BlockCached {
          */
         this._ops = [];
 
+        this._next = null;
+        this._allOps = this._ops;
+    }
+}
+
+class InputBlockCached extends BlockCached {
+    constructor (blockContainer, cached) {
+        super(blockContainer, cached);
+
         const {runtime} = blockUtility.sequencer;
 
         const {opcode, fields, inputs} = this;
@@ -310,8 +344,8 @@ class BlockCached {
                 // it would normally be placed. This lets us produce this value
                 // dynamically without having special case handling later in the
                 // runtime execute function.
-                const inputCached = new BlockCached(runtime.sequencer.blocks, {
-                    id: 'vm_cast_string',
+                const inputCached = new InputBlockCached(runtime.sequencer.blocks, {
+                    id: input.block,
                     opcode: 'vm_cast_string',
                     fields: {},
                     inputs: {
@@ -328,7 +362,7 @@ class BlockCached {
                 inputCached._parentKey = 'name';
                 inputCached._parentValues = this._argValues.BROADCAST_OPTION;
             } else if (input.block) {
-                const inputCached = BlocksExecuteCache.getCached(blockContainer, input.block, BlockCached);
+                const inputCached = BlocksExecuteCache.getCached(blockContainer, input.block, InputBlockCached);
 
                 if (inputCached._isHat) {
                     continue;
@@ -355,8 +389,8 @@ class BlockCached {
             this._ops.push(this);
 
             if (this._isHat) {
-                const reportCached = new BlockCached(null, {
-                    id: 'vm_report_hat',
+                const reportCached = new InputBlockCached(null, {
+                    id: cached.id,
                     opcode: 'vm_report_hat',
                     fields: {},
                     inputs: {},
@@ -369,65 +403,106 @@ class BlockCached {
             }
         }
 
+        this._next = null;
         this._allOps = this._ops;
+    }
 
-        if (this.opcode !== 'vm_may_continue') {
-            const nextId = blockContainer ?
-                blockContainer.getNextBlock(this.id) :
-                null;
-            const nextCached = blockContainer ? BlocksExecuteCache.getCached(
-                blockContainer, nextId, BlockCached
-            ) : null;
+    connectProfiler (profiler) {
+        this.profiler = profiler;
 
-            this._next = nextCached;
+        if (blockFunctionProfilerId === -1) {
+            blockFunctionProfilerId = profiler.idByName(blockFunctionProfilerFrame);
+        }
 
-            if (nextCached) {
-                if (!nextCached._next) {
-                    // If we step the thread with a block we must step the
-                    // thread in every following thread including the last in
-                    // the sequence. The last block doesn't know though if it is
-                    // last or if it is a reporter so the block before it will
-                    // finish its configuration. If the last block is alone in
-                    // the stack, the normal step behaviour outside of the block
-                    // sequence will step us.
-                    const mayStepFromLastCached = new BlockCached(null, {
-                        id: 'vm_may_continue',
-                        opcode: 'vm_may_continue',
-                        fields: {},
-                        inputs: {},
-                        mutation: null
-                    });
-
-                    mayStepFromLastCached._argValues = {
-                        EXPECT_STACK: nextCached.id,
-                        NEXT_STACK: null
-                    };
-
-                    nextCached._ops.push(mayStepFromLastCached);
-                }
-
-                const mayContinueCached = new BlockCached(null, {
-                    id: 'vm_may_continue',
-                    opcode: 'vm_may_continue',
-                    fields: {},
-                    inputs: {},
-                    mutation: null
-                });
-
-                mayContinueCached._argValues = {
-                    EXPECT_STACK: this.id,
-                    NEXT_STACK: nextId
-                };
-
-                this._ops.push(mayContinueCached);
-                this._allOps = [
-                    ...this._ops,
-                    ...nextCached._allOps
-                ];
+        const ops = this._allOps;
+        for (let i = 0; i < ops.length; i++) {
+            if (ops[i].profileOpcode) {
+                ops[i].profilerFrame = profiler.frame(blockFunctionProfilerId, ops[i].opcode);
+            } else {
+                ops[i].profilerFrame = Profiler.NULL_FRAME;
             }
         }
     }
 }
+
+class CommandBlockCached extends InputBlockCached {
+    constructor (blockContainer, cached) {
+        super(blockContainer, cached);
+
+        const nextId = blockContainer ?
+            blockContainer.getNextBlock(this.id) :
+            null;
+        const nextCached = blockContainer ? BlocksExecuteCache.getCached(
+            blockContainer, nextId, CommandBlockCached
+        ) : null;
+
+        this._next = nextCached;
+
+        const mayContinueCached = new InputBlockCached(null, {
+            id: cached.id,
+            opcode: 'vm_may_continue',
+            fields: {},
+            inputs: {},
+            mutation: null
+        });
+
+        mayContinueCached._argValues = {
+            EXPECT_STACK: this.id,
+            NEXT_STACK: nextId
+        };
+
+        this._ops.push(mayContinueCached);
+        this._allOps = [
+            ...this._ops,
+            ...(nextCached ? nextCached._allOps : [])
+        ];
+    }
+}
+
+class NullBlockCached extends BlockCached {
+    constructor (blockContainer, cached) {
+        super(blockContainer, cached);
+
+        this._blockFunction = this._blockFunctionUnbound =
+            function (_, {sequencer, thread}) {
+                sequencer.retireThread(thread);
+            };
+        this._definedBlockFunction = true;
+        this._ops.push(this);
+    }
+}
+
+const NULL_BLOCK = new NullBlockCached(null, {
+    id: 'vm_null',
+    opcode: 'vm_null',
+    fields: {},
+    inputs: {},
+    mutation: null
+});
+
+const getCached = function (sequencer, thread, currentBlockId) {
+    const blockCached = (
+        BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, CommandBlockCached) ||
+        BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId, CommandBlockCached) ||
+        BlocksExecuteCache.getCached(sequencer.runtime.flyoutBlocks, currentBlockId, CommandBlockCached) ||
+        // No block found: stop the thread; script no longer exists.
+        NULL_BLOCK
+    );
+    return blockCached;
+};
+
+const executeOps = function (thread, ops) {
+    let i = -1;
+
+    while (thread.status === STATUS_RUNNING) {
+        const opCached = ops[++i];
+
+        opCached.profilerFrame.count += 1;
+        if (isPromise(call(opCached))) handlePromise(thread, opCached);
+    }
+
+    thread.blockGlowInFrame = ops[i].id;
+};
 
 /**
  * Execute a block.
@@ -435,16 +510,12 @@ class BlockCached {
  * @param {!Thread} thread Thread which to read and execute.
  */
 const execute = function (sequencer, thread) {
-    const runtime = sequencer.runtime;
-
     // Blocks should glow when a script is starting, not after it has finished
     // (see #1404). Only blocks in blockContainers that don't forceNoGlow should
     // request a glow.
     if (!thread.blockContainer.forceNoGlow) {
         thread.requestScriptGlowInFrame = true;
     }
-
-    let currentBlockId;
 
     // Store old sequencer and thread and reset them after execution.
     const _lastSequencer = blockUtility.sequencer;
@@ -455,85 +526,29 @@ const execute = function (sequencer, thread) {
     blockUtility.sequencer = sequencer;
     blockUtility.thread = thread;
 
-    do {
-        // On a second iteration, step the thread if it has not experienced
-        // control flow.
-        if (thread.pointer === currentBlockId) {
-            thread.goToNextBlock();
-        }
+    const isProfiling = sequencer.runtime.profiler !== null;
 
+    while (thread.status === STATUS_RUNNING) {
         // Current block to execute is the one on the top of the stack.
-        currentBlockId = thread.pointer || thread.stackFrame.endBlockId;
-
-        const blockCached = (
-            BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, BlockCached) ||
-            BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId, BlockCached) ||
-            BlocksExecuteCache.getCached(runtime.flyoutBlocks, currentBlockId, BlockCached)
+        const blockCached = getCached(
+            sequencer, thread, thread.pointer || thread.stackFrame.endBlockId
         );
-        if (blockCached === null) {
-            // No block found: stop the thread; script no longer exists.
-            sequencer.retireThread(thread);
-            break;
+
+        if (isProfiling &&
+            blockCached.profiler !== sequencer.runtime.profiler) {
+            blockCached.connectProfiler(sequencer.runtime.profiler);
         }
 
-        const isNotProfiling = runtime.profiler === null || !blockCached.profileOpcode;
+        executeOps(thread, blockCached._allOps);
 
-        const ops = blockCached._allOps;
-        const length = ops.length;
-        let i = 0;
-
-        let reportedValue;
-        let opCached;
-
-        for (; i < length && thread.status === STATUS_RUNNING; i++) {
-            opCached = ops[i];
-
-            if (isNotProfiling) {
-                opCached._parentValues[opCached._parentKey] = reportedValue =
-                    opCached._blockFunctionUnbound.call(
-                        opCached._blockFunctionContext,
-                        opCached._argValues, blockUtility
-                    );
-            } else {
-                const {profiler} = runtime;
-
-                if (blockFunctionProfilerId === -1) {
-                    blockFunctionProfilerId = profiler.idByName(blockFunctionProfilerFrame);
-                }
-
-                const opcode = opCached.opcode;
-                // The method commented below has its code inlined
-                // underneath to reduce the bias recorded for the profiler's
-                // calls in this time sensitive execute function.
-                //
-                // profiler.start(blockFunctionProfilerId, opcode);
-                profiler.records.push(
-                    profiler.START, blockFunctionProfilerId, opcode, 0);
-
-                opCached._parentValues[opCached._parentKey] = reportedValue =
-                    opCached._blockFunctionUnbound.call(
-                        opCached._blockFunctionContext,
-                        opCached._argValues, blockUtility
-                    );
-
-                // profiler.stop(blockFunctionProfilerId);
-                profiler.records.push(profiler.STOP, 0);
-            }
-
-            // If it's a promise, wait until promise resolves.
-            if (isPromise(reportedValue)) {
-                // We are waiting for a promise. Set the status to a non-running
-                // state and store the arg values for the executed operations.
-                handlePromise(reportedValue, thread, opCached);
-            }
-        }
-
-        if (thread.status === Thread.STATUS_INTERRUPT) {
+        if (thread.status === Thread.STATUS_INTERRUPT && thread.continuous) {
             thread.status = STATUS_RUNNING;
         }
-    } while (thread.continuous && thread.status === STATUS_RUNNING);
+    }
 
-    thread.blockGlowInFrame = thread.pointer;
+    if (thread.status === Thread.STATUS_INTERRUPT) {
+        thread.status = STATUS_RUNNING;
+    }
 
     blockUtility.sequencer = _lastSequencer;
     blockUtility.thread = _lastThread;

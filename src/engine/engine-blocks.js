@@ -63,16 +63,12 @@ class Scratch3VMBlocks {
     }
 
     mayContinue (args, {thread}) {
-        if (
-            thread.continuous && thread.status === Thread.STATUS_RUNNING &&
-            thread.pointer === args.EXPECT_STACK
-        ) {
-            if (args.NEXT_STACK) {
-                thread.reuseStackForNextBlock(args.NEXT_STACK);
-            } else {
-                thread.goToNextBlock();
+        if (thread.continuous && thread.pointer === args.EXPECT_STACK) {
+            thread.reuseStackForNextBlock(args.NEXT_STACK);
+            if (args.NEXT_STACK === null) {
+                thread.status = Thread.STATUS_INTERRUPT;
             }
-        } else if (thread.status === Thread.STATUS_RUNNING) {
+        } else {
             thread.status = Thread.STATUS_INTERRUPT;
         }
     }
