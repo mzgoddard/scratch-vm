@@ -192,6 +192,18 @@ class BlockCached {
         this.mutation = cached.mutation;
 
         /**
+         * Profiler block is configured with.
+         * @type {?Profiler}
+         */
+        this._profiler = null;
+
+        /**
+         * Profiler information frame.
+         * @type {?ProfilerFrame}
+         */
+        this._profilerFrame = null;
+
+        /**
          * Is the opcode a hat (event responder) block.
          * @type {boolean}
          */
@@ -370,6 +382,19 @@ class BlockCached {
     }
 }
 
+const prepareBlockProfiling = function (profiler, blockCached) {
+    blockCached._profiler = profiler;
+
+    if (blockFunctionProfilerId === -1) {
+        blockFunctionProfilerId = profiler.idByName(blockFunctionProfilerFrame);
+    }
+
+    const ops = blockCached._ops;
+    for (let i = 0; i < ops.length; i++) {
+        ops[i]._profilerFrame = profiler.frame(blockFunctionProfilerId, ops[i].opcode);
+    }
+};
+
 /**
  * Execute a block.
  * @param {!Sequencer} sequencer Which sequencer is executing.
@@ -466,6 +491,8 @@ const execute = function (sequencer, thread) {
         currentStackFrame.reported = null;
     }
 
+    const start = i;
+
     for (; i < length; i++) {
         const lastOperation = i === length - 1;
         const opCached = ops[i];
@@ -487,27 +514,7 @@ const execute = function (sequencer, thread) {
 
         // Inputs are set during previous steps in the loop.
 
-        let primitiveReportedValue = null;
-        if (runtime.profiler === null) {
-            primitiveReportedValue = blockFunction(argValues, blockUtility);
-        } else {
-            const opcode = opCached.opcode;
-            if (blockFunctionProfilerId === -1) {
-                blockFunctionProfilerId = runtime.profiler.idByName(blockFunctionProfilerFrame);
-            }
-            // The method commented below has its code inlined
-            // underneath to reduce the bias recorded for the profiler's
-            // calls in this time sensitive execute function.
-            //
-            // runtime.profiler.start(blockFunctionProfilerId, opcode);
-            runtime.profiler.records.push(
-                runtime.profiler.START, blockFunctionProfilerId, opcode, 0);
-
-            primitiveReportedValue = blockFunction(argValues, blockUtility);
-
-            // runtime.profiler.stop(blockFunctionProfilerId);
-            runtime.profiler.records.push(runtime.profiler.STOP, 0);
-        }
+        const primitiveReportedValue = blockFunction(argValues, blockUtility);
 
         // If it's a promise, wait until promise resolves.
         if (isPromise(primitiveReportedValue)) {
@@ -556,6 +563,16 @@ const execute = function (sequencer, thread) {
                     parentValues[inputName] = primitiveReportedValue;
                 }
             }
+        }
+    }
+
+    if (runtime.profiler !== null) {
+        if (blockCached._profiler !== runtime.profiler) {
+            prepareBlockProfiling(runtime.profiler, blockCached);
+        }
+        const end = Math.min(i + 1, length);
+        for (let p = start; p < end; p++) {
+            ops[p]._profilerFrame.count += 1;
         }
     }
 };
