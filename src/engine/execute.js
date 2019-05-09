@@ -52,11 +52,16 @@ const isPromise = function (value) {
 };
 
 const call = function (opCached) {
+    opCached.count += 1;
     return opCached._parentValues[opCached._parentKey] =
         opCached._blockFunctionUnbound.call(
             opCached._blockFunctionContext,
             opCached._argValues, blockUtility
         );
+};
+
+const wrapPromise = function (value) {
+    if (isPromise(value)) blockUtility.thread.status = Thread.STATUS_PROMISE_WAIT;
 };
 
 /**
@@ -525,14 +530,9 @@ const execute = function (sequencer, thread) {
         }
 
         const ops = blockCached._allOps;
+
         let i = -1;
-
-        while (thread.status === STATUS_RUNNING) {
-            const opCached = ops[++i];
-
-            opCached.count += 1;
-            if (isPromise(call(opCached))) thread.status = Thread.STATUS_PROMISE_WAIT;
-        }
+        while (thread.status === STATUS_RUNNING) wrapPromise(call(ops[++i]));
 
         if (thread.status === Thread.STATUS_INTERRUPT && thread.continuous) {
             thread.status = STATUS_RUNNING;
