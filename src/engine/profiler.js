@@ -117,6 +117,10 @@ class ProfilerFrame {
     }
 }
 
+let profilerReportId = -1;
+
+const profilerReportName = 'Profiler.reportFrames';
+
 class Profiler {
     /**
      * @param {FrameCallback} onFrame a handle called for each recorded frame.
@@ -218,6 +222,11 @@ class Profiler {
         const stack = this._stack;
         let depth = 1;
 
+        if (profilerReportId === -1) {
+            profilerReportId = this.idByName(profilerReportName);
+        }
+        this.start(profilerReportId, null);
+
         // Step through the records and initialize Frame instances from the
         // START and STOP events. START and STOP events are separated by events
         // for deeper frames run by higher frames. Frames are stored on a stack
@@ -226,7 +235,8 @@ class Profiler {
         // passed to the current onFrame callback. This way Frames are "pushed"
         // for each START event and "popped" for each STOP and handed to an
         // outside handle to any desired reduction of the collected data.
-        for (let i = 0; i < this.records.length;) {
+        let i = 0;
+        for (; i < this.records.length;) {
             if (this.records[i] === START) {
                 if (depth >= stack.length) {
                     stack.push(new ProfilerFrame(depth));
@@ -294,6 +304,15 @@ class Profiler {
             this.onFrame(this.counters[k]);
             this.counters[k].count = 0;
         }
+
+        this.stop();
+
+        const now = this.records[i + 1];
+        const frame = stack[--depth];
+        frame.totalTime = now - frame.totalTime;
+        frame.selfTime += frame.totalTime;
+
+        this.onFrame(frame);
 
         this.records.length = 0;
     }

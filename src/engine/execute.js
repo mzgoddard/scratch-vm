@@ -52,12 +52,11 @@ const isPromise = function (value) {
 };
 
 const call = function (opCached) {
-    opCached.count += 1;
-    return opCached._parentValues[opCached._parentKey] =
+    return opCached._parentValues[opCached._parentKey] = (
         opCached._blockFunctionUnbound.call(
             opCached._blockFunctionContext,
             opCached._argValues, blockUtility
-        );
+        ));
 };
 
 const wrapPromise = function (value) {
@@ -137,7 +136,7 @@ class BlockCached {
          */
         this.opcode = cached.opcode;
 
-        this.profiler = null;
+        this.profiler = 0;
 
         /**
          * Some opcodes (vm_*) should not be measured by the profiler.
@@ -261,7 +260,21 @@ class BlockCached {
         this._next = null;
         this._allOps = this._ops;
 
+        this.count = null;
+
+        this.willCount = [];
+        this.mayCount = [];
+        this.opsAt = 0;
+        this.opsAfter = 0;
+    }
+}
+
+class MayCount {
+    constructor ({opcode, frame, may}) {
+        this.opcode = opcode;
+        this.frame = frame;
         this.count = 0;
+        this.may = (may | 0) + 1;
     }
 }
 
@@ -413,25 +426,6 @@ class InputBlockCached extends BlockCached {
         this._next = null;
         this._allOps = this._ops;
     }
-
-    connectProfiler (profiler) {
-        this.profiler = profiler;
-
-        if (blockFunctionProfilerId === -1) {
-            blockFunctionProfilerId = profiler.idByName(blockFunctionProfilerFrame);
-        }
-
-        const ops = this._allOps;
-        for (let i = 0; i < ops.length; i++) {
-            if (ops[i].profileOpcode) {
-                profiler.addSubframe(blockFunctionProfilerId, ops[i].opcode, ops[i]);
-                ops[i].count = 0;
-                ops[i].profilerFrame = profiler.frame(blockFunctionProfilerId, ops[i].opcode);
-            // } else {
-            //     ops[i].profilerFrame = Profiler.NULL_FRAME;
-            }
-        }
-    }
 }
 
 class CommandBlockCached extends InputBlockCached {
@@ -489,15 +483,153 @@ const NULL_BLOCK = new NullBlockCached(null, {
     mutation: null
 });
 
-const getCached = function (sequencer, thread, currentBlockId) {
+const getCached = function (thread, currentBlockId) {
     const blockCached = (
         BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, CommandBlockCached) ||
-        BlocksExecuteCache.getCached(sequencer.blocks, currentBlockId, CommandBlockCached) ||
-        BlocksExecuteCache.getCached(sequencer.runtime.flyoutBlocks, currentBlockId, CommandBlockCached) ||
+        BlocksExecuteCache.getCached(
+            blockUtility.sequencer.blocks, currentBlockId, CommandBlockCached
+        ) ||
+        BlocksExecuteCache.getCached(
+            blockUtility.sequencer.runtime.flyoutBlocks, currentBlockId, CommandBlockCached
+        ) ||
         // No block found: stop the thread; script no longer exists.
         NULL_BLOCK
     );
     return blockCached;
+};
+
+const EMPTY_MAY_COUNT = [];
+
+const executeOps = function (thread, ops) {
+    let i = -1;
+    while (thread.status === STATUS_RUNNING) {
+        const opCached = ops[++i];
+        if (isPromise(opCached._parentValues[opCached._parentKey] = (
+            opCached._blockFunctionUnbound.call(
+                opCached._blockFunctionContext,
+                opCached._argValues, blockUtility
+        )))) {
+        // if (isPromise(call(ops[++i]))) {
+            thread.status = Thread.STATUS_PROMISE_WAIT;
+        }
+    }
+    return ops[i];
+};
+
+let profiler = null;
+let profilerId = 0;
+
+const PROFILE_WITH_NAMES = false;
+
+const connectProfiler = function (blockCached) {
+    blockCached.profiler = profilerId;
+    if (blockFunctionProfilerId === -1) {
+        blockFunctionProfilerId = profiler.idByName(blockFunctionProfilerFrame);
+    }
+
+    const ops = blockCached._allOps;
+    for (let i = ops.length - 1; i >= 0; i--) {
+        const op = ops[i];
+        const mayCount = i + 1 < ops.length ? ops[i + 1].willCount : [];
+        op.profiler = profilerId;
+        op.mayCount = mayCount;
+        op.opsAfter = i + 1 < ops.length ? ops[i + 1].opsAt : 0;
+        if (op.profileOpcode) {
+            op.opsAt = op.opsAfter + 1;
+            const opcode = op.opcode;
+            const index = mayCount.findIndex(may => may.opcode === opcode);
+            const may = new MayCount(mayCount[index] || {
+                opcode,
+                frame: profiler.frame(blockFunctionProfilerId, opcode),
+                may: 0
+            });
+
+            op.willCount = mayCount.slice();
+            if (index === -1) {
+                op.willCount.push(may);
+            } else {
+                op.willCount[index] = may;
+            }
+            // profiler.addSubframe(blockFunctionProfilerId, opcode, may);
+        } else {
+            op.opsAt = op.opsAfter;
+            op.willCount = mayCount;
+        }
+
+        op.count = new MayCount({
+            opcode: op.opcode,
+            frame: profiler.frame(blockFunctionProfilerId, null)
+        });
+        // profiler.addSubframe(blockFunctionProfilerId, null, op.count);
+    }
+
+    blockCached.count = new MayCount({
+        opcode: blockCached.opcode,
+        frame: profiler.frame(blockFunctionProfilerId, null)
+    });
+    // profiler.addSubframe(blockFunctionProfilerId, null, blockCached.count);
+}
+
+const updateProfiler = function (blockCached, lastBlock) {
+    if (blockCached.profiler !== profilerId) connectProfiler(blockCached);
+
+    if (PROFILE_WITH_NAMES) {
+        // What may run
+        const mayStart = blockCached._allOps[0].willCount;
+        // What has not run
+        const mayEnd = lastBlock.mayCount;
+
+        let j = 0;
+        for (; j < mayEnd.length; j++) {
+            mayStart[j].frame.count += mayStart[j].may - mayEnd[j].may;
+        }
+        for (; j < mayStart.length; j++) {
+            mayStart[j].frame.count += mayStart[j].may;
+        }
+    } else {
+        blockCached.count.frame.count +=
+            blockCached._allOps[0].opsAt - lastBlock.opsAfter;
+    }
+};
+
+const executeOuter = function (sequencer, thread) {
+    let lastBlock = NULL_BLOCK;
+
+    const isProfiling = sequencer.runtime.profiler !== null;
+    if (isProfiling && profiler !== sequencer.runtime.profiler) {
+        profiler = sequencer.runtime.profiler;
+        profilerId += 1;
+    }
+
+    while (thread.status === STATUS_RUNNING) {
+        // Current block to execute is the one on the top of the stack.
+        const blockCached = getCached(
+            thread, thread.pointer || thread.stackFrame.endBlockId);
+
+        // lastBlock = executeOps(thread, blockCached._allOps);
+        const ops = blockCached._allOps;
+        let i = -1;
+        while (thread.status === STATUS_RUNNING) {
+            const opCached = ops[++i];
+            if (isPromise(opCached._parentValues[opCached._parentKey] = (
+                opCached._blockFunctionUnbound.call(
+                    opCached._blockFunctionContext,
+                    opCached._argValues, blockUtility
+            )))) {
+            // if (isPromise(call(ops[++i]))) {
+                thread.status = Thread.STATUS_PROMISE_WAIT;
+            }
+        }
+        lastBlock = ops[i];
+
+        if (isProfiling) updateProfiler(blockCached, lastBlock);
+
+        if (thread.status === Thread.STATUS_INTERRUPT && thread.continuous) {
+            thread.status = STATUS_RUNNING;
+        }
+    }
+
+    return lastBlock;
 };
 
 /**
@@ -515,31 +647,7 @@ const execute = function (sequencer, thread) {
     blockUtility.sequencer = sequencer;
     blockUtility.thread = thread;
 
-    const isProfiling = sequencer.runtime.profiler !== null;
-    let lastBlock = NULL_BLOCK;
-
-    while (thread.status === STATUS_RUNNING) {
-        // Current block to execute is the one on the top of the stack.
-        const blockCached = getCached(
-            sequencer, thread, thread.pointer || thread.stackFrame.endBlockId
-        );
-
-        if (isProfiling &&
-            blockCached.profiler !== sequencer.runtime.profiler) {
-            blockCached.connectProfiler(sequencer.runtime.profiler);
-        }
-
-        const ops = blockCached._allOps;
-
-        let i = -1;
-        while (thread.status === STATUS_RUNNING) wrapPromise(call(ops[++i]));
-
-        if (thread.status === Thread.STATUS_INTERRUPT && thread.continuous) {
-            thread.status = STATUS_RUNNING;
-        } else if (thread.status !== STATUS_RUNNING) {
-            lastBlock = ops[i];
-        }
-    }
+    const lastBlock = executeOuter(sequencer, thread);
 
     if (thread.status === Thread.STATUS_INTERRUPT) {
         thread.status = STATUS_RUNNING;
