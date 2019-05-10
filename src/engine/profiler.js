@@ -291,7 +291,7 @@ class Profiler {
 
         for (let j = 0; j < this.increments.length; j++) {
             if (this.increments[j]) {
-                this.onFrame(this.increments[j]);
+                if (this.increments[j].count > 0) this.onFrame(this.increments[j]);
                 this.increments[j].count = 0;
             }
         }
@@ -301,7 +301,7 @@ class Profiler {
                 this.counters[k].count += this.counters[k].subframes[l].count;
                 this.counters[k].subframes[l].count = 0;
             }
-            this.onFrame(this.counters[k]);
+            if (this.counters[k].count > 0) this.onFrame(this.counters[k]);
             this.counters[k].count = 0;
         }
 

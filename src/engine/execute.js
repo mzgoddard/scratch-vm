@@ -260,7 +260,7 @@ class BlockCached {
         this._next = null;
         this._allOps = this._ops;
 
-        this.count = null;
+        this.count = 0;
 
         this.willCount = [];
         this.mayCount = [];
@@ -389,7 +389,8 @@ class InputBlockCached extends BlockCached {
                 }
 
                 this._shadowOps.push(...inputCached._shadowOps);
-                this._ops.push(...inputCached._ops);
+                this._ops.splice(this._ops.length - 1, 0, ...inputCached._ops.slice(0, inputCached._ops.length - 1));
+                if (inputCached._ops.length > 0) this._ops.push(inputCached._ops[inputCached._ops.length - 1]);
                 inputCached._parentKey = inputName;
                 inputCached._parentValues = this._argValues;
 
@@ -400,6 +401,14 @@ class InputBlockCached extends BlockCached {
                 }
             }
         }
+
+        // const _ops = this._ops.slice();
+        // this._ops.sort((a, b) => (
+        //     (this._argValues === b._parentValues ? _ops.length :
+        //         _ops.findIndex(_b => _b._argValues === b._parentValues)) -
+        //     (this._argValues === a._parentValues ? _ops.length :
+        //         _ops.findIndex(_a => _a._argValues === a._parentValues))
+        // ));
 
         // The final operation is this block itself. At the top most block is a
         // command block or a block that is being run as a monitor.
@@ -483,6 +492,145 @@ const NULL_BLOCK = new NullBlockCached(null, {
     mutation: null
 });
 
+const compileId = function (i) {
+    return (
+        (i >= 0x0fff ? String.fromCharCode(97 + ((i & 0x0000f000) >> 0x0c)) : '') +
+        (i >= 0x00ff ? String.fromCharCode(97 + ((i & 0x00000f00) >> 0x08)) : '') +
+        (i >= 0x000f ? String.fromCharCode(97 + ((i & 0x000000f0) >> 0x04)) : '') +
+        (i >= 0x0000 ? String.fromCharCode(97 + ((i & 0x0000000f) >> 0x00)) : '')
+    );
+};
+
+const compile = function (blockCached) {
+    const ops = blockCached._allOps;
+
+    const bindings = {contexts: {}, functions: {}, args: {}, out: {}};
+    const contexts = [];
+    let source = '';
+    let commandParent = 0;
+
+    for (let i = 0; i < ops.length; i++) {
+        const op = ops[i];
+
+        const id = compileId(i);
+        bindings.args[id] = op._argValues;
+
+        const context = op._blockFunctionContext;
+        let contextId;
+
+        const func = op._blockFunctionUnbound;
+        let functionId;
+        if (context) {
+            for (const key of [
+                ...Object.getOwnPropertyNames(context),
+                ...Object.getOwnPropertyNames(Object.getPrototypeOf(context))
+            ]) {
+                if (context[key] === func) {
+                    functionId = key;
+                    break;
+                }
+            }
+        }
+
+        const supportReturn = /return|=>/.test(func.toString());
+        const supportThis = /this/.test(func.toString());
+        const beforeLastOp = i < ops.length - 1;
+        const needStatus = !/^(data|operator|argument)/.test(op.opcode);
+        const isMayContinue = op.opcode === 'vm_may_continue';
+        const afterStackChange = i > 0 && /^(control|procedure)/.test(ops[i - 1].opcode);
+        const checkContinuous = ops.findIndex(({opcode}) => opcode === op.opcode) === i;
+        const supportStatusChange = beforeLastOp && (
+            isMayContinue ? (checkContinuous || afterStackChange) : needStatus
+        );
+        // const supportStatusChange = beforeLastOp && needStatus;
+
+        if (isMayContinue && beforeLastOp && !checkContinuous && !afterStackChange) {
+            source += `    thread.reuseStackForNextBlock(arg_${id}.NEXT_STACK);\n`;
+            continue;
+        }
+        if (supportReturn) {
+            const parentValues = op._parentValues;
+            let parentI = ops.findIndex(op => op._argValues === parentValues);
+            let parentId;
+            if (parentI === -1) {
+                parentI = i;
+                // bindings.out[compileId(parentI)] = parentValues;
+                parentId = `out_${compileId(parentI)}`;
+                source += `    `;
+            } else {
+                parentId = `arg_${compileId(parentI)}`;
+                source += `    ${parentId}.${op._parentKey} = `;
+            }
+        } else source += '    ';
+        if (supportThis) {
+            contextId = (Object.entries(bindings.contexts).find(([_, ctx]) => ctx === context) || [])[0];
+            if (context && !contextId) {
+                contextId = context.constructor.name;
+                if (bindings.contexts[contextId]) {
+                    contextId = `ctx_${compileId(Object.keys(bindings.contexts).length)}`;
+                }
+                bindings.contexts[contextId] = context;
+            } else if (!context) {
+                contextId = 'null';
+            }
+        }
+        if (functionId && supportThis) {
+            source += `${contextId}.${functionId}(arg_${id}, blockUtility);\n`;
+        } else {
+            functionId = op.opcode;
+            if (!bindings.functions[functionId]) {
+                bindings.functions[functionId] = func;
+            } else if (bindings.functions[functionId] !== func) {
+                const functionI = Object.values(bindings.functions).indexOf(func);
+                if (functionI === -1) {
+                    functionId = compileId(Object.keys(bindings.functions).length);
+                    bindings.functions[functionId] = func;
+                } else {
+                    functionId = compileId(functionI);
+                }
+            }
+            if (supportThis) {
+                source += `${functionId}.call(${contextId}, arg_${id}, blockUtility);\n`;
+            } else {
+                source += `${functionId}(arg_${id}, blockUtility);\n`;
+            }
+        }
+        if (supportStatusChange) {
+            source += `    if (thread.status !== 0) return;\n`;
+        }
+    }
+
+    const compileCached = new BlockCached(null, {
+        id: blockCached.id,
+        opcode: 'vm_compiled',
+        fields: {},
+        inputs: {},
+        mutation: null
+    });
+    const factory = new Function('bindings', [
+        ...Object.keys(bindings.contexts)
+            .map(key => `const ${key} = bindings.contexts.${key};`),
+        ...Object.keys(bindings.functions)
+            .map(key => `const ${key} = bindings.functions.${key};`),
+        ...Object.keys(bindings.out)
+            .map(key => `const out_${key} = bindings.args.${key};`),
+        ...Object.keys(bindings.args)
+            .map(key => `const arg_${key} = bindings.args.${key};`),
+        `return function ${blockCached.opcode}_${ops.length} (_, blockUtility) {`,
+        // `    window.COMILE_USE = (window.COMILE_USE | 0) + 1;`,
+        '    const thread = blockUtility.thread;',
+        source,
+        `};`
+    ].join('\n'));
+    compileCached._blockFunctionUnbound = factory(bindings);
+    (window.COMPILED = (window.COMPILED || {}))[compileCached._blockFunctionUnbound.name] = factory.toString();
+    // console.log(factory.toString());
+    // window.LONGEST_COMILE = Math.max(window.LONGEST_COMILE | 0, blockCached._allOps.length);
+    // window.COMILES = (window.COMILES | 0) + 1;
+    // console.log(bindings, compileCached._blockFunctionUnbound);
+    blockCached._allOps = [compileCached];
+};
+
 const getCached = function (thread, currentBlockId) {
     const blockCached = (
         BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, CommandBlockCached) ||
@@ -495,6 +643,7 @@ const getCached = function (thread, currentBlockId) {
         // No block found: stop the thread; script no longer exists.
         NULL_BLOCK
     );
+    if (thread.continuous && blockCached.count++ === 100) compile(blockCached);
     return blockCached;
 };
 
@@ -556,17 +705,17 @@ const connectProfiler = function (blockCached) {
             op.willCount = mayCount;
         }
 
-        op.count = new MayCount({
-            opcode: op.opcode,
-            frame: profiler.frame(blockFunctionProfilerId, null)
-        });
+        // op.count = new MayCount({
+        //     opcode: op.opcode,
+        //     frame: profiler.frame(blockFunctionProfilerId, null)
+        // });
         // profiler.addSubframe(blockFunctionProfilerId, null, op.count);
     }
 
-    blockCached.count = new MayCount({
-        opcode: blockCached.opcode,
-        frame: profiler.frame(blockFunctionProfilerId, null)
-    });
+    // blockCached.count = new MayCount({
+    //     opcode: blockCached.opcode,
+    //     frame: profiler.frame(blockFunctionProfilerId, null)
+    // });
     // profiler.addSubframe(blockFunctionProfilerId, null, blockCached.count);
 }
 
@@ -587,8 +736,8 @@ const updateProfiler = function (blockCached, lastBlock) {
             mayStart[j].frame.count += mayStart[j].may;
         }
     } else {
-        blockCached.count.frame.count +=
-            blockCached._allOps[0].opsAt - lastBlock.opsAfter;
+        // blockCached.count.frame.count +=
+        //     blockCached._allOps[0].opsAt - lastBlock.opsAfter;
     }
 };
 
@@ -608,6 +757,7 @@ const executeOuter = function (sequencer, thread) {
 
         // lastBlock = executeOps(thread, blockCached._allOps);
         const ops = blockCached._allOps;
+        // if (isProfiling && ops[0].opcode !== 'vm_compiled') window.NORMAL_USE = (window.NORMAL_USE | 0) + 1;
         let i = -1;
         while (thread.status === STATUS_RUNNING) {
             const opCached = ops[++i];
@@ -617,7 +767,9 @@ const executeOuter = function (sequencer, thread) {
                     opCached._argValues, blockUtility
             )))) {
             // if (isPromise(call(ops[++i]))) {
+                blockCached.count = 0;
                 thread.status = Thread.STATUS_PROMISE_WAIT;
+                // window.PROMISE_WAITS = (window.PROMISE_WAITS | 0) + 1;
             }
         }
         lastBlock = ops[i];

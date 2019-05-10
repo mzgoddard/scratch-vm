@@ -136,21 +136,18 @@ class Scratch3DataBlocks {
         const list = util.target.lookupOrCreateList(
             args.LIST.id, args.LIST.name);
         const index = Cast.toListIndex(args.INDEX, list.value.length);
-        if (index === Cast.LIST_INVALID) {
-            return;
-        } else if (index === Cast.LIST_ALL) {
+        if (index === Cast.LIST_ALL) {
             list.value = [];
-            return;
+        } else if (index !== Cast.LIST_INVALID) {
+            list.value.splice(index - 1, 1);
+            list._monitorUpToDate = false;
         }
-        list.value.splice(index - 1, 1);
-        list._monitorUpToDate = false;
     }
 
     deleteAllOfList (args, util) {
         const list = util.target.lookupOrCreateList(
             args.LIST.id, args.LIST.name);
         list.value = [];
-        return;
     }
 
     insertAtList (args, util) {
