@@ -3,6 +3,7 @@ const BlocksExecuteCache = require('./blocks-execute-cache');
 const log = require('../util/log');
 const Thread = require('./thread');
 const Profiler = require('./profiler');
+const Cast = require('../util/cast');
 
 /**
  * Thread status value when it is actively running.
@@ -501,104 +502,570 @@ const compileId = function (i) {
     );
 };
 
+const safeId = function (id) {
+    return id.replace(/[^\w+_]/g, '_');
+}
+
+const findId = function (_set, obj, _default, prefix) {
+    if (!obj) return safeId('null');
+    let index = Object.values(_set).indexOf(obj);
+    if (index > -1) {
+        return safeId(Object.keys(_set)[index]);
+    } else if (!_default || _set[_default]) {
+        _set.__nextId = (_set.__nextId || 0) + 1;
+        return safeId(`${prefix || ''}${_set.__nextId}`);
+    }
+    return safeId(_default);
+};
+
+class JSNode {
+    toString () {
+        return '';
+    }
+}
+class JSWhitespace {}
+class JSChunk extends JSNode {
+    constructor ({index, statements}) {
+        super();
+        this.index = index;
+        this.statements = statements;
+    }
+    toString () {
+        return this.statements.join('');
+    }
+}
+class JSStatement extends JSNode {
+    constructor ({expr} = {}) {
+        super();
+        this.indent = new JSWhitespace();
+        this.expr = expr;
+    }
+}
+class JSExpressionStatement extends JSStatement {
+    constructor ({expr}) {
+        super({expr});
+    }
+    toString () {
+        return `${this.expr};`;
+    }
+}
+class JSCheckStatus extends JSStatement {
+    toString () {
+        return 'if (thread.status !== 0) return;';
+    }
+}
+class JSStore extends JSStatement {
+    constructor ({index, expr}) {
+        super({expr});
+        this.index = index;
+    }
+}
+class JSStoreArg extends JSStore {
+    constructor ({index, expr, name, key}) {
+        super({index, expr});
+        this.name = name;
+        this.key = key;
+    }
+    toString () {
+        return `${this.name}.${this.key} = ${this.expr};`;
+    }
+}
+class JSStoreVar extends JSStore {
+    constructor ({index, expr, name}) {
+        super({index, expr});
+        this.refs = 0;
+        this.name = name;
+    }
+    toString () {
+        if (this.refs === 0) return '';
+        return `var ${this.name} = ${this.expr};`;
+    }
+}
+class JSOperator extends JSNode {}
+class JSProperty extends JSOperator {
+    constructor ({lhs, member}) {
+        super();
+        this.lhs = lhs;
+        this.member = member;
+    }
+    toString () {
+        return `${this.lhs}.${this.member}`;
+    }
+}
+class JSGetVariable extends JSOperator {}
+class JSBinaryOperator extends JSOperator {
+    constructor ({operator, input1, input2}) {
+        super();
+        this.operator = operator;
+        this.input1 = input1;
+        this.input2 = input2;
+    }
+    toString () {
+        return `${this.input1} ${this.operator} ${this.input2}`;
+    }
+}
+class JSCall extends JSOperator {}
+class JSCallBlock extends JSCall {
+    constructor ({context, func, args}) {
+        super();
+        this.context = context;
+        this.func = func;
+        this.args = args;
+    }
+    toString () {
+        return `${this.func}.call(${this.context}, ${this.args}, blockUtility)`;
+    }
+}
+class JSCallMember extends JSCall {}
+class JSCallFunction extends JSCall {
+    constructor ({func, args}) {
+        super();
+        this.func = func;
+        this.args = args;
+    }
+    toString () {
+        return `${this.func}(${this.args}, blockUtility)`;
+    }
+}
+class JSFactory extends JSNode {
+    constructor ({debugName}) {
+        super();
+        this.debugName = debugName;
+        this.bindings = [];
+        this.dereferences = [];
+        this.chunks = [];
+    }
+    toString () {
+        return [
+            ...this.bindings,
+            `return function ${this.debugName} (_, blockUtility) {`,
+            ...this.dereferences,
+            ...this.chunks,
+            `};`
+        ].join('')
+    }
+}
+class JSPrinter {
+    visit (node) {
+
+    }
+}
+
 const compile = function (blockCached) {
     const ops = blockCached._allOps;
 
-    const bindings = {contexts: {}, functions: {}, args: {}, out: {}};
-    const contexts = [];
-    let source = '';
-    let commandParent = 0;
+    // const bindings = {contexts: {}, functions: {}, args: {}, out: {}};
+    // const contexts = [];
+    // let source = '';
+    // let commandParent = 0;
+
+    const bindings = {};
+    const factoryAST = new JSFactory({
+        debugName: `${blockCached.opcode}_${ops.length}`
+    });
+
+    factoryAST.dereferences.push(new JSStoreVar({
+        name: 'thread',
+        expr: new JSProperty({
+            lhs: 'blockUtility',
+            member: 'thread'
+        })
+    }));
+
+    const findVar = function (name) {
+        return (
+            factoryAST.dereferences.find(store => store.name === name) ||
+            factoryAST.bindings.find(store => store.name === name)
+        );
+    }
+
+    const addRef = function (name) {
+        const node = findVar(name);
+        if (node) node.refs++;
+    };
+
+    const removeRef = function (name) {
+        const node = findVar(name);
+        if (node) node.refs--;
+    };
+
+    const bind = function (i, name, value) {
+        if (value && !bindings[name]) {
+            bindings[name] = value;
+            factoryAST.bindings.push(new JSStoreVar({
+                index: i,
+                name,
+                expr: new JSProperty({
+                    lhs: `bindings`,
+                    member: name
+                })
+            }));
+        }
+    };
 
     for (let i = 0; i < ops.length; i++) {
         const op = ops[i];
+        const argValues = op._argValues;
+        const func = op._blockFunctionUnbound;
+        const context = op._blockFunctionContext;
 
-        const id = compileId(i);
-        bindings.args[id] = op._argValues;
+        const id = findId(bindings, argValues, null, 'arg_');
+        const contextId = findId(bindings, context, context && context.constructor.name, 'ctx_');
+        const functionId = findId(bindings, func, op.opcode, 'fn_');
+
+        bind(i, contextId, context);
+        bind(i, functionId, func);
+        bind(i, id, argValues);
+    }
+
+    for (let i = 0; i < ops.length; i++) {
+        const op = ops[i];
+        const argValues = op._argValues;
+        const parentValues = op._parentValues;
+        const func = op._blockFunctionUnbound;
+        const context = op._blockFunctionContext;
+
+        const id = findId(bindings, argValues);
+        const parentI = ops.findIndex(({_argValues}) => _argValues === parentValues);
+        const parentId = parentI > -1 ? findId(bindings, parentValues) : null;
+        const contextId = findId(bindings, context, context && context.constructor.name, 'ctx_');
+        const functionId = findId(bindings, func, op.opcode, 'fn_');
+
+        // let statement = JSNode.callBlock(contextId, functionId, id);
+        // addRef(statement);
+        let statement = new JSCallBlock({
+            context: contextId,
+            func: functionId,
+            args: id
+        });
+        addRef(contextId);
+        addRef(functionId);
+        addRef(id);
+        if (parentId) {
+            // statement = JSNode.storeArg(i, parentId, op._parentKey, statement);
+            statement = new JSStoreArg({
+                index: i,
+                name: `${parentId}`,
+                key: `${op._parentKey}`,
+                expr: statement
+            });
+        } else {
+            // statement = JSNode.expressionStatement(statement);
+            statement = new JSExpressionStatement({
+                expr: statement
+            });
+        }
+        // const chunk = JSNode.chunk(i, [statement, new JSCheckStatus()]);
+        // factoryAST.chunks.push(chunk);
+        factoryAST.chunks.push(new JSChunk({
+            index: i,
+            statements: [
+                statement,
+                new JSCheckStatus()
+            ]
+        }));
+        addRef('thread');
+    }
+
+    for (let i = 0; i < factoryAST.chunks.length; i++) {
+        const op = ops[i];
+        const chunk = factoryAST.chunks[i];
 
         const context = op._blockFunctionContext;
-        let contextId;
-
         const func = op._blockFunctionUnbound;
-        let functionId;
-        if (context) {
-            for (const key of [
+        const funcsrc = func.toString();
+
+        const statement = chunk.statements[0];
+        let call;
+        if (statement instanceof JSStoreArg) {
+            call = statement.expr;
+        } else if (statement instanceof JSExpressionStatement) {
+            call = statement.expr;
+        }
+
+        if (!/this/.test(funcsrc)) {
+            statement.expr = new JSCallFunction({
+                func: call.func,
+                args: call.args
+            });
+            removeRef(call.context);
+        } else if (context) {
+            const methodId = [
                 ...Object.getOwnPropertyNames(context),
                 ...Object.getOwnPropertyNames(Object.getPrototypeOf(context))
-            ]) {
-                if (context[key] === func) {
-                    functionId = key;
-                    break;
+            ].find(key => context[key] === func);
+            if (methodId && safeId(methodId) === methodId) {
+                statement.expr = new JSCallFunction({
+                    func: new JSProperty({
+                        lhs: call.context,
+                        member: methodId
+                    }),
+                    args: call.args
+                });
+                removeRef(call.func);
+            }
+        }
+
+        if (
+            // this opcode does not modify the thread status
+            /^(operator|data|argument)/.test(op.opcode) ||
+            // no need to check the last operation the function is done
+            i === ops.length - 1
+        ) {
+            const before = chunk.statements.length;
+            chunk.statements = chunk.statements
+                .filter(stmt => !(stmt instanceof JSCheckStatus));
+            const after = chunk.statements.length;
+            for (let j = 0; j < (before - after); j++) removeRef('thread');
+        }
+
+        if (
+            op.opcode === 'vm_may_continue' &&
+            (
+                // is the first operation
+                i === 0 ||
+                // or last opcode does not modify the stack
+                /^(operator|data|argument)/.test(ops[i - 1].opcode)
+            )
+        ) {
+            const call = chunk.statements[0].expr;
+            call.context && removeRef(call.context);
+            call.func && removeRef(call.func);
+            removeRef(call.args);
+            if (chunk.statements.length === 1) addRef('thread');
+
+            if (i === ops.findIndex(({opcode}) => opcode === 'vm_may_continue') && i < ops.length - 1) {
+                // the first vm_may_continue operation
+                chunk.statements = [
+                    new JSExpressionStatement({
+                        expr: `if (thread.continuous) thread.reuseStackForNextBlock('${op._argValues.NEXT_STACK}')`
+                    }),
+                    new JSExpressionStatement({
+                        expr: `else return thread.status = ${Thread.STATUS_INTERRUPT}`
+                    })
+                ];
+                if (i === ops.length - 1) {
+                    // also the last
+                    chunk.statements[1] = new JSExpressionStatement({
+                        expr: `thread.status = ${Thread.STATUS_INTERRUPT}`
+                    });
+                }
+            } else if (i < ops.length - 1) {
+                // not the first or last operation
+                chunk.statements = [
+                    new JSExpressionStatement({
+                        expr: `thread.reuseStackForNextBlock('${op._argValues.NEXT_STACK}')`
+                    })
+                ];
+            } else {
+                // not the first but the last operation
+                chunk.statements = [
+                    new JSExpressionStatement({
+                        expr: `thread.reuseStackForNextBlock(null)`
+                    }),
+                    new JSExpressionStatement({
+                        expr: `thread.status = ${Thread.STATUS_INTERRUPT}`
+                    })
+                ];
+                if (i === ops.findIndex(({opcode}) => opcode === 'vm_may_continue')) {
+                    chunk.statements[0] = new JSExpressionStatement({
+                        expr: `if (thread.continuous) thread.reuseStackForNextBlock(null)`
+                    });
                 }
             }
         }
 
-        const supportReturn = /return|=>/.test(func.toString());
-        const supportThis = /this/.test(func.toString());
-        const beforeLastOp = i < ops.length - 1;
-        const needStatus = !/^(data|operator|argument)/.test(op.opcode);
-        const isMayContinue = op.opcode === 'vm_may_continue';
-        const afterStackChange = i > 0 && /^(control|procedure)/.test(ops[i - 1].opcode);
-        const checkContinuous = ops.findIndex(({opcode}) => opcode === op.opcode) === i;
-        const supportStatusChange = beforeLastOp && (
-            isMayContinue ? (checkContinuous || afterStackChange) : needStatus
-        );
-        // const supportStatusChange = beforeLastOp && needStatus;
-
-        if (isMayContinue && beforeLastOp && !checkContinuous && !afterStackChange) {
-            source += `    thread.reuseStackForNextBlock(arg_${id}.NEXT_STACK);\n`;
-            continue;
-        }
-        if (supportReturn) {
-            const parentValues = op._parentValues;
-            let parentI = ops.findIndex(op => op._argValues === parentValues);
-            let parentId;
-            if (parentI === -1) {
-                parentI = i;
-                // bindings.out[compileId(parentI)] = parentValues;
-                parentId = `out_${compileId(parentI)}`;
-                source += `    `;
-            } else {
-                parentId = `arg_${compileId(parentI)}`;
-                source += `    ${parentId}.${op._parentKey} = `;
-            }
-        } else source += '    ';
-        if (supportThis) {
-            contextId = (Object.entries(bindings.contexts).find(([_, ctx]) => ctx === context) || [])[0];
-            if (context && !contextId) {
-                contextId = context.constructor.name;
-                if (bindings.contexts[contextId]) {
-                    contextId = `ctx_${compileId(Object.keys(bindings.contexts).length)}`;
-                }
-                bindings.contexts[contextId] = context;
-            } else if (!context) {
-                contextId = 'null';
-            }
-        }
-        if (functionId && supportThis) {
-            source += `${contextId}.${functionId}(arg_${id}, blockUtility);\n`;
-        } else {
-            functionId = op.opcode;
-            if (!bindings.functions[functionId]) {
-                bindings.functions[functionId] = func;
-            } else if (bindings.functions[functionId] !== func) {
-                const functionI = Object.values(bindings.functions).indexOf(func);
-                if (functionI === -1) {
-                    functionId = compileId(Object.keys(bindings.functions).length);
-                    bindings.functions[functionId] = func;
-                } else {
-                    functionId = compileId(functionI);
-                }
-            }
-            if (supportThis) {
-                source += `${functionId}.call(${contextId}, arg_${id}, blockUtility);\n`;
-            } else {
-                source += `${functionId}(arg_${id}, blockUtility);\n`;
-            }
-        }
-        if (supportStatusChange) {
-            source += `    if (thread.status !== 0) return;\n`;
-        }
+        // if (/^operator_(add|subtract|multiply|divide)/.test(op.opcode)) {
+        //     const argValues = op._argValues;
+        //     const store1Index = ops.findIndex(({_parentValues, _parentKey}) => _parentValues === argValues && _parentKey === 'NUM1');
+        //     const store2Index = ops.findIndex(({_parentValues, _parentKey}) => _parentValues === argValues && _parentKey === 'NUM2');
+        //
+        //     let store1Id = `${findId(bindings, argValues)}.NUM1`;
+        //     if (store1Index > -1) {
+        //         const chunk1 = factoryAST.chunks[store1Index];
+        //         const stmt1 = chunk1.statements[0];
+        //         if (stmt1 instanceof JSStoreArg) {
+        //             store1Id = `var_${store1Index}`;
+        //             chunk1.statements[0] = new JSStoreVar({
+        //                 index: store1Index,
+        //                 name: store1Id,
+        //                 expr: stmt1.expr
+        //             });
+        //             chunk1.statements[0].refs = 1;
+        //         }
+        //     }
+        //     let store2Id = `${findId(bindings, argValues)}.NUM2`;
+        //     if (store2Index > -1) {
+        //         const chunk2 = factoryAST.chunks[store2Index];
+        //         const stmt2 = chunk2.statements[0];
+        //         if (stmt2 instanceof JSStoreArg) {
+        //             store2Id = `var_${store2Index}`;
+        //             chunk2.statements[0] = new JSStoreVar({
+        //                 index: store2Index,
+        //                 name: store2Id,
+        //                 expr: stmt2.expr
+        //             });
+        //             chunk2.statements[0].refs = 1;
+        //         }
+        //     }
+        //
+        //     let operator = '+';
+        //     if (op.opcode === 'operator_subtract') operator = '-';
+        //     if (op.opcode === 'operator_multiply') operator = '*';
+        //     if (op.opcode === 'operator_divide') operator = '/';
+        //
+        //     const expr = chunk.statements[0].expr;
+        //     if (store1Index > -1 && store2Index > -1) {
+        //         removeRef(expr.args);
+        //     }
+        //
+        //     chunk.statements[0].expr = new JSBinaryOperator({
+        //         operator,
+        //         input1: store1Id,
+        //         input2: store2Id
+        //     });
+        // }
     }
+
+    // for (let i = 0; i < ops.length; i++) {
+    //     const op = ops[i];
+    //
+    //     const id = compileId(i);
+    //     bindings.args[id] = op._argValues;
+    //
+    //     const context = op._blockFunctionContext;
+    //     let contextId;
+    //
+    //     const func = op._blockFunctionUnbound;
+    //     let functionId;
+    //     if (context) {
+    //         for (const key of [
+    //             ...Object.getOwnPropertyNames(context),
+    //             ...Object.getOwnPropertyNames(Object.getPrototypeOf(context))
+    //         ]) {
+    //             if (context[key] === func) {
+    //                 functionId = key;
+    //                 break;
+    //             }
+    //         }
+    //     }
+    //
+    //     const supportReturn = /return|=>/.test(func.toString());
+    //     const supportThis = /this/.test(func.toString());
+    //     const beforeLastOp = i < ops.length - 1;
+    //     const needStatus = !/^(data|operator|argument)/.test(op.opcode);
+    //     const isMayContinue = op.opcode === 'vm_may_continue';
+    //     const afterStackChange = i > 0 && /^(control|procedure)/.test(ops[i - 1].opcode);
+    //     const checkContinuous = ops.findIndex(({opcode}) => opcode === op.opcode) === i;
+    //     const supportStatusChange = beforeLastOp && (
+    //         isMayContinue ? (checkContinuous || afterStackChange) : needStatus
+    //     );
+    //     // const supportStatusChange = beforeLastOp && needStatus;
+    //
+    //     const isDataVariable = op.opcode === 'data_variable';
+    //     const isBinaryOperator = /^operator_(add|subtract|multiply|divide)/.test(op.opcode);
+    //
+    //     if (isMayContinue && beforeLastOp && !checkContinuous && !afterStackChange) {
+    //         delete bindings.args[id];
+    //         source += `    thread.reuseStackForNextBlock('${op._argValues.NEXT_STACK}');\n`;
+    //         continue;
+    //     }
+    //     if (supportReturn) {
+    //         const parentValues = op._parentValues;
+    //         let parentI = ops.findIndex(op => op._argValues === parentValues);
+    //         let parentId;
+    //         if (parentI === -1) {
+    //             parentI = i;
+    //             // bindings.out[compileId(parentI)] = parentValues;
+    //             parentId = `out_${compileId(parentI)}`;
+    //             source += `    `;
+    //         } else {
+    //             const isParentOperator = /^operator_(add|subtract|multiply|divide)/.test(ops[parentI].opcode);
+    //             if (isParentOperator) {
+    //                 parentId = `var_${id}`;
+    //                 source += `    var ${parentId} = `;
+    //             } else {
+    //                 parentId = `arg_${compileId(parentI)}`;
+    //                 source += `    ${parentId}.${op._parentKey} = `;
+    //             }
+    //         }
+    //     } else source += '    ';
+    //     if (isDataVariable) {
+    //         source += `thread.target.lookupOrCreateVariable('${op._argValues.VARIABLE.id}', '${op._argValues.VARIABLE.name}').value;\n`;
+    //         continue;
+    //     }
+    //     if (isBinaryOperator) {
+    //         const aIndex = ops.findIndex(a => a._parentValues === op._argValues && a._parentKey === 'NUM1');
+    //         const aId = aIndex === -1 ? `arg_${id}.NUM1` : `var_${compileId(aIndex)}`;
+    //         const bIndex = ops.findIndex(b => b._parentValues === op._argValues && b._parentKey === 'NUM2');
+    //         const bId = bIndex === -1 ? `arg_${id}.NUM2` : `var_${compileId(bIndex)}`;
+    //         if (aIndex > -1 && bIndex > -1) {
+    //             delete bindings.args[id];
+    //         }
+    //         let operator = '+';
+    //         if (op.opcode === 'operator_subtract') operator = '-';
+    //         if (op.opcode === 'operator_multiply') operator = '*';
+    //         if (op.opcode === 'operator_divide') operator = '/';
+    //
+    //         bindings.functions['toNumber'] = Cast.toNumber;
+    //         source += `toNumber(${aId}) ${operator} toNumber(${bId});\n`;
+    //         continue;
+    //     }
+    //     if (supportThis) {
+    //         contextId = (Object.entries(bindings.contexts).find(([_, ctx]) => ctx === context) || [])[0];
+    //         if (context && !contextId) {
+    //             contextId = context.constructor.name;
+    //             if (bindings.contexts[contextId]) {
+    //                 contextId = `ctx_${compileId(Object.keys(bindings.contexts).length)}`;
+    //             }
+    //             bindings.contexts[contextId] = context;
+    //         } else if (!context) {
+    //             contextId = 'null';
+    //         }
+    //     }
+    //     if (functionId && supportThis) {
+    //         source += `${contextId}.${functionId}(arg_${id}, blockUtility);\n`;
+    //     } else {
+    //         functionId = op.opcode;
+    //         if (!bindings.functions[functionId]) {
+    //             bindings.functions[functionId] = func;
+    //         } else if (bindings.functions[functionId] !== func) {
+    //             const functionI = Object.values(bindings.functions).indexOf(func);
+    //             if (functionI === -1) {
+    //                 functionId = compileId(Object.keys(bindings.functions).length);
+    //                 bindings.functions[functionId] = func;
+    //             } else {
+    //                 functionId = compileId(functionI);
+    //             }
+    //         }
+    //         if (supportThis) {
+    //             source += `${functionId}.call(${contextId}, arg_${id}, blockUtility);\n`;
+    //         } else {
+    //             source += `${functionId}(arg_${id}, blockUtility);\n`;
+    //         }
+    //     }
+    //     if (supportStatusChange) {
+    //         source += `    if (thread.status !== 0) return;\n`;
+    //     }
+    // }
+    //
+    // const factory = new Function('bindings', [
+    //     ...Object.keys(bindings.contexts)
+    //         .map(key => `const ${key} = bindings.contexts.${key};`),
+    //     ...Object.keys(bindings.functions)
+    //         .map(key => `const ${key} = bindings.functions.${key};`),
+    //     ...Object.keys(bindings.out)
+    //         .map(key => `const out_${key} = bindings.args.${key};`),
+    //     ...Object.keys(bindings.args)
+    //         .map(key => `const arg_${key} = bindings.args.${key};`),
+    //     `return function ${blockCached.opcode}_${ops.length} (_, blockUtility) {`,
+    //     // `    window.COMILE_USE = (window.COMILE_USE | 0) + 1;`,
+    //     '    const thread = blockUtility.thread;',
+    //     source,
+    //     `};`
+    // ].join('\n'));
+
+    const factory = new Function('bindings', factoryAST.toString());
 
     const compileCached = new BlockCached(null, {
         id: blockCached.id,
@@ -607,23 +1074,9 @@ const compile = function (blockCached) {
         inputs: {},
         mutation: null
     });
-    const factory = new Function('bindings', [
-        ...Object.keys(bindings.contexts)
-            .map(key => `const ${key} = bindings.contexts.${key};`),
-        ...Object.keys(bindings.functions)
-            .map(key => `const ${key} = bindings.functions.${key};`),
-        ...Object.keys(bindings.out)
-            .map(key => `const out_${key} = bindings.args.${key};`),
-        ...Object.keys(bindings.args)
-            .map(key => `const arg_${key} = bindings.args.${key};`),
-        `return function ${blockCached.opcode}_${ops.length} (_, blockUtility) {`,
-        // `    window.COMILE_USE = (window.COMILE_USE | 0) + 1;`,
-        '    const thread = blockUtility.thread;',
-        source,
-        `};`
-    ].join('\n'));
     compileCached._blockFunctionUnbound = factory(bindings);
     (window.COMPILED = (window.COMPILED || {}))[compileCached._blockFunctionUnbound.name] = factory.toString();
+    // return;
     // console.log(factory.toString());
     // window.LONGEST_COMILE = Math.max(window.LONGEST_COMILE | 0, blockCached._allOps.length);
     // window.COMILES = (window.COMILES | 0) + 1;
@@ -717,7 +1170,7 @@ const connectProfiler = function (blockCached) {
     //     frame: profiler.frame(blockFunctionProfilerId, null)
     // });
     // profiler.addSubframe(blockFunctionProfilerId, null, blockCached.count);
-}
+};
 
 const updateProfiler = function (blockCached, lastBlock) {
     if (blockCached.profiler !== profilerId) connectProfiler(blockCached);
@@ -766,10 +1219,8 @@ const executeOuter = function (sequencer, thread) {
                     opCached._blockFunctionContext,
                     opCached._argValues, blockUtility
             )))) {
-            // if (isPromise(call(ops[++i]))) {
                 blockCached.count = 0;
                 thread.status = Thread.STATUS_PROMISE_WAIT;
-                // window.PROMISE_WAITS = (window.PROMISE_WAITS | 0) + 1;
             }
         }
         lastBlock = ops[i];
