@@ -503,7 +503,8 @@ const compileId = function (i) {
 };
 
 const safeId = function (id) {
-    return id.replace(/[^\w+_]/g, '_');
+    id = String(id);
+    return id[0].replace(/[^a-zA-Z]/g, '_') + id.substring(1).replace(/[^_\w]/g, '_');
 }
 
 const findId = function (_set, obj, _default, prefix) {
@@ -519,15 +520,26 @@ const findId = function (_set, obj, _default, prefix) {
 };
 
 class JSNode {
+    constructor ({refs = []} = {}) {
+        this.refs = refs.filter(ast.type.isString);
+    }
+    get type () {
+        return this.constructor.name[2].toLowerCase() + this.constructor.name.substring(3);
+    }
     toString () {
         return '';
     }
 }
 class JSWhitespace {}
+class JSId extends JSNode {
+    constructor ({id, refs = [id]}) {
+        super({refs});
+        this.id = id;
+    }
+}
 class JSChunk extends JSNode {
-    constructor ({index, statements}) {
-        super();
-        this.index = index;
+    constructor ({refs, statements}) {
+        super({refs});
         this.statements = statements;
     }
     toString () {
@@ -535,34 +547,36 @@ class JSChunk extends JSNode {
     }
 }
 class JSStatement extends JSNode {
-    constructor ({expr} = {}) {
-        super();
-        this.indent = new JSWhitespace();
+    constructor ({indent = new JSWhitespace(), expr, refs = [expr]} = {}) {
+        super({refs});
+        this.indent = indent;
         this.expr = expr;
     }
 }
 class JSExpressionStatement extends JSStatement {
-    constructor ({expr}) {
-        super({expr});
+    constructor ({expr, refs = [expr]}) {
+        super({refs, expr});
     }
     toString () {
         return `${this.expr};`;
     }
 }
 class JSCheckStatus extends JSStatement {
+    constructor () {
+        super({refs: ['thread']});
+    }
     toString () {
         return 'if (thread.status !== 0) return;';
     }
 }
 class JSStore extends JSStatement {
-    constructor ({index, expr}) {
-        super({expr});
-        this.index = index;
+    constructor ({expr, refs = [expr]}) {
+        super({refs, expr});
     }
 }
 class JSStoreArg extends JSStore {
-    constructor ({index, expr, name, key}) {
-        super({index, expr});
+    constructor ({expr, name, key, refs = [expr, name]}) {
+        super({refs, expr});
         this.name = name;
         this.key = key;
     }
@@ -571,20 +585,27 @@ class JSStoreArg extends JSStore {
     }
 }
 class JSStoreVar extends JSStore {
-    constructor ({index, expr, name}) {
-        super({index, expr});
-        this.refs = 0;
+    constructor ({uses = 0, expr, name, refs = [expr]}) {
+        super({refs, expr});
+        this.uses = uses;
         this.name = name;
     }
     toString () {
-        if (this.refs === 0) return '';
+        if (this.uses === 0) return '';
         return `var ${this.name} = ${this.expr};`;
     }
 }
 class JSOperator extends JSNode {}
+class JSCast extends JSNode {
+    constructor ({expect, value, refs = [expect, value]}) {
+        super({refs});
+        this.expect = expect;
+        this.value = value;
+    }
+}
 class JSProperty extends JSOperator {
-    constructor ({lhs, member}) {
-        super();
+    constructor ({lhs, member, refs = [lhs]}) {
+        super({refs});
         this.lhs = lhs;
         this.member = member;
     }
@@ -594,8 +615,8 @@ class JSProperty extends JSOperator {
 }
 class JSGetVariable extends JSOperator {}
 class JSBinaryOperator extends JSOperator {
-    constructor ({operator, input1, input2}) {
-        super();
+    constructor ({operator, input1, input2, refs = [input1, input2]}) {
+        super({refs});
         this.operator = operator;
         this.input1 = input1;
         this.input2 = input2;
@@ -606,8 +627,8 @@ class JSBinaryOperator extends JSOperator {
 }
 class JSCall extends JSOperator {}
 class JSCallBlock extends JSCall {
-    constructor ({context, func, args}) {
-        super();
+    constructor ({context, func, args, refs = [context, func, args]}) {
+        super({refs});
         this.context = context;
         this.func = func;
         this.args = args;
@@ -616,10 +637,9 @@ class JSCallBlock extends JSCall {
         return `${this.func}.call(${this.context}, ${this.args}, blockUtility)`;
     }
 }
-class JSCallMember extends JSCall {}
 class JSCallFunction extends JSCall {
-    constructor ({func, args}) {
-        super();
+    constructor ({func, args, refs = [func, args]}) {
+        super({refs});
         this.func = func;
         this.args = args;
     }
@@ -628,12 +648,12 @@ class JSCallFunction extends JSCall {
     }
 }
 class JSFactory extends JSNode {
-    constructor ({debugName}) {
-        super();
+    constructor ({debugName, bindings = [], dereferences = [], chunks = [], refs}) {
+        super({refs});
         this.debugName = debugName;
-        this.bindings = [];
-        this.dereferences = [];
-        this.chunks = [];
+        this.bindings = bindings;
+        this.dereferences = dereferences;
+        this.chunks = chunks;
     }
     toString () {
         return [
@@ -645,9 +665,537 @@ class JSFactory extends JSNode {
         ].join('')
     }
 }
-class JSPrinter {
-    visit (node) {
+const ast = {
+    clone (node) {
+        if (Array.isArray(node)) {
+            return node.map(item => item instanceof JSNode ? item : ast.clone(item));
+        } else if (typeof node === 'object' && node) {
+            const newNode = {};
+            for (const key in node) {
+                if (!(node[key] instanceof JSNode)) {
+                    newNode[key] = ast.clone(node[key]);
+                } else newNode[key] = node[key];
+            }
+            if (node instanceof JSNode) return new node.constructor(newNode);
+            return newNode;
+        }
+        return node;
+    },
+    cloneDeep (node) {
+        if (Array.isArray(node)) {
+            return node.map(ast.cloneDeep);
+        } else if (typeof node === 'object' && node) {
+            const newNode = {};
+            for (const key in node) newNode[key] = ast.cloneDeep(node[key]);
+            if (node instanceof JSNode) return new node.constructor(newNode);
+            return newNode;
+        }
+        return node;
+    },
 
+    id (id) {
+        return new JSId({id});
+    },
+    chunk (statements = []) {
+        return new JSChunk({statements});
+    },
+    expressionStatement (expr) {
+        return new JSExpressionStatement({expr});
+    },
+    checkStatus () {
+        return new JSCheckStatus();
+    },
+    storeArg (name, key, expr) {
+        return new JSStoreArg({name, key, expr});
+    },
+    storeVar (name, expr) {
+        return new JSStoreVar({name, expr});
+    },
+    cast (expect, value) {
+        return new JSCast({expect, value});
+    },
+    property (lhs, member) {
+        return new JSProperty({lhs, member});
+    },
+    binaryOperator (operator, input1, input2) {
+        return new JSBinaryOperator({operator, input1, input2});
+    },
+    callBlock (context, func, args) {
+        return new JSCallBlock({context, func, args});
+    },
+    callFunction (func, args) {
+        return new JSCallFunction({func, args});
+    },
+    factory (debugName) {
+        return new JSFactory({debugName});
+    },
+    type: {
+        isBoolean (node) {
+            return typeof node === 'boolean';
+        },
+        isNumber (node) {
+            return typeof node === 'number';
+        },
+        isString (node) {
+            return typeof node === 'string';
+        },
+        isId (node) {
+            return node instanceof JSId;
+        },
+        isChunk (node) {
+            return node instanceof JSChunk;
+        },
+        isStatement (node) {
+            return node instanceof JSStatement;
+        },
+        isExpressionStatement (node) {
+            return node instanceof JSExpressionStatement;
+        },
+        isCheckStatus (node) {
+            return node instanceof JSCheckStatus;
+        },
+        isStore (node) {
+            return node instanceof JSStore;
+        },
+        isStoreArg (node) {
+            return node instanceof JSStoreArg;
+        },
+        isStoreVar (node) {
+            return node instanceof JSStoreVar;
+        },
+        isOperator (node) {
+            return node instanceof JSOperator;
+        },
+        isCast (node) {
+            return node instanceof JSCast;
+        },
+        isProperty (node) {
+            return node instanceof JSProperty;
+        },
+        isBinaryOperator (node) {
+            return node instanceof JSBinaryOperator;
+        },
+        isCall (node) {
+            return node instanceof JSCall;
+        },
+        isCallBlock (node) {
+            return node instanceof JSCallBlock;
+        },
+        isCallFunction (node) {
+            return node instanceof JSCallFunction;
+        },
+        isFactory (node) {
+            return node instanceof JSFactory;
+        }
+    }
+};
+class JSToken extends JSNode {
+    constructor ({token}) {
+        super();
+        this.token = token;
+    }
+}
+const code = {
+    t (token) {
+        return code.token(token);
+    },
+    token (token) {
+        return new JSToken({token});
+    }
+};
+
+class Path {
+    constructor (parentPath) {
+        const {pathArray, parents} = parentPath;
+        this.parentPath = this;
+        this.pathArray = pathArray;
+        this.parents = parents;
+        this.node = parents[parents.length - 1];
+        this.changedNodes = [];
+        if (parentPath instanceof Path) {
+            this.parentPath = parentPath.parentPath;
+            this.parents = parents.slice();
+            this.changedNodes = parentPath.changedNodes;
+        }
+    }
+    get length () {
+        return this.pathArray.length;
+    }
+    get key () {
+        return this.pathArray[this.length - 1];
+    }
+    get parent () {
+        const newPathArray = this.pathArray.slice(0, this.length - 1);
+        return new Path(this).setPath(newPathArray);
+    }
+    get parentKey () {
+        return this.pathArray[this.length - 2];
+    }
+    get parentNode () {
+        return this.parents[this.length - 2];
+    }
+    static clonePath (path) {
+        return new Path({})
+    }
+    static fromRoot (root) {
+        return new Path({
+            pathArray: ['root'],
+            parents: [root]
+        });
+    }
+    static fromPath (path) {
+        return new Path(path);
+    }
+    setPath (pathArray) {
+        const parents = this.parents;
+        let i = 1;
+        let node = parents[0];
+        for (; node && i < pathArray.length; i++) {
+            node = parents[i - 1][pathArray[i]];
+            if (node) parents[i] = node;
+            else i = 1;
+        }
+        this.pathArray = pathArray;
+        this.pathArray.length = i;
+        this.parents.length = i;
+        this.node = this.parents[i - 1];
+        return this;
+    }
+    skip () {
+        this.node = null;
+    }
+    stop () {
+        this.pathArray.length = 0;
+    }
+    setKey (key, newNode) {
+        const parentDepth = this.parents.length - 1;
+        return this._insert(parentDepth, key, newNode);
+    }
+    getKey (key) {
+        return new Path(this).setPath([...this.pathArray, key]);
+    }
+    earlierPath (laterPath) {
+        let i = 1;
+        const length = Math.min(this.pathArray.length, laterPath.pathArray.length);
+        for (; i < length && this.pathArray[i] === laterPath.pathArray[i]; i++) {}
+        if (i < length) {
+            const key = this.pathArray[i];
+            const laterKey = laterPath.pathArray[i];
+            if (typeof key === 'number') {
+                return key < laterKey;
+            } else {
+                const parent = this.parents[i - 1];
+                const siblings = Object.keys(parent);
+                return siblings.indexOf(key) < siblings.indexOf(laterKey);
+            }
+        }
+        return this.pathArray.length < laterPath.pathArray.length;
+    }
+    confirmPath () {
+        for (let i = this.pathArray.length - 1; i > 0; i--) {
+            const node = this.parents[i];
+            const parent = this.parents[i - 1];
+            const parentKey = this.pathArray[i];
+            if (parent[parentKey] !== node) {
+                if (Array.isArray(parent)) {
+                    const newIndex = parent.indexOf(node);
+                    if (newIndex === -1) throw new Error('path.node must be a descendent of Path\'s root');
+                    this.pathArray[i] = newIndex;
+                } else {
+                    const newIndex = Object.values(parent).indexOf(node);
+                    if (newIndex === -1) throw new Error('path.node must be a descendent of Path\'s root');
+                    this.pathArray[i] = Object.keys(parent)[newIndex];
+                }
+            }
+        }
+    }
+    confirmArrayParent () {
+        const parent = this.parents[this.parents.length - 2];
+        if (!Array.isArray(parent)) throw new Error('Must use insertBefore with a parent array');
+    }
+    remove () {
+        this.confirmPath();
+        const parent = this.parents[this.parents.length - 2];
+        const parentKey = this.pathArray[this.pathArray.length - 1];
+        if (Array.isArray(parent)) parent.splice(Number(parentKey), 1);
+        else parent[parentKey] = null;
+        this.node = null;
+    }
+    replaceWith (newNode) {
+        if (this.length === 1) {
+            this.parents[0] = newNode;
+            this.node = newNode;
+            this.changedNodes.push({pathArray: this.pathArray.slice(), node: newNode});
+            return new Path(this);
+        }
+        this.confirmPath();
+        const parent = this.parents[this.parents.length - 2];
+        const parentKey = this.pathArray[this.pathArray.length - 1];
+        parent[parentKey] = newNode;
+        this.changedNodes.push({pathArray: this.pathArray.slice(), node: newNode});
+        return new Path(this);
+    }
+    _insert (depth, index, newNode) {
+        this.confirmPath();
+        const parent = this.parents[depth];
+        if (Array.isArray(parent)) parent.splice(Number(index), 0, newNode);
+        else parent[index] = newNode;
+        const newPathArray = this.pathArray.slice();
+        if (depth <= newPathArray.length) {
+            newPathArray.length = depth;
+            newPathArray[depth] = index;
+        }
+        const newPath = new Path(this).setPath(newPathArray);
+        if (newPath.earlierPath(this)) this.changedNodes.push({pathArray: newPathArray, node: newNode});
+        return newPath;
+    }
+    insertSibling (index, newNode) {
+        this.confirmArrayParent();
+        const parentDepth = this.parents.length - 2;
+        return this._insert(parentDepth, index, newNode);
+    }
+    insertFirst (newNode) {
+        return this.insertSibling(0, newNode);
+    }
+    insertLast (newNode) {
+        const parent = this.parents[this.parents.length - 2];
+        return this.insertSibling(parent.length, newNode);
+    }
+    insertBefore (newNode) {
+        const parentKey = this.pathArray[this.pathArray.length - 1];
+        return this.insertSibling(parentKey, newNode);
+    }
+    insertAfter (newNode) {
+        const parentKey = this.pathArray[this.pathArray.length - 1];
+        return this.insertSibling(parentKey + 1, newNode);
+    }
+    insertChild (index, newNode) {
+        this.confirmArrayParent();
+        const parentDepth = this.parents.length - 1;
+        return this._insert(parentDepth, index, newNode);
+    }
+    prependChild () {
+        return this.insertChild(0, newNode);
+    }
+    appendChild () {
+        const node = this.node;
+        return this.insertChild(node.length, newNode);
+    }
+}
+class Visitor {
+    factory () {}
+    enterFactory () {}
+    exitFactory () {}
+}
+class Transformer {
+    constructor () {
+        this.path = null;
+        this.visitors = null;
+        this.states = null;
+        this.i = 0;
+        this.queued = null;
+    }
+    transform (root, visitors, states) {
+        this.i = 0;
+        this.queued = []
+        this.path = Path.fromRoot(root);
+        this.visitors = visitors || [];
+        this.states = states || [];
+        this.queue('enter', [{pathArray: this.path.pathArray, node: root}]);
+        while (this.i < this.queued.length) {
+            const item = this.queued[this.i];
+            this.path.setPath(item.pathArray);
+            if (this.i > 100000 || this.path.length > 100) return;
+            if (this.path.node === item.node) {
+                if (item.mode === 'enter') {
+                    this.enter();
+                } else {
+                    this.exit();
+                }
+                if (this.path.length === 0) break;
+                this.queue('enter', this.path.changedNodes);
+                this.path.changedNodes.length = 0;
+            }
+            this.i += 1;
+        }
+    }
+    queue (mode, newNodes) {
+        this.queued.splice(this.i + 1, 0, ...newNodes.map(info => ({mode, ...info})));
+    }
+    visit (keys) {
+        const node = this.path.node;
+        for (let i = 0; node === this.path.node && i < this.visitors.length; i++) {
+            const visitor = this.visitors[i];
+            for (let j = 0; j < keys.length; j++) {
+                if (visitor[keys[j]]) {
+                    visitor[keys[j]](node, this.path, this.states[i]);
+                }
+            }
+        }
+    }
+    nodeKeys (node) {
+        let keys;
+        if (Array.isArray(node)) keys = Array.from(node, (_, i) => i);
+        else if (typeof node === 'object' && node) keys = Object.keys(node);
+        else keys = [];
+        return keys.map(key => ({
+            pathArray: [...this.path.pathArray, key],
+            node: node[key]
+        }));
+    }
+    visitorKeys (node) {
+        const keys = new Set();
+        if (Array.isArray(node)) {
+            keys.add('array');
+        } else if (typeof node === 'object') {
+            while (node && node.type) {
+                keys.add(node.type);
+                node = Object.getPrototypeOf(node);
+            }
+        } else {
+            keys.add(typeof node);
+        }
+        return Array.from(keys);
+    }
+    visitorEnterKeys (node) {
+        return ['enter', ...this.visitorKeys(node).map(type => `enter${type.toUpperCase() + type.substring(1)}`)];
+    }
+    visitorExitKeys (node) {
+        return ['exit', ...this.visitorKeys(node).map(type => `exit${type.toUpperCase() + type.substring(1)}`)];
+    }
+    enter () {
+        const node = this.path.node;
+        this.visit([...this.visitorKeys(node), ...this.visitorEnterKeys(node)]);
+        if (node === this.path.node) this.queue('exit', [{node, pathArray: this.path.pathArray}]);
+        if (node === this.path.node) this.queue('enter', this.nodeKeys(node));
+    }
+    exit () {
+        const node = this.path.node;
+        this.visit(this.visitorExitKeys(node));
+    }
+}
+class JSCountRefs {
+    node (node, path, state) {
+        const {refs} = node;
+        if (ast.type.isId(node) && refs.length === 0) debugger;
+        for (let i = 0; i < refs.length; i++) {
+            const refNode = state.vars[refs[i]];
+            if (refNode) refNode.uses++;
+        }
+    }
+    storeVar (node, path, state) {
+        node.uses = 0;
+        state.vars[node.name] = node;
+    }
+}
+class JSFindArg {
+    storeArg (node, path, state) {
+        state.paths[node.name] = state.paths[node.name] || {};
+        state.paths[node.name][node.key] = path.pathArray;
+    }
+}
+const findArg = new JSFindArg();
+class JSInlineOperators {
+    call (node, path, state) {
+        const info = state.opInfos.find(info => info.id === node.args);
+        if (info && /^operator_(add|subtract|multiply|divide)/.test(info.op.opcode)) {
+            const store1Id = ast.property(node.args, 'NUM1');
+            const store2Id = ast.property(node.args, 'NUM2');
+
+            let operator = '+';
+            if (info.op.opcode === 'operator_subtract') operator = '-';
+            if (info.op.opcode === 'operator_multiply') operator = '*';
+            if (info.op.opcode === 'operator_divide') operator = '/';
+
+            path.replaceWith(ast.binaryOperator(operator, ast.cast('toNumber', store1Id), ast.cast('toNumber', store2Id)));
+        }
+    }
+    property (node, path, state) {
+        if (typeof node.lhs === 'string' && typeof node.member === 'string') {
+            if (!state.paths) {
+                state.paths = {};
+                const finder = new Transformer();
+                finder.transform(path.parents[0], [findArg], [state]);
+            }
+
+            const storePathArray = state.paths[node.lhs] && state.paths[node.lhs][node.member];
+
+            if (!storePathArray) {
+                // const info = state.opInfos.find(info => info.parentId === node.lhs && info.op._parentKey === node.member);
+                // if (info) path.replaceWith(Cast.toNumber(info.op._argValues[node.member]));
+            } else {
+                const storePath = new Path(path).setPath(storePathArray);
+                const storeExpr = storePath.node.expr;
+
+                if (storeExpr instanceof JSCall || storeExpr instanceof JSProperty || storeExpr instanceof JSBinaryOperator) {
+                    path.replaceWith(ast.cloneDeep(storeExpr));
+                    storePath.remove();
+                } else {
+                    const storeId = `${node.lhs}_${node.member}`;
+                    path.replaceWith(ast.id(storeId));
+                    storePath.replaceWith(ast.storeVar(storeId, ast.cloneDeep(storeExpr)));
+                }
+            }
+        }
+    }
+}
+class JSPrinter {
+    boolean (node, path, state) {
+        state.source += node;
+    }
+    number (node, path, state) {
+        state.source += node;
+    }
+    string (node, path, state) {
+        state.source += node;
+    }
+    array (node, path, state) {
+        if (path.key === 'refs') path.skip();
+    }
+    checkStatus (node, path, state) {
+        state.source += 'if (thread.status !== 0) return;';
+    }
+    expressionStatement ({expr}, path, state) {
+        path.replaceWith(ast.chunk([expr, code.t(';')]));
+    }
+    storeArg ({name, key, expr}, path, state) {
+        const {t} = code;
+        path.replaceWith(ast.chunk([name, t('.'), key, t(' = '), expr, t(';')]));
+    }
+    storeVar ({uses, name, expr}, path, state) {
+        const {t} = code;
+        if (uses === 0) return path.replaceWith(ast.chunk([t('/* skipping unused var '), name, t('. */')]));
+        path.replaceWith(ast.chunk([t('var '), name, t(' = '), expr, t(';'), t(` /* uses: ${uses} */`)]));
+    }
+    cast (node, path, state) {
+        const {t} = code;
+        path.replaceWith(ast.chunk([node.expect, t('('), node.value, t(')')]));
+    }
+    property (node, path, state) {
+        const {t} = code;
+        path.replaceWith(ast.chunk([node.lhs, t('.'), node.member]));
+    }
+    binaryOperator ({operator, input1, input2}, path, state) {
+        const {t} = code;
+        path.replaceWith(ast.chunk([t('('), input1, t(' '), operator, t(' '), input2, t(')')]));
+    }
+    callBlock ({context, func, args}, path, state) {
+        const {t} = code;
+        path.replaceWith(ast.chunk([func, t('.call('), context, t(', '), args, t(', blockUtility)')]))
+    }
+    callFunction ({func, args}, path, state) {
+        const {t} = code;
+        path.replaceWith(ast.chunk([func, t('('), args, t(', blockUtility)')]));
+    }
+    factory ({bindings, dereferences, debugName, chunks}, path, state) {
+        const {t} = code;
+        path.replaceWith(ast.chunk([
+            bindings,
+            t('return function '), debugName, t(' (_, blockUtility) {'),
+            dereferences,
+            chunks,
+            t('};')
+        ]));
     }
 }
 
@@ -664,44 +1212,39 @@ const compile = function (blockCached) {
         debugName: `${blockCached.opcode}_${ops.length}`
     });
 
-    factoryAST.dereferences.push(new JSStoreVar({
-        name: 'thread',
-        expr: new JSProperty({
-            lhs: 'blockUtility',
-            member: 'thread'
-        })
-    }));
+    factoryAST.dereferences.push(
+        ast.storeVar('thread', ast.property('blockUtility', 'thread'))
+    );
 
-    const findVar = function (name) {
-        return (
-            factoryAST.dereferences.find(store => store.name === name) ||
-            factoryAST.bindings.find(store => store.name === name)
-        );
-    }
-
-    const addRef = function (name) {
-        const node = findVar(name);
-        if (node) node.refs++;
-    };
-
-    const removeRef = function (name) {
-        const node = findVar(name);
-        if (node) node.refs--;
-    };
+    // const findVar = function (name) {
+    //     return (
+    //         [].concat.apply([], factoryAST.chunks.map(chunk => chunk.statements.filter(store => store instanceof JSStoreVar))).find(store => store.name === name) ||
+    //         factoryAST.dereferences.find(store => store.name === name) ||
+    //         factoryAST.bindings.find(store => store.name === name)
+    //     );
+    // }
+    //
+    // const addRef = function (name) {
+    //     const node = findVar(name);
+    //     if (node) node.uses++;
+    // };
+    //
+    // const removeRef = function (name) {
+    //     const node = findVar(name);
+    //     if (node) node.uses--;
+    // };
 
     const bind = function (i, name, value) {
         if (value && !bindings[name]) {
             bindings[name] = value;
-            factoryAST.bindings.push(new JSStoreVar({
-                index: i,
-                name,
-                expr: new JSProperty({
-                    lhs: `bindings`,
-                    member: name
-                })
-            }));
+            factoryAST.bindings.push(ast.storeVar(name, ast.property('bindings', name)));
         }
     };
+
+    bind(-1, 'toNumber', Cast.toNumber);
+    bind(-1, 'commandArg', {mutation: null, VALUE: null});
+
+    const opInfos = [];
 
     for (let i = 0; i < ops.length; i++) {
         const op = ops[i];
@@ -709,9 +1252,11 @@ const compile = function (blockCached) {
         const func = op._blockFunctionUnbound;
         const context = op._blockFunctionContext;
 
-        const id = findId(bindings, argValues, null, 'arg_');
+        const id = findId(bindings, argValues, `arg_${i}`, 'arg_');
         const contextId = findId(bindings, context, context && context.constructor.name, 'ctx_');
         const functionId = findId(bindings, func, op.opcode, 'fn_');
+
+        opInfos[i] = {op, id, parentId: null, contextId, functionId};
 
         bind(i, contextId, context);
         bind(i, functionId, func);
@@ -720,352 +1265,265 @@ const compile = function (blockCached) {
 
     for (let i = 0; i < ops.length; i++) {
         const op = ops[i];
-        const argValues = op._argValues;
         const parentValues = op._parentValues;
-        const func = op._blockFunctionUnbound;
-        const context = op._blockFunctionContext;
 
-        const id = findId(bindings, argValues);
         const parentI = ops.findIndex(({_argValues}) => _argValues === parentValues);
-        const parentId = parentI > -1 ? findId(bindings, parentValues) : null;
-        const contextId = findId(bindings, context, context && context.constructor.name, 'ctx_');
-        const functionId = findId(bindings, func, op.opcode, 'fn_');
+        opInfos[i].parentId = parentI > -1 ? findId(bindings, parentValues) : 'commandArg';
 
-        // let statement = JSNode.callBlock(contextId, functionId, id);
-        // addRef(statement);
-        let statement = new JSCallBlock({
-            context: contextId,
-            func: functionId,
-            args: id
-        });
-        addRef(contextId);
-        addRef(functionId);
-        addRef(id);
-        if (parentId) {
-            // statement = JSNode.storeArg(i, parentId, op._parentKey, statement);
-            statement = new JSStoreArg({
-                index: i,
-                name: `${parentId}`,
-                key: `${op._parentKey}`,
-                expr: statement
-            });
-        } else {
-            // statement = JSNode.expressionStatement(statement);
-            statement = new JSExpressionStatement({
-                expr: statement
-            });
-        }
-        // const chunk = JSNode.chunk(i, [statement, new JSCheckStatus()]);
-        // factoryAST.chunks.push(chunk);
-        factoryAST.chunks.push(new JSChunk({
-            index: i,
-            statements: [
-                statement,
-                new JSCheckStatus()
-            ]
-        }));
-        addRef('thread');
+        const {id, parentId, contextId, functionId} = opInfos[i];
+        factoryAST.chunks.push([
+            ast.storeArg(parentId, op._parentKey, ast.callBlock(contextId, functionId, id)),
+            ast.checkStatus()
+        ]);
     }
 
-    for (let i = 0; i < factoryAST.chunks.length; i++) {
-        const op = ops[i];
-        const chunk = factoryAST.chunks[i];
+    let start = Date.now();
+    const inlineState = {opInfos, paths: null};
+    new Transformer().transform(factoryAST, [new JSInlineOperators()], [inlineState]);
+    const countRefs = {vars: {}};
+    new Transformer().transform(factoryAST, [new JSCountRefs()], [countRefs]);
+    const factoryClone = ast.cloneDeep(factoryAST);
+    const renderState = {source: ''};
+    new Transformer().transform(factoryClone, [new JSPrinter()], [renderState]);
+    (window.AST_COMPILE = (window.AST_COMPILE || [])).push([factoryAST, renderState]);
+    console.log(Date.now() - start);
 
-        const context = op._blockFunctionContext;
-        const func = op._blockFunctionUnbound;
-        const funcsrc = func.toString();
-
-        const statement = chunk.statements[0];
-        let call;
-        if (statement instanceof JSStoreArg) {
-            call = statement.expr;
-        } else if (statement instanceof JSExpressionStatement) {
-            call = statement.expr;
-        }
-
-        if (!/this/.test(funcsrc)) {
-            statement.expr = new JSCallFunction({
-                func: call.func,
-                args: call.args
-            });
-            removeRef(call.context);
-        } else if (context) {
-            const methodId = [
-                ...Object.getOwnPropertyNames(context),
-                ...Object.getOwnPropertyNames(Object.getPrototypeOf(context))
-            ].find(key => context[key] === func);
-            if (methodId && safeId(methodId) === methodId) {
-                statement.expr = new JSCallFunction({
-                    func: new JSProperty({
-                        lhs: call.context,
-                        member: methodId
-                    }),
-                    args: call.args
-                });
-                removeRef(call.func);
-            }
-        }
-
-        if (
-            // this opcode does not modify the thread status
-            /^(operator|data|argument)/.test(op.opcode) ||
-            // no need to check the last operation the function is done
-            i === ops.length - 1
-        ) {
-            const before = chunk.statements.length;
-            chunk.statements = chunk.statements
-                .filter(stmt => !(stmt instanceof JSCheckStatus));
-            const after = chunk.statements.length;
-            for (let j = 0; j < (before - after); j++) removeRef('thread');
-        }
-
-        if (
-            op.opcode === 'vm_may_continue' &&
-            (
-                // is the first operation
-                i === 0 ||
-                // or last opcode does not modify the stack
-                /^(operator|data|argument)/.test(ops[i - 1].opcode)
-            )
-        ) {
-            const call = chunk.statements[0].expr;
-            call.context && removeRef(call.context);
-            call.func && removeRef(call.func);
-            removeRef(call.args);
-            if (chunk.statements.length === 1) addRef('thread');
-
-            if (i === ops.findIndex(({opcode}) => opcode === 'vm_may_continue') && i < ops.length - 1) {
-                // the first vm_may_continue operation
-                chunk.statements = [
-                    new JSExpressionStatement({
-                        expr: `if (thread.continuous) thread.reuseStackForNextBlock('${op._argValues.NEXT_STACK}')`
-                    }),
-                    new JSExpressionStatement({
-                        expr: `else return thread.status = ${Thread.STATUS_INTERRUPT}`
-                    })
-                ];
-                if (i === ops.length - 1) {
-                    // also the last
-                    chunk.statements[1] = new JSExpressionStatement({
-                        expr: `thread.status = ${Thread.STATUS_INTERRUPT}`
-                    });
-                }
-            } else if (i < ops.length - 1) {
-                // not the first or last operation
-                chunk.statements = [
-                    new JSExpressionStatement({
-                        expr: `thread.reuseStackForNextBlock('${op._argValues.NEXT_STACK}')`
-                    })
-                ];
-            } else {
-                // not the first but the last operation
-                chunk.statements = [
-                    new JSExpressionStatement({
-                        expr: `thread.reuseStackForNextBlock(null)`
-                    }),
-                    new JSExpressionStatement({
-                        expr: `thread.status = ${Thread.STATUS_INTERRUPT}`
-                    })
-                ];
-                if (i === ops.findIndex(({opcode}) => opcode === 'vm_may_continue')) {
-                    chunk.statements[0] = new JSExpressionStatement({
-                        expr: `if (thread.continuous) thread.reuseStackForNextBlock(null)`
-                    });
-                }
-            }
-        }
-
-        // if (/^operator_(add|subtract|multiply|divide)/.test(op.opcode)) {
-        //     const argValues = op._argValues;
-        //     const store1Index = ops.findIndex(({_parentValues, _parentKey}) => _parentValues === argValues && _parentKey === 'NUM1');
-        //     const store2Index = ops.findIndex(({_parentValues, _parentKey}) => _parentValues === argValues && _parentKey === 'NUM2');
-        //
-        //     let store1Id = `${findId(bindings, argValues)}.NUM1`;
-        //     if (store1Index > -1) {
-        //         const chunk1 = factoryAST.chunks[store1Index];
-        //         const stmt1 = chunk1.statements[0];
-        //         if (stmt1 instanceof JSStoreArg) {
-        //             store1Id = `var_${store1Index}`;
-        //             chunk1.statements[0] = new JSStoreVar({
-        //                 index: store1Index,
-        //                 name: store1Id,
-        //                 expr: stmt1.expr
-        //             });
-        //             chunk1.statements[0].refs = 1;
-        //         }
-        //     }
-        //     let store2Id = `${findId(bindings, argValues)}.NUM2`;
-        //     if (store2Index > -1) {
-        //         const chunk2 = factoryAST.chunks[store2Index];
-        //         const stmt2 = chunk2.statements[0];
-        //         if (stmt2 instanceof JSStoreArg) {
-        //             store2Id = `var_${store2Index}`;
-        //             chunk2.statements[0] = new JSStoreVar({
-        //                 index: store2Index,
-        //                 name: store2Id,
-        //                 expr: stmt2.expr
-        //             });
-        //             chunk2.statements[0].refs = 1;
-        //         }
-        //     }
-        //
-        //     let operator = '+';
-        //     if (op.opcode === 'operator_subtract') operator = '-';
-        //     if (op.opcode === 'operator_multiply') operator = '*';
-        //     if (op.opcode === 'operator_divide') operator = '/';
-        //
-        //     const expr = chunk.statements[0].expr;
-        //     if (store1Index > -1 && store2Index > -1) {
-        //         removeRef(expr.args);
-        //     }
-        //
-        //     chunk.statements[0].expr = new JSBinaryOperator({
-        //         operator,
-        //         input1: store1Id,
-        //         input2: store2Id
-        //     });
-        // }
-    }
-
-    // for (let i = 0; i < ops.length; i++) {
+    // for (let i = 0; i < factoryAST.chunks.length; i++) {
     //     const op = ops[i];
-    //
-    //     const id = compileId(i);
-    //     bindings.args[id] = op._argValues;
+    //     const chunk = factoryAST.chunks[i];
     //
     //     const context = op._blockFunctionContext;
-    //     let contextId;
-    //
     //     const func = op._blockFunctionUnbound;
-    //     let functionId;
-    //     if (context) {
-    //         for (const key of [
+    //     const funcsrc = func.toString();
+    //
+    //     const statement = chunk.statements[0];
+    //     let call;
+    //     if (statement instanceof JSStatement) {
+    //         call = statement.expr;
+    //     }
+    //
+    //     if (!/this/.test(funcsrc)) {
+    //         statement.expr = new JSCallFunction({
+    //             func: call.func,
+    //             args: call.args
+    //         });
+    //         removeRef(call.context);
+    //     } else if (context) {
+    //         const methodId = [
     //             ...Object.getOwnPropertyNames(context),
     //             ...Object.getOwnPropertyNames(Object.getPrototypeOf(context))
-    //         ]) {
-    //             if (context[key] === func) {
-    //                 functionId = key;
-    //                 break;
-    //             }
+    //         ].find(key => context[key] === func);
+    //         if (methodId && safeId(methodId) === methodId) {
+    //             statement.expr = new JSCallFunction({
+    //                 func: new JSProperty({
+    //                     lhs: call.context,
+    //                     member: methodId
+    //                 }),
+    //                 args: call.args
+    //             });
+    //             removeRef(call.func);
     //         }
     //     }
     //
-    //     const supportReturn = /return|=>/.test(func.toString());
-    //     const supportThis = /this/.test(func.toString());
-    //     const beforeLastOp = i < ops.length - 1;
-    //     const needStatus = !/^(data|operator|argument)/.test(op.opcode);
-    //     const isMayContinue = op.opcode === 'vm_may_continue';
-    //     const afterStackChange = i > 0 && /^(control|procedure)/.test(ops[i - 1].opcode);
-    //     const checkContinuous = ops.findIndex(({opcode}) => opcode === op.opcode) === i;
-    //     const supportStatusChange = beforeLastOp && (
-    //         isMayContinue ? (checkContinuous || afterStackChange) : needStatus
-    //     );
-    //     // const supportStatusChange = beforeLastOp && needStatus;
-    //
-    //     const isDataVariable = op.opcode === 'data_variable';
-    //     const isBinaryOperator = /^operator_(add|subtract|multiply|divide)/.test(op.opcode);
-    //
-    //     if (isMayContinue && beforeLastOp && !checkContinuous && !afterStackChange) {
-    //         delete bindings.args[id];
-    //         source += `    thread.reuseStackForNextBlock('${op._argValues.NEXT_STACK}');\n`;
-    //         continue;
+    //     if (
+    //         // this opcode does not modify the thread status
+    //         /^(operator|data|argument)/.test(op.opcode) ||
+    //         // no need to check the last operation the function is done
+    //         i === ops.length - 1
+    //     ) {
+    //         const before = chunk.statements.length;
+    //         chunk.statements = chunk.statements
+    //             .filter(stmt => !(stmt instanceof JSCheckStatus));
+    //         const after = chunk.statements.length;
+    //         for (let j = 0; j < (before - after); j++) removeRef('thread');
     //     }
-    //     if (supportReturn) {
-    //         const parentValues = op._parentValues;
-    //         let parentI = ops.findIndex(op => op._argValues === parentValues);
-    //         let parentId;
-    //         if (parentI === -1) {
-    //             parentI = i;
-    //             // bindings.out[compileId(parentI)] = parentValues;
-    //             parentId = `out_${compileId(parentI)}`;
-    //             source += `    `;
+    //
+    //     if (
+    //         op.opcode === 'vm_may_continue' &&
+    //         (
+    //             // is the first operation
+    //             i === 0 ||
+    //             // or last opcode does not modify the stack
+    //             /^(operator|data|argument)/.test(ops[i - 1].opcode)
+    //         )
+    //     ) {
+    //         const call = chunk.statements[0].expr;
+    //         call.context && removeRef(call.context);
+    //         call.func && removeRef(call.func);
+    //         removeRef(call.args);
+    //         if (chunk.statements.length === 1) addRef('thread');
+    //
+    //         if (i === ops.findIndex(({opcode}) => opcode === 'vm_may_continue') && i < ops.length - 1) {
+    //             // the first vm_may_continue operation
+    //             chunk.statements = [
+    //                 new JSExpressionStatement({
+    //                     expr: `if (thread.continuous) thread.reuseStackForNextBlock('${op._argValues.NEXT_STACK}')`
+    //                 }),
+    //                 new JSExpressionStatement({
+    //                     expr: `else return thread.status = ${Thread.STATUS_INTERRUPT}`
+    //                 })
+    //             ];
+    //             if (i === ops.length - 1) {
+    //                 // also the last
+    //                 chunk.statements[1] = new JSExpressionStatement({
+    //                     expr: `thread.status = ${Thread.STATUS_INTERRUPT}`
+    //                 });
+    //             }
+    //         } else if (i < ops.length - 1) {
+    //             // not the first or last operation
+    //             chunk.statements = [
+    //                 new JSExpressionStatement({
+    //                     expr: `thread.reuseStackForNextBlock('${op._argValues.NEXT_STACK}')`
+    //                 })
+    //             ];
     //         } else {
-    //             const isParentOperator = /^operator_(add|subtract|multiply|divide)/.test(ops[parentI].opcode);
-    //             if (isParentOperator) {
-    //                 parentId = `var_${id}`;
-    //                 source += `    var ${parentId} = `;
-    //             } else {
-    //                 parentId = `arg_${compileId(parentI)}`;
-    //                 source += `    ${parentId}.${op._parentKey} = `;
+    //             // not the first but the last operation
+    //             chunk.statements = [
+    //                 new JSExpressionStatement({
+    //                     expr: `thread.reuseStackForNextBlock(null)`
+    //                 }),
+    //                 new JSExpressionStatement({
+    //                     expr: `thread.status = ${Thread.STATUS_INTERRUPT}`
+    //                 })
+    //             ];
+    //             if (i === ops.findIndex(({opcode}) => opcode === 'vm_may_continue')) {
+    //                 chunk.statements[0] = new JSExpressionStatement({
+    //                     expr: `if (thread.continuous) thread.reuseStackForNextBlock(null)`
+    //                 });
     //             }
     //         }
-    //     } else source += '    ';
-    //     if (isDataVariable) {
-    //         source += `thread.target.lookupOrCreateVariable('${op._argValues.VARIABLE.id}', '${op._argValues.VARIABLE.name}').value;\n`;
-    //         continue;
     //     }
-    //     if (isBinaryOperator) {
-    //         const aIndex = ops.findIndex(a => a._parentValues === op._argValues && a._parentKey === 'NUM1');
-    //         const aId = aIndex === -1 ? `arg_${id}.NUM1` : `var_${compileId(aIndex)}`;
-    //         const bIndex = ops.findIndex(b => b._parentValues === op._argValues && b._parentKey === 'NUM2');
-    //         const bId = bIndex === -1 ? `arg_${id}.NUM2` : `var_${compileId(bIndex)}`;
-    //         if (aIndex > -1 && bIndex > -1) {
-    //             delete bindings.args[id];
+    //
+    //     if (op.opcode === 'data_variable' || op.opcode === 'data_setvariableto') {
+    //         const argValues = op._argValues;
+    //         const localId = `local_${safeId(argValues.VARIABLE.name)}`;
+    //         if (!findVar(localId)) {
+    //             chunk.statements.unshift(new JSStoreVar({
+    //                 name: localId,
+    //                 expr: `target.lookupOrCreateVariable('${argValues.VARIABLE.id}', '${argValues.VARIABLE.name}')`
+    //             }));
+    //             if (!findVar('target')) {
+    //                 chunk.statements.unshift(new JSStoreVar({
+    //                     name: 'target',
+    //                     expr: 'blockUtility.target'
+    //                 }));
+    //             }
+    //             addRef('target');
     //         }
+    //         if (op.opcode === 'data_variable') {
+    //             const callIndex = chunk.statements.findIndex(st => st instanceof JSStoreArg);
+    //             const call = chunk.statements[callIndex].expr;
+    //             call.context && removeRef(call.context);
+    //             call.func && removeRef(call.func);
+    //             removeRef(call.args);
+    //             chunk.statements[callIndex].expr = new JSProperty({
+    //                 lhs: localId,
+    //                 member: 'value'
+    //             });
+    //         } else {
+    //             const callIndex = chunk.statements.findIndex(st => st instanceof JSExpressionStatement);
+    //             const call = chunk.statements[callIndex].expr;
+    //             call.context && removeRef(call.context);
+    //             call.func && removeRef(call.func);
+    //             chunk.statements.splice(callIndex, 1,
+    //                 new JSStoreArg({
+    //                     name: localId,
+    //                     key: 'value',
+    //                     expr: `${call.args}.VALUE`
+    //                 }),
+    //                 new JSExpressionStatement({
+    //                     expr: `if (${localId}.isCloud) blockUtility.ioQuery('cloud', 'requestUpdateVariable', [${localId}.name, ${call.args}.VALUE])`
+    //                 })
+    //             );
+    //         }
+    //         addRef(localId);
+    //     }
+    //
+    //     if (/^operator_(add|subtract|multiply|divide)/.test(op.opcode)) {
+    //         const argValues = op._argValues;
+    //         const store1Index = ops.findIndex(({_parentValues, _parentKey}) => _parentValues === argValues && _parentKey === 'NUM1');
+    //         const store2Index = ops.findIndex(({_parentValues, _parentKey}) => _parentValues === argValues && _parentKey === 'NUM2');
+    //
+    //         const id = findId(bindings, argValues);
+    //         // let store1Id = `${id}.NUM1`;
+    //         let store1Id = `${Cast.toNumber(argValues.NUM1)}`;
+    //         if (store1Index > -1) {
+    //             const chunk1 = factoryAST.chunks[store1Index];
+    //             const stmtIndex = chunk1.statements.findIndex(st => st instanceof JSStoreArg);
+    //             const stmt1 = chunk1.statements[stmtIndex];
+    //             if (stmt1) {
+    //                 if (stmt1.expr instanceof JSCall || stmt1.expr instanceof JSProperty) {
+    //                     chunk1.statements = chunk1.statements.slice(0, stmtIndex);
+    //                     store1Id = stmt1.expr;
+    //                 } else if (stmt1.expr instanceof JSBinaryOperator) {
+    //                     chunk1.statements = chunk1.statements.slice(0, stmtIndex);
+    //                     store1Id = `(${stmt1.expr})`;
+    //                 } else {
+    //                     store1Id = `var_${store1Index}`;
+    //                     chunk1.statements[stmtIndex] = new JSStoreVar({
+    //                         name: store1Id,
+    //                         expr: stmt1.expr
+    //                     });
+    //                     chunk1.statements[stmtIndex].uses = 1;
+    //                 }
+    //                 if (!/^operator_(add|subtract|multiply|divide|random|length|mod|round|mathop)$/.test(ops[store1Index].opcode)) {
+    //                     store1Id = `toNumber(${store1Id})`;
+    //                 }
+    //             }
+    //         }
+    //         // let store2Id = `${id}.NUM2`;
+    //         let store2Id = `${Cast.toNumber(argValues.NUM2)}`;
+    //         if (store2Index > -1) {
+    //             const chunk2 = factoryAST.chunks[store2Index];
+    //             const stmtIndex = chunk2.statements.findIndex(st => st instanceof JSStoreArg);
+    //             const stmt2 = chunk2.statements[stmtIndex];
+    //             if (stmt2) {
+    //                 if (stmt2.expr instanceof JSCall || stmt2.expr instanceof JSProperty) {
+    //                     chunk2.statements = chunk2.statements.slice(0, stmtIndex);
+    //                     store2Id = stmt2.expr;
+    //                 } else if (stmt2.expr instanceof JSBinaryOperator) {
+    //                     chunk2.statements = chunk2.statements.slice(0, stmtIndex);
+    //                     store2Id = `(${stmt2.expr})`;
+    //                 } else {
+    //                     store2Id = `var_${store2Index}`;
+    //                     chunk2.statements[stmtIndex] = new JSStoreVar({
+    //                         name: store2Id,
+    //                         expr: stmt2.expr
+    //                     });
+    //                     chunk2.statements[stmtIndex].uses = 1;
+    //                 }
+    //                 if (!/^operator_(add|subtract|multiply|divide|random|length|mod|round|mathop)$/.test(ops[store2Index].opcode)) {
+    //                     store2Id = `toNumber(${store2Id})`;
+    //                 }
+    //             }
+    //         }
+    //
     //         let operator = '+';
     //         if (op.opcode === 'operator_subtract') operator = '-';
     //         if (op.opcode === 'operator_multiply') operator = '*';
     //         if (op.opcode === 'operator_divide') operator = '/';
     //
-    //         bindings.functions['toNumber'] = Cast.toNumber;
-    //         source += `toNumber(${aId}) ${operator} toNumber(${bId});\n`;
-    //         continue;
-    //     }
-    //     if (supportThis) {
-    //         contextId = (Object.entries(bindings.contexts).find(([_, ctx]) => ctx === context) || [])[0];
-    //         if (context && !contextId) {
-    //             contextId = context.constructor.name;
-    //             if (bindings.contexts[contextId]) {
-    //                 contextId = `ctx_${compileId(Object.keys(bindings.contexts).length)}`;
-    //             }
-    //             bindings.contexts[contextId] = context;
-    //         } else if (!context) {
-    //             contextId = 'null';
+    //         const expr = chunk.statements[0].expr;
+    //         if (store1Index > -1 && store2Index > -1) {
+    //             removeRef(expr.args);
     //         }
-    //     }
-    //     if (functionId && supportThis) {
-    //         source += `${contextId}.${functionId}(arg_${id}, blockUtility);\n`;
-    //     } else {
-    //         functionId = op.opcode;
-    //         if (!bindings.functions[functionId]) {
-    //             bindings.functions[functionId] = func;
-    //         } else if (bindings.functions[functionId] !== func) {
-    //             const functionI = Object.values(bindings.functions).indexOf(func);
-    //             if (functionI === -1) {
-    //                 functionId = compileId(Object.keys(bindings.functions).length);
-    //                 bindings.functions[functionId] = func;
-    //             } else {
-    //                 functionId = compileId(functionI);
-    //             }
+    //         if (store1Index > -1 || store2Index > -1) {
+    //             bind(i, 'toNumber', Cast.toNumber);
+    //             addRef('toNumber');
     //         }
-    //         if (supportThis) {
-    //             source += `${functionId}.call(${contextId}, arg_${id}, blockUtility);\n`;
-    //         } else {
-    //             source += `${functionId}(arg_${id}, blockUtility);\n`;
-    //         }
-    //     }
-    //     if (supportStatusChange) {
-    //         source += `    if (thread.status !== 0) return;\n`;
+    //
+    //         chunk.statements[0].expr = new JSBinaryOperator({
+    //             operator,
+    //             input1: store1Id,
+    //             input2: store2Id
+    //         });
     //     }
     // }
-    //
-    // const factory = new Function('bindings', [
-    //     ...Object.keys(bindings.contexts)
-    //         .map(key => `const ${key} = bindings.contexts.${key};`),
-    //     ...Object.keys(bindings.functions)
-    //         .map(key => `const ${key} = bindings.functions.${key};`),
-    //     ...Object.keys(bindings.out)
-    //         .map(key => `const out_${key} = bindings.args.${key};`),
-    //     ...Object.keys(bindings.args)
-    //         .map(key => `const arg_${key} = bindings.args.${key};`),
-    //     `return function ${blockCached.opcode}_${ops.length} (_, blockUtility) {`,
-    //     // `    window.COMILE_USE = (window.COMILE_USE | 0) + 1;`,
-    //     '    const thread = blockUtility.thread;',
-    //     source,
-    //     `};`
-    // ].join('\n'));
 
-    const factory = new Function('bindings', factoryAST.toString());
+    // const renderState = {source: ''};
+    // new Transformer().transform(factoryClone, [new JSPrinter()], [renderState]);
+
+    const factory = new Function('bindings', renderState.source);
 
     const compileCached = new BlockCached(null, {
         id: blockCached.id,
