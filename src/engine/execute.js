@@ -509,6 +509,8 @@ const safeId = function (id) {
 
 const findId = function (_set, obj, _default, prefix) {
     if (!obj) return safeId('null');
+    if (_default && _set[_default] === obj) return _default;
+    if (_default && !_set[_default]) return _default;
     let index = Object.values(_set).indexOf(obj);
     if (index > -1) {
         return safeId(Object.keys(_set)[index]);
@@ -519,27 +521,44 @@ const findId = function (_set, obj, _default, prefix) {
     return safeId(_default);
 };
 
+const memoify = function (fn) {
+    const memo = {};
+    return function (value) {
+        return memo[value] || (memo[value] = fn(value));
+    };
+};
+const camelCase = memoify(str => `${str[0].toLowerCase()}${str.substring(1)}`);
+const sansPrefix = memoify(str => camelCase(str.substring(2)));
+const titleCase = memoify(str => `${str[0].toUpperCase()}${str.substring(1)}`)
+const enterTitleCase = memoify(str => `enter${titleCase(str)}`);
+const exitTitleCase = memoify(str => `exit${titleCase(str)}`);
+
 class JSNode {
-    constructor ({refs = []} = {}) {
+    constructor (refs = []) {
+        Object.defineProperty(this, 'type', {
+            enumerable: false,
+            writeable: false,
+            value: this.type
+        });
+
         this.refs = refs.filter(ast.type.isString);
     }
     get type () {
-        return this.constructor.name[2].toLowerCase() + this.constructor.name.substring(3);
+        return sansPrefix(this.constructor.name);
     }
     toString () {
         return '';
     }
 }
-class JSWhitespace {}
 class JSId extends JSNode {
     constructor ({id, refs = [id]}) {
-        super({refs});
+        super(refs);
         this.id = id;
     }
 }
 class JSChunk extends JSNode {
-    constructor ({refs, statements}) {
-        super({refs});
+    constructor ({statements, refs}) {
+        super(refs);
         this.statements = statements;
     }
     toString () {
@@ -547,36 +566,32 @@ class JSChunk extends JSNode {
     }
 }
 class JSStatement extends JSNode {
-    constructor ({indent = new JSWhitespace(), expr, refs = [expr]} = {}) {
-        super({refs});
-        this.indent = indent;
+    constructor (refs, expr) {
+        super(refs || [expr]);
         this.expr = expr;
     }
 }
 class JSExpressionStatement extends JSStatement {
-    constructor ({expr, refs = [expr]}) {
-        super({refs, expr});
-    }
     toString () {
         return `${this.expr};`;
     }
 }
 class JSCheckStatus extends JSStatement {
     constructor () {
-        super({refs: ['thread']});
+        super(['thread']);
     }
     toString () {
         return 'if (thread.status !== 0) return;';
     }
 }
 class JSStore extends JSStatement {
-    constructor ({expr, refs = [expr]}) {
-        super({refs, expr});
+    constructor (refs, expr) {
+        super(refs || [expr], expr);
     }
 }
 class JSStoreArg extends JSStore {
     constructor ({expr, name, key, refs = [expr, name]}) {
-        super({refs, expr});
+        super(refs, expr);
         this.name = name;
         this.key = key;
     }
@@ -586,7 +601,7 @@ class JSStoreArg extends JSStore {
 }
 class JSStoreVar extends JSStore {
     constructor ({uses = 0, expr, name, refs = [expr]}) {
-        super({refs, expr});
+        super(refs, expr);
         this.uses = uses;
         this.name = name;
     }
@@ -598,14 +613,14 @@ class JSStoreVar extends JSStore {
 class JSOperator extends JSNode {}
 class JSCast extends JSNode {
     constructor ({expect, value, refs = [expect, value]}) {
-        super({refs});
+        super(refs);
         this.expect = expect;
         this.value = value;
     }
 }
 class JSProperty extends JSOperator {
     constructor ({lhs, member, refs = [lhs]}) {
-        super({refs});
+        super(refs);
         this.lhs = lhs;
         this.member = member;
     }
@@ -616,7 +631,7 @@ class JSProperty extends JSOperator {
 class JSGetVariable extends JSOperator {}
 class JSBinaryOperator extends JSOperator {
     constructor ({operator, input1, input2, refs = [input1, input2]}) {
-        super({refs});
+        super(refs);
         this.operator = operator;
         this.input1 = input1;
         this.input2 = input2;
@@ -628,7 +643,7 @@ class JSBinaryOperator extends JSOperator {
 class JSCall extends JSOperator {}
 class JSCallBlock extends JSCall {
     constructor ({context, func, args, refs = [context, func, args]}) {
-        super({refs});
+        super(refs);
         this.context = context;
         this.func = func;
         this.args = args;
@@ -639,7 +654,7 @@ class JSCallBlock extends JSCall {
 }
 class JSCallFunction extends JSCall {
     constructor ({func, args, refs = [func, args]}) {
-        super({refs});
+        super(refs);
         this.func = func;
         this.args = args;
     }
@@ -649,7 +664,7 @@ class JSCallFunction extends JSCall {
 }
 class JSFactory extends JSNode {
     constructor ({debugName, bindings = [], dereferences = [], chunks = [], refs}) {
-        super({refs});
+        super(refs);
         this.debugName = debugName;
         this.bindings = bindings;
         this.dereferences = dereferences;
@@ -795,44 +810,217 @@ class JSToken extends JSNode {
         this.token = token;
     }
 }
+class JSWhitespace extends JSNode {}
 const code = {
     t (token) {
         return code.token(token);
     },
     token (token) {
         return new JSToken({token});
+    },
+    ws () {
+        return code.whitespace();
+    },
+    whitespace () {
+        return new JSWhitespace();
     }
+};
+
+const NODE_TYPES = [
+    Boolean,
+    Number,
+    String,
+    Object,
+    Array,
+    JSId,
+    JSChunk,
+    JSExpressionStatement,
+    JSCheckStatus,
+    JSStoreArg,
+    JSStoreVar,
+    JSCast,
+    JSProperty,
+    JSBinaryOperator,
+    JSCallBlock,
+    JSCallFunction,
+    JSFactory,
+
+    JSToken,
+    JSWhitespace
+];
+
+const NODE_DATA = {
+    node: {
+        extends: null,
+    },
+    id: {
+        extends: 'node',
+        keys: ['id'],
+    },
+    chunk: {
+        extends: 'node',
+        keys: ['statements'],
+    },
+    statement: {
+        extends: 'node',
+        keys: ['expr'],
+    },
+    expressionStatement: {
+        extends: 'statement',
+        keys: ['expr'],
+    },
+    checkStatus: {
+        extends: 'statement',
+        keys: [],
+    },
+    store: {
+        extends: 'statement',
+        keys: ['expr'],
+    },
+    storeArg: {
+        extends: 'store',
+        keys: ['name', 'key', 'expr'],
+    },
+    storeVar: {
+        extends: 'store',
+        keys: ['name', 'expr'],
+    },
+    operator: {
+        extends: 'node',
+        keys: [],
+    },
+    cast: {
+        extends: 'operator',
+        keys: ['expect', 'value'],
+    },
+    property: {
+        extends: 'operator',
+        keys: ['lhs', 'member'],
+    },
+    getVariable: {
+        extends: 'operator',
+        keys: []
+    },
+    binaryOperator: {
+        extends: 'operator',
+        keys: ['operator', 'input1', 'input2'],
+    },
+    call: {
+        extends: 'operator',
+        keys: [],
+    },
+    callBlock: {
+        extends: 'call',
+        keys: ['func', 'context', 'args'],
+    },
+    callFunction: {
+        extends: 'call',
+        keys: ['func', 'args'],
+    },
+    factory: {
+        extends: 'node',
+        keys: ['debugName', 'bindings', 'dereferences', 'chunks'],
+    },
+    token: {
+        extends: 'node',
+        keys: ['token'],
+    },
+    whitespace: {
+        extends: 'node',
+        keys: []
+    }
+};
+
+const NODE_KEYS = Object.entries(NODE_DATA).reduce((object, [name, data]) => {
+    object[name] = data.keys || [];
+    return object;
+}, {});
+
+const NODE_ANCESTORS = Object.entries(NODE_DATA).reduce((object, [name, data]) => {
+    object[name] = [name];
+    let _extends = data.extends;
+    let parent = NODE_DATA[data.extends];
+    while (NODE_DATA[_extends]) {
+        object[name].push(_extends);
+        _extends = NODE_DATA[_extends].extends;
+    }
+    return object;
+}, {});
+
+const NODE_ENTER_KEYS = Object.entries(NODE_ANCESTORS).reduce((object, [name, keys]) => {
+    object[name] = keys.concat(keys.map(enterTitleCase));
+    return object;
+});
+const NODE_EXIT_KEYS = Object.entries(NODE_ANCESTORS).reduce((object, [name, keys]) => {
+    object[name] = keys.map(exitTitleCase);
+    return object;
+});
+
+const EMPTY_KEYS = [];
+const nodeKeys = function (node) {
+    if (typeof node !== 'object' || node === null) return EMPTY_KEYS;
+    return NODE_KEYS[node.type] || Object.keys(node);
 };
 
 class Path {
     constructor (parentPath) {
         const {pathArray, parents} = parentPath;
         this.parentPath = this;
-        this.pathArray = pathArray;
-        this.parents = parents;
-        this.node = parents[parents.length - 1];
         this.changedNodes = [];
+
+        this.pathArray = pathArray;
+
+        this.ownsArray = false;
+        this.parents = parents;
+
         if (parentPath instanceof Path) {
             this.parentPath = parentPath.parentPath;
-            this.parents = parents.slice();
             this.changedNodes = parentPath.changedNodes;
+
+            if (parentPath.ownsArray) this.pathArray = this.pathArray.slice();
+
+            this.parents = parents.slice();
         }
     }
     get length () {
         return this.pathArray.length;
-    }
-    get key () {
-        return this.pathArray[this.length - 1];
-    }
-    get parent () {
-        const newPathArray = this.pathArray.slice(0, this.length - 1);
-        return new Path(this).setPath(newPathArray);
     }
     get parentKey () {
         return this.pathArray[this.length - 2];
     }
     get parentNode () {
         return this.parents[this.length - 2];
+    }
+    get parent () {
+        const parentLength = this.length - 1;
+        const parentPath = new Path(this);
+        parentPath.pathArray = parentPath.pathArray.slice(0, parentLength);
+        parentPath.node = parentPath.parents[parentLength - 1];
+        return parentPath;
+    }
+    get key () {
+        return this.pathArray[this.length - 1];
+    }
+    get node () {
+        return this.parents[this.length - 1];
+    }
+    set node (value) {
+        return this.parents[this.length - 1] = value;
+    }
+    get safeParentNode () {
+        const {length} = this;
+        if (length === 1) return this.parents;
+        return this.parents[length - 2];
+    }
+    get rootNode () {
+        return this.parents[0];
+    }
+    get pathArrayCopy () {
+        if (this.ownsArray) {
+            this.pathArray = this.pathArray.slice();
+            this.ownsArray = false;
+        }
+        return this.pathArray;
     }
     static clonePath (path) {
         return new Path({})
@@ -846,19 +1034,49 @@ class Path {
     static fromPath (path) {
         return new Path(path);
     }
-    setPath (pathArray) {
-        const parents = this.parents;
-        let i = 1;
-        let node = parents[0];
-        for (; node && i < pathArray.length; i++) {
-            node = parents[i - 1][pathArray[i]];
-            if (node) parents[i] = node;
-            else i = 1;
+    reset () {
+        this.pathArray = ['root'];
+        this.ownsArray = false;
+        return this;
+    }
+    addChange (pathArray, node) {
+        this.changedNodes.push(new QueuedEnter(pathArray, node));
+    }
+    _takePathArray () {
+        if (!this.ownsArray) {
+            this.pathArray = this.pathArray.slice();
+            this.ownsArray = true;
         }
+    }
+    _goTo (i, pathArray) {
+        let node = this.parents[i - 1];
+        for (; node && i < pathArray.length; i++) {
+            node = this.parents[i] = node[pathArray[i]];
+        }
+        if (!node) return this.reset();
         this.pathArray = pathArray;
-        this.pathArray.length = i;
-        this.parents.length = i;
-        this.node = this.parents[i - 1];
+        this.ownsArray = false;
+        return this;
+    }
+    mismatchIndex (pathArray) {
+        let i = 1;
+        for (; i < pathArray.length && this.pathArray[i] === pathArray[i]; i++) {}
+        return i;
+    }
+    goToFast (pathArray) {
+        const i = this.mismatchIndex(pathArray);
+        if (this.length + i === 2 * pathArray.length) return this;
+        return this._goTo(i, pathArray);
+    }
+    goTo (pathArray) {
+        return this._goTo(1, pathArray);
+    }
+    goToKey (key) {
+        // Make a copy of pathArray before changing it.
+        const {length} = this.pathArray;
+        this._takePathArray();
+        this.pathArray[length] = key;
+        this.parents[length] = this.parents[length - 1][key];
         return this;
     }
     skip () {
@@ -868,15 +1086,15 @@ class Path {
         this.pathArray.length = 0;
     }
     setKey (key, newNode) {
-        const parentDepth = this.parents.length - 1;
+        const parentDepth = this.length - 1;
         return this._insert(parentDepth, key, newNode);
     }
     getKey (key) {
-        return new Path(this).setPath([...this.pathArray, key]);
+        return new Path(this).goToKey(key);
     }
     earlierPath (laterPath) {
         let i = 1;
-        const length = Math.min(this.pathArray.length, laterPath.pathArray.length);
+        const length = Math.min(this.length, laterPath.length);
         for (; i < length && this.pathArray[i] === laterPath.pathArray[i]; i++) {}
         if (i < length) {
             const key = this.pathArray[i];
@@ -885,14 +1103,14 @@ class Path {
                 return key < laterKey;
             } else {
                 const parent = this.parents[i - 1];
-                const siblings = Object.keys(parent);
+                const siblings = nodeKeys(parent);
                 return siblings.indexOf(key) < siblings.indexOf(laterKey);
             }
         }
-        return this.pathArray.length < laterPath.pathArray.length;
+        return this.length < laterPath.length;
     }
     confirmPath () {
-        for (let i = this.pathArray.length - 1; i > 0; i--) {
+        for (let i = this.length - 1; i > 0; i--) {
             const node = this.parents[i];
             const parent = this.parents[i - 1];
             const parentKey = this.pathArray[i];
@@ -910,29 +1128,26 @@ class Path {
         }
     }
     confirmArrayParent () {
-        const parent = this.parents[this.parents.length - 2];
+        const parent = this.parentNode;
         if (!Array.isArray(parent)) throw new Error('Must use insertBefore with a parent array');
     }
     remove () {
         this.confirmPath();
-        const parent = this.parents[this.parents.length - 2];
-        const parentKey = this.pathArray[this.pathArray.length - 1];
-        if (Array.isArray(parent)) parent.splice(Number(parentKey), 1);
-        else parent[parentKey] = null;
+        const parent = this.parentNode;
+        const key = this.key;
+        if (Array.isArray(parent)) parent.splice(Number(key), 1);
+        else parent[key] = null;
         this.node = null;
     }
     replaceWith (newNode) {
         if (this.length === 1) {
             this.parents[0] = newNode;
-            this.node = newNode;
-            this.changedNodes.push({pathArray: this.pathArray.slice(), node: newNode});
+            this.addChange(this.pathArray, newNode);
             return new Path(this);
         }
         this.confirmPath();
-        const parent = this.parents[this.parents.length - 2];
-        const parentKey = this.pathArray[this.pathArray.length - 1];
-        parent[parentKey] = newNode;
-        this.changedNodes.push({pathArray: this.pathArray.slice(), node: newNode});
+        this.parentNode[this.key] = newNode;
+        this.addChange(this.pathArray, newNode);
         return new Path(this);
     }
     _insert (depth, index, newNode) {
@@ -945,33 +1160,33 @@ class Path {
             newPathArray.length = depth;
             newPathArray[depth] = index;
         }
-        const newPath = new Path(this).setPath(newPathArray);
-        if (newPath.earlierPath(this)) this.changedNodes.push({pathArray: newPathArray, node: newNode});
+        const newPath = new Path(this).goTo(newPathArray);
+        if (newPath.earlierPath(this)) this.addChange(newPathArray, newNode);
         return newPath;
     }
     insertSibling (index, newNode) {
         this.confirmArrayParent();
-        const parentDepth = this.parents.length - 2;
+        const parentDepth = this.length - 2;
         return this._insert(parentDepth, index, newNode);
     }
     insertFirst (newNode) {
         return this.insertSibling(0, newNode);
     }
     insertLast (newNode) {
-        const parent = this.parents[this.parents.length - 2];
+        const parent = this.parentNode;
         return this.insertSibling(parent.length, newNode);
     }
     insertBefore (newNode) {
-        const parentKey = this.pathArray[this.pathArray.length - 1];
+        const parentKey = this.key;
         return this.insertSibling(parentKey, newNode);
     }
     insertAfter (newNode) {
-        const parentKey = this.pathArray[this.pathArray.length - 1];
+        const parentKey = this.key;
         return this.insertSibling(parentKey + 1, newNode);
     }
     insertChild (index, newNode) {
         this.confirmArrayParent();
-        const parentDepth = this.parents.length - 1;
+        const parentDepth = this.length - 1;
         return this._insert(parentDepth, index, newNode);
     }
     prependChild () {
@@ -987,6 +1202,31 @@ class Visitor {
     enterFactory () {}
     exitFactory () {}
 }
+class QueuedVisit {
+    constructor (mode, pathArray, node, keys) {
+        this.mode = mode;
+        this.pathArray = pathArray;
+        this.node = node;
+        this.keyIndex = keys.length > 0 ? 0 : -1;
+        this.keys = keys;
+    }
+}
+class QueuedKeys extends QueuedVisit {
+    constructor (pathArray, node, keys) {
+        super('enter', pathArray, node, keys);
+    }
+}
+const QUEUED_EMPTY_KEYS = [];
+class QueuedEnter extends QueuedVisit {
+    constructor (pathArray, node) {
+        super('enter', pathArray, node, QUEUED_EMPTY_KEYS);
+    }
+}
+class QueuedExit extends QueuedVisit {
+    constructor (pathArray, node) {
+        super('exit', pathArray, node, QUEUED_EMPTY_KEYS);
+    }
+}
 class Transformer {
     constructor () {
         this.path = null;
@@ -994,104 +1234,295 @@ class Transformer {
         this.states = null;
         this.i = 0;
         this.queued = null;
+        this.isUnchanged = true;
     }
     transform (root, visitors, states) {
         this.i = 0;
-        this.queued = []
-        this.path = Path.fromRoot(root);
+        const queued = this.queued = []
+        const path = this.path = Path.fromRoot(root);
+        this.cache = {node: {}, keys: {}, enter: {}, exit: {}};
+        this.initVisitors(visitors, states);
+        this.queue(new QueuedEnter(this.path.pathArrayCopy, root));
+        this.isUnchanged = true;
+
+        // const visited = new Set();
+        while (
+            queued.length > 0 && queued.length < 100000 &&
+            path.length > 0 && path.length < 100
+        ) {
+            const item = queued[0];
+            if (this.isUnchanged) {
+                const mismatch = path.mismatchIndex(item.pathArray);
+                if (path.length - mismatch > 1 || item.keyIndex === -1) {
+                    path._goTo(mismatch, item.pathArray);
+                }
+            } else {
+                path.goTo(item.pathArray);
+                this.isUnchanged = true;
+            }
+
+            if (path.parents[item.pathArray.length - 1] !== item.node) {
+                // Queued visit is out of date
+                queued.shift();
+                continue;
+            }
+
+            // There are more leaves than branches. Test if we are at a leaf.
+            if (item.keyIndex === -1) queued.shift();
+            else {
+                const key = item.keys[item.keyIndex++];
+                if (item.keyIndex >= item.keys.length) queued.shift();
+
+                // path.goToKey(key);
+                path._takePathArray();
+                path.pathArray[item.pathArray.length] = key;
+                path.parents[item.pathArray.length] = item.node[key];
+            }
+
+            // if (item.mode === 'enter') {
+            //     if (path.node instanceof JSNode && visited.has(path.node)) throw new Error('repeat');
+            //     visited.add(path.node);
+            //     window.GENERATOR_VISITS = (window.GENERATOR_VISITS | 0) + 1;
+            // }
+
+            if (item.mode === 'enter') this.enter();
+            else this.exit();
+        }
+    }
+    getPrototypeAncestry (proto) {
+        const ancestry = [];
+        while (proto && proto !== Object.prototype) {
+            ancestry.push(proto);
+            proto = Object.getPrototypeOf(proto);
+        }
+        return ancestry;
+    }
+    getAllPropertyNames (proto) {
+        const keySet = new Set();
+        const protos = this.getPrototypeAncestry(proto);
+        for (let i = 0; i < protos.length; i++) {
+            const keys = Object.getOwnPropertyNames(protos[i]);
+            for (let j = 0; j < keys.length; j++) keySet.add(keys[j]);
+        }
+        return Array.from(keySet);
+    }
+    initVisitors (visitors, states) {
         this.visitors = visitors || [];
-        this.states = states || [];
-        this.queue('enter', [{pathArray: this.path.pathArray, node: root}]);
-        while (this.i < this.queued.length) {
-            const item = this.queued[this.i];
-            this.path.setPath(item.pathArray);
-            if (this.i > 100000 || this.path.length > 100) return;
-            if (this.path.node === item.node) {
-                if (item.mode === 'enter') {
-                    this.enter();
-                } else {
-                    this.exit();
-                }
-                if (this.path.length === 0) break;
-                this.queue('enter', this.path.changedNodes);
-                this.path.changedNodes.length = 0;
-            }
-            this.i += 1;
-        }
-    }
-    queue (mode, newNodes) {
-        this.queued.splice(this.i + 1, 0, ...newNodes.map(info => ({mode, ...info})));
-    }
-    visit (keys) {
-        const node = this.path.node;
-        for (let i = 0; node === this.path.node && i < this.visitors.length; i++) {
-            const visitor = this.visitors[i];
+        const visitKeys = this.visitKeys = Object.create(null);
+        for (let i = 0; i < visitors.length; i++) {
+            const state = states[i];
+            const visitor = visitors[i];
+            const keys = this.getAllPropertyNames(visitor);
             for (let j = 0; j < keys.length; j++) {
-                if (visitor[keys[j]]) {
-                    visitor[keys[j]](node, this.path, this.states[i]);
+                const key = keys[j];
+                if (typeof visitor[keys[j]] === 'function') {
+                    visitKeys[key] = (visitKeys[key] || []);
+                    visitKeys[key].push(visitor[key], state);
                 }
             }
         }
+        const visitTypes = this.visitTypes = Object.create(null);
+        for (let k = 0; k < NODE_TYPES.length; k++) {
+            const type = NODE_TYPES[k];
+            const enterKeys = this.visitorEnterKeys(type.prototype);
+            const exitKeys = this.visitorExitKeys(type.prototype);
+
+            const typeKey = this.nodeType(type.prototype);
+            const typeFunctions = visitTypes[typeKey] = {enter: [], exit: []};
+
+            for (let l = 0; l < enterKeys.length; l++) {
+                const visitFunctions = visitKeys[enterKeys[l]];
+                if (visitFunctions) typeFunctions.enter.push(...visitFunctions);
+            }
+            for (let m = 0; m < exitKeys.length; m++) {
+                const visitFunctions = visitKeys[exitKeys[m]];
+                if (visitFunctions) typeFunctions.exit.push(...visitFunctions);
+            }
+
+            // console.log(typeKey, enterKeys, exitKeys, typeFunctions, this.visitKeys);
+        }
+    }
+    hasVisitor (key) {
+        return Boolean(this.visitKeys[key]);
+    }
+    queue (queuedVisit) {
+        this.queued.unshift(queuedVisit);
+    }
+    queueChanges () {
+        const changedNodes = this.path.changedNodes;
+        if (changedNodes.length > 0) {
+            this.isUnchanged = false;
+            for (let i = 0; i < changedNodes.length; i++) this.queue(changedNodes[i]);
+            changedNodes.length = 0;
+        }
+    }
+    visit (visitFunctions) {
+        const {path} = this;
+        const node = path.node;
+        for (let j = 0; node === path.node && j < visitFunctions.length; j += 2) {
+            visitFunctions[j](node, path, visitFunctions[j + 1]);
+        }
+    }
+    nodeType (node) {
+        if (typeof node !== 'object') return typeof node;
+        else if (Array.isArray(node)) return 'array';
+        else if (node) return node.type || camelCase(node.constructor.name);
+        else if (node === null) return 'null';
+        return 'unknown';
     }
     nodeKeys (node) {
-        let keys;
-        if (Array.isArray(node)) keys = Array.from(node, (_, i) => i);
-        else if (typeof node === 'object' && node) keys = Object.keys(node);
-        else keys = [];
-        return keys.map(key => ({
-            pathArray: [...this.path.pathArray, key],
-            node: node[key]
-        }));
+        if (typeof node !== 'object' || node === null) return QUEUED_EMPTY_KEYS;
+        // else if (node instanceof JSNode && node.keys) return node.keys;
+        // else if (Array.isArray(node)) return Array.from(node.keys());
+        else if (Array.isArray(node)) {
+            const indices = [];
+            for (let i = 0; i < node.length; i++) indices.push(i);
+            return indices;
+        }
+        return NODE_KEYS[node.type] || [];
+
+        const cacheKey = node.type || node.constructor.name;
+        const cached = this.cache.node[cacheKey];
+        if (cached) return cached;
+
+        const keys = Object.keys(node);
+        window.CACHE_SET_NODE_KEYS = (window.CACHE_SET_NODE_KEYS | 0) + 1;
+        this.cache.node[cacheKey] = keys;
+
+        // if (node instanceof JSNode) Object.getPrototypeOf(node).keys = keys;
+
+        return keys;
     }
     visitorKeys (node) {
-        const keys = new Set();
-        if (Array.isArray(node)) {
-            keys.add('array');
-        } else if (typeof node === 'object') {
-            while (node && node.type) {
-                keys.add(node.type);
-                node = Object.getPrototypeOf(node);
+        if (typeof node !== 'object') return [typeof node];
+        else if (node === null) return ['null'];
+        else if (Array.isArray(node)) return ['array'];
+        return NODE_ANCESTORS[node.type] || [camelCase(node.constructor.name)];
+        // else if (node instanceof JSNode && node.visitorKeys) return node.visitorKeys;
+        // else if (node === null) return ['null'];
+
+        const cacheKey = node.type || node.constructor.name;
+        const cached = this.cache.keys[cacheKey];
+        if (cached) return cached;
+
+        const keySet = new Set();
+        if (typeof node === 'object') {
+            const protos = this.getPrototypeAncestry(node)
+            for (let i = 0; i < protos.length; i++) {
+                if (protos[i].type) keySet.add(protos[i].type);
+                else keySet.add(camelCase(protos[i].constructor.name));
             }
-        } else {
-            keys.add(typeof node);
-        }
-        return Array.from(keys);
+        } else keySet.add(typeof node);
+
+        const keys = Array.from(keySet);
+        window.CACHE_SET_VISITOR_KEYS = (window.CACHE_SET_VISITOR_KEYS | 0) + 1;
+        this.cache.keys[cacheKey] = keys;
+
+        // if (node instanceof JSNode) Object.getPrototypeOf(node).visitorKeys = keys;
+
+        return keys;
     }
     visitorEnterKeys (node) {
-        return ['enter', ...this.visitorKeys(node).map(type => `enter${type.toUpperCase() + type.substring(1)}`)];
+        if (typeof node !== 'object') return [typeof node];
+        else if (node === null) return ['null'];
+        else if (Array.isArray(node)) return ['array', 'enterArray'];
+        return NODE_ENTER_KEYS[node.type] || [camelCase(node.constructor.name), enterTitleCase(node.constructor.name)];
+
+        const cacheKey = typeof node === 'object' ? (node.type || node.constructor.name) : typeof node;
+        const cached = this.cache.enter[cacheKey];
+        if (cached) return cached;
+
+        const keys = this.visitorKeys(node);
+        const enterKeys = [];
+        enterKeys.push('enter');
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            enterKeys.push(key);
+            const enterKey = enterTitleCase(key);
+            enterKeys.push(enterKey);
+        }
+        window.CACHE_SET_ENTER_KEYS = (window.CACHE_SET_ENTER_KEYS | 0) + 1;
+        this.cache.enter[cacheKey] = enterKeys;
+        return enterKeys;
     }
     visitorExitKeys (node) {
-        return ['exit', ...this.visitorKeys(node).map(type => `exit${type.toUpperCase() + type.substring(1)}`)];
+        if (typeof node !== 'object') return [];
+        else if (node === null) return [];
+        else if (Array.isArray(node)) return ['exitArray'];
+        return NODE_EXIT_KEYS[node.type] || [exitTitleCase(node.constructor.name)];
+
+        const cacheKey = typeof node === 'object' ? (node.type || node.constructor.name) : typeof node;
+        const cached = this.cache.exit[cacheKey];
+        if (cached) return cached;
+
+        const keys = this.visitorKeys(node);
+        const exitKeys = [];
+        exitKeys.push('exit');
+        for (let i = 0; i < keys.length; i++) {
+            const exitKey = exitTitleCase(keys[i]);
+            exitKeys.push(exitKey);
+        }
+        window.CACHE_SET_EXIT_KEYS = (window.CACHE_SET_EXIT_KEYS | 0) + 1;
+        this.cache.exit[cacheKey] = exitKeys;
+        return exitKeys;
+    }
+    pass () {
+        const node = this.path.node;
+        const nodeType = this.nodeType(node);
+        const visitTypes = this.visitTypes[nodeType];
+        if (typeof visitTypes === 'undefined') return;
+
+        const nodeKeys = this.nodeKeys(node);
+        if (nodeKeys.length > 0) this.queue(new QueuedKeys(this.path.pathArrayCopy, node, nodeKeys));
     }
     enter () {
         const node = this.path.node;
-        this.visit([...this.visitorKeys(node), ...this.visitorEnterKeys(node)]);
-        if (node === this.path.node) this.queue('exit', [{node, pathArray: this.path.pathArray}]);
-        if (node === this.path.node) this.queue('enter', this.nodeKeys(node));
+        const nodeType = this.nodeType(node);
+        const visitTypes = this.visitTypes[nodeType];
+        if (typeof visitTypes === 'undefined') return;
+
+        const enterFunctions = visitTypes.enter;
+        if (enterFunctions.length > 0) {
+            this.visit(enterFunctions);
+            // The node has been replaced and is no longer in the tree. 
+            if (node !== this.path.node) return this.queueChanges();
+        }
+
+        const exitFunctions = visitTypes.exit;
+        if (exitFunctions.length > 0) this.queue(new QueuedExit(this.path.pathArrayCopy, node));
+
+        if (enterFunctions.length > 0) this.queueChanges();
+
+        const nodeKeys = this.nodeKeys(node);
+        if (nodeKeys.length > 0) this.queue(new QueuedKeys(this.path.pathArrayCopy, node, nodeKeys));
     }
     exit () {
         const node = this.path.node;
-        this.visit(this.visitorExitKeys(node));
+        const exitFunctions = this.visitTypes[this.nodeKeys(node)].exit;
+        this.visit(exitFunctions);
+        this.queueChanges();
     }
 }
 class JSCountRefs {
-    node (node, path, state) {
-        const {refs} = node;
-        if (ast.type.isId(node) && refs.length === 0) debugger;
-        for (let i = 0; i < refs.length; i++) {
-            const refNode = state.vars[refs[i]];
-            if (refNode) refNode.uses++;
-        }
+    string (node, path, state) {
+        if (path.key === 'member') return;
+        if (path.key === 'name' && path.parentNode.type === 'storeVar') return;
+        const refNode = state.vars[node];
+        if (refNode) refNode.uses++;
     }
     storeVar (node, path, state) {
         node.uses = 0;
         state.vars[node.name] = node;
     }
+    checkStatus (node, path, state) {
+        const refNode = state.vars.thread;
+        if (refNode) refNode.uses++;
+    }
 }
 class JSFindArg {
     storeArg (node, path, state) {
         state.paths[node.name] = state.paths[node.name] || {};
-        state.paths[node.name][node.key] = path.pathArray;
+        state.paths[node.name][node.key] = path.pathArrayCopy;
     }
 }
 const findArg = new JSFindArg();
@@ -1124,7 +1555,7 @@ class JSInlineOperators {
                 // const info = state.opInfos.find(info => info.parentId === node.lhs && info.op._parentKey === node.member);
                 // if (info) path.replaceWith(Cast.toNumber(info.op._argValues[node.member]));
             } else {
-                const storePath = new Path(path).setPath(storePathArray);
+                const storePath = new Path(path).goTo(storePathArray);
                 const storeExpr = storePath.node.expr;
 
                 if (storeExpr instanceof JSCall || storeExpr instanceof JSProperty || storeExpr instanceof JSBinaryOperator) {
@@ -1207,6 +1638,8 @@ const compile = function (blockCached) {
     // let source = '';
     // let commandParent = 0;
 
+    let start = Date.now();
+
     const bindings = {};
     const factoryAST = new JSFactory({
         debugName: `${blockCached.opcode}_${ops.length}`
@@ -1252,7 +1685,7 @@ const compile = function (blockCached) {
         const func = op._blockFunctionUnbound;
         const context = op._blockFunctionContext;
 
-        const id = findId(bindings, argValues, `arg_${i}`, 'arg_');
+        const id = findId(bindings, argValues, `arg_${op.opcode}_${i}`, 'arg_');
         const contextId = findId(bindings, context, context && context.constructor.name, 'ctx_');
         const functionId = findId(bindings, func, op.opcode, 'fn_');
 
@@ -1263,28 +1696,29 @@ const compile = function (blockCached) {
         bind(i, id, argValues);
     }
 
-    for (let i = 0; i < ops.length; i++) {
-        const op = ops[i];
+    for (let j = 0; j < ops.length; j++) {
+        const op = ops[j];
         const parentValues = op._parentValues;
 
         const parentI = ops.findIndex(({_argValues}) => _argValues === parentValues);
-        opInfos[i].parentId = parentI > -1 ? findId(bindings, parentValues) : 'commandArg';
+        const parentOp = ops[parentI];
+        opInfos[j].parentId = parentI > -1 ?
+            findId(bindings, parentValues, `arg_${parentOp.opcode}_${parentI}`) :
+            'commandArg';
 
-        const {id, parentId, contextId, functionId} = opInfos[i];
+        const {id, parentId, contextId, functionId} = opInfos[j];
         factoryAST.chunks.push([
             ast.storeArg(parentId, op._parentKey, ast.callBlock(contextId, functionId, id)),
             ast.checkStatus()
         ]);
     }
 
-    let start = Date.now();
     const inlineState = {opInfos, paths: null};
     new Transformer().transform(factoryAST, [new JSInlineOperators()], [inlineState]);
     const countRefs = {vars: {}};
     new Transformer().transform(factoryAST, [new JSCountRefs()], [countRefs]);
-    const factoryClone = ast.cloneDeep(factoryAST);
     const renderState = {source: ''};
-    new Transformer().transform(factoryClone, [new JSPrinter()], [renderState]);
+    new Transformer().transform(factoryAST, [new JSPrinter()], [renderState]);
     (window.AST_COMPILE = (window.AST_COMPILE || [])).push([factoryAST, renderState]);
     console.log(Date.now() - start);
 
