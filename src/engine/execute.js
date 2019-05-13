@@ -1274,7 +1274,7 @@ class QueuedVisit {
         this.mode = mode;
         this.pathArray = pathArray;
         this.node = node;
-        this.keyIndex = keys.length > 0 ? 0 : -1;
+        this.keyIndex = Math.min(keys.length - 1, 0);
         this.keys = keys;
     }
 }
@@ -1449,11 +1449,8 @@ class Transformer {
         if (typeof node !== 'object' || node === null) return QUEUED_EMPTY_KEYS;
         // else if (node instanceof JSNode && node.keys) return node.keys;
         // else if (Array.isArray(node)) return Array.from(node.keys());
-        else if (Array.isArray(node)) {
-            const indices = [];
-            for (let i = 0; i < node.length; i++) indices.push(i);
-            return indices;
-        }
+        // Array have "psuedo" keys.
+        else if (Array.isArray(node)) return node;
         return NODE_KEYS[node.type] || [];
 
         const cacheKey = node.type || node.constructor.name;
