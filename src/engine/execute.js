@@ -108,6 +108,10 @@ const handlePromise = (thread, blockCached) => {
     });
 };
 
+const safeId = function (id) {
+    return `_${String(id).replace(/[^_\w]/g, '_')}`;
+};
+
 /**
  * A execute.js internal representation of a block to reduce the time spent in
  * execute as the same blocks are called the most.
@@ -130,6 +134,8 @@ class BlockCached {
          * @type {string}
          */
         this.id = cached.id;
+
+        this._safeId = safeId(cached.id);
 
         /**
          * Block operation code for this block.
@@ -228,11 +234,19 @@ class BlockCached {
             mutation: this.mutation
         };
 
+        this._parentId = '';
+
+        this._parentOffset = 0;
+
+        this._parentSafeId = '';
+
+        this._parentOpcode = '';
+
         /**
          * The inputs key the parent refers to this BlockCached by.
          * @type {string}
          */
-        this._parentKey = 'VALUE';
+        this._parentKey = 'STATEMENT';
 
         /**
          * The target object where the parent wants the resulting value stored
@@ -378,8 +392,8 @@ class InputBlockCached extends BlockCached {
                     mutation: null
                 });
 
-                this._shadowOps.push(...inputCached._shadowOps);
-                this._ops.push(...inputCached._ops);
+                this._shadowOps.unshift(...inputCached._shadowOps);
+                this._ops.unshift(...inputCached._ops);
                 inputCached._parentKey = 'name';
                 inputCached._parentValues = this._argValues.BROADCAST_OPTION;
             } else if (input.block) {
@@ -389,9 +403,12 @@ class InputBlockCached extends BlockCached {
                     continue;
                 }
 
-                this._shadowOps.push(...inputCached._shadowOps);
-                this._ops.splice(this._ops.length - 1, 0, ...inputCached._ops.slice(0, inputCached._ops.length - 1));
-                if (inputCached._ops.length > 0) this._ops.push(inputCached._ops[inputCached._ops.length - 1]);
+                inputCached._parentOffset = this._ops.length + 1;
+                this._shadowOps.unshift(...inputCached._shadowOps);
+                this._ops.unshift(...inputCached._ops);
+                inputCached._parentId = this.id;
+                inputCached._parentSafeId = this._safeId;
+                inputCached._parentOpcode = this.opcode;
                 inputCached._parentKey = inputName;
                 inputCached._parentValues = this._argValues;
 
@@ -399,7 +416,11 @@ class InputBlockCached extends BlockCached {
                 // store their value on args.
                 if (inputCached._isShadowBlock) {
                     this._argValues[inputName] = inputCached._shadowValue;
+                } else {
+                    // this._argValues[inputName] = 0;
                 }
+            } else {
+                // this._argValues[inputName] = 0;
             }
         }
 
@@ -502,11 +523,6 @@ const compileId = function (i) {
     );
 };
 
-const safeId = function (id) {
-    id = String(id);
-    return id[0].replace(/[^a-zA-Z]/g, '_') + id.substring(1).replace(/[^_\w]/g, '_');
-}
-
 const findId = function (_set, obj, _default, prefix) {
     if (!obj) return safeId('null');
     if (_default && _set[_default] === obj) return _default;
@@ -534,14 +550,12 @@ const enterTitleCase = memoify(str => `enter${titleCase(str)}`);
 const exitTitleCase = memoify(str => `exit${titleCase(str)}`);
 
 class JSNode {
-    constructor (refs = []) {
+    constructor () {
         Object.defineProperty(this, 'type', {
             enumerable: false,
             writeable: false,
             value: this.type
         });
-
-        this.refs = refs.filter(ast.type.isString);
     }
     get type () {
         return sansPrefix(this.constructor.name);
@@ -551,14 +565,14 @@ class JSNode {
     }
 }
 class JSId extends JSNode {
-    constructor ({id, refs = [id]}) {
-        super(refs);
+    constructor ({id}) {
+        super();
         this.id = id;
     }
 }
 class JSChunk extends JSNode {
-    constructor ({statements, refs}) {
-        super(refs);
+    constructor ({statements}) {
+        super();
         this.statements = statements;
     }
     toString () {
@@ -566,8 +580,8 @@ class JSChunk extends JSNode {
     }
 }
 class JSStatement extends JSNode {
-    constructor (refs, expr) {
-        super(refs || [expr]);
+    constructor (expr) {
+        super();
         this.expr = expr;
     }
 }
@@ -585,13 +599,13 @@ class JSCheckStatus extends JSStatement {
     }
 }
 class JSStore extends JSStatement {
-    constructor (refs, expr) {
-        super(refs || [expr], expr);
+    constructor (expr) {
+        super(expr);
     }
 }
 class JSStoreArg extends JSStore {
-    constructor ({expr, name, key, refs = [expr, name]}) {
-        super(refs, expr);
+    constructor ({expr, name, key}) {
+        super(expr);
         this.name = name;
         this.key = key;
     }
@@ -600,8 +614,8 @@ class JSStoreArg extends JSStore {
     }
 }
 class JSStoreVar extends JSStore {
-    constructor ({uses = 0, expr, name, refs = [expr]}) {
-        super(refs, expr);
+    constructor ({uses = 0, expr, name}) {
+        super(expr);
         this.uses = uses;
         this.name = name;
     }
@@ -612,15 +626,15 @@ class JSStoreVar extends JSStore {
 }
 class JSOperator extends JSNode {}
 class JSCast extends JSNode {
-    constructor ({expect, value, refs = [expect, value]}) {
-        super(refs);
+    constructor ({expect, value}) {
+        super();
         this.expect = expect;
         this.value = value;
     }
 }
 class JSProperty extends JSOperator {
-    constructor ({lhs, member, refs = [lhs]}) {
-        super(refs);
+    constructor ({lhs, member}) {
+        super();
         this.lhs = lhs;
         this.member = member;
     }
@@ -630,8 +644,8 @@ class JSProperty extends JSOperator {
 }
 class JSGetVariable extends JSOperator {}
 class JSBinaryOperator extends JSOperator {
-    constructor ({operator, input1, input2, refs = [input1, input2]}) {
-        super(refs);
+    constructor ({operator, input1, input2}) {
+        super();
         this.operator = operator;
         this.input1 = input1;
         this.input2 = input2;
@@ -642,8 +656,8 @@ class JSBinaryOperator extends JSOperator {
 }
 class JSCall extends JSOperator {}
 class JSCallBlock extends JSCall {
-    constructor ({context, func, args, refs = [context, func, args]}) {
-        super(refs);
+    constructor ({context, func, args}) {
+        super();
         this.context = context;
         this.func = func;
         this.args = args;
@@ -653,8 +667,8 @@ class JSCallBlock extends JSCall {
     }
 }
 class JSCallFunction extends JSCall {
-    constructor ({func, args, refs = [func, args]}) {
-        super(refs);
+    constructor ({func, args}) {
+        super();
         this.func = func;
         this.args = args;
     }
@@ -663,8 +677,8 @@ class JSCallFunction extends JSCall {
     }
 }
 class JSFactory extends JSNode {
-    constructor ({debugName, bindings = [], dereferences = [], chunks = [], refs}) {
-        super(refs);
+    constructor ({debugName, bindings = [], dereferences = [], chunks = []}) {
+        super();
         this.debugName = debugName;
         this.bindings = bindings;
         this.dereferences = dereferences;
@@ -715,31 +729,70 @@ const ast = {
         return new JSChunk({statements});
     },
     expressionStatement (expr) {
-        return new JSExpressionStatement({expr});
+        return {
+            type: 'expressionStatement',
+            expr
+        };
     },
     checkStatus () {
-        return new JSCheckStatus();
+        return {
+            type: 'checkStatus'
+        };
     },
     storeArg (name, key, expr) {
-        return new JSStoreArg({name, key, expr});
+        return {
+            type: 'storeArg',
+            name,
+            key,
+            expr
+        };
     },
     storeVar (name, expr) {
-        return new JSStoreVar({name, expr});
+        return {
+            type: 'storeVar',
+            name,
+            expr
+        };
+    },
+    binding (name) {
+        return ast.storeVar(name, ast.property('bindings', name));
     },
     cast (expect, value) {
-        return new JSCast({expect, value});
+        return {
+            type: 'cast',
+            expect,
+            value
+        };
     },
     property (lhs, member) {
-        return new JSProperty({lhs, member});
+        return {
+            type: 'property',
+            lhs,
+            member
+        };
     },
     binaryOperator (operator, input1, input2) {
-        return new JSBinaryOperator({operator, input1, input2});
+        return {
+            type: 'binaryOperator',
+            operator,
+            input1,
+            input2
+        };
     },
     callBlock (context, func, args) {
-        return new JSCallBlock({context, func, args});
+        return {
+            type: 'callBlock',
+            context,
+            func,
+            args
+        };
     },
     callFunction (func, args) {
-        return new JSCallFunction({func, args});
+        return {
+            type: 'callFunction',
+            func,
+            args
+        };
     },
     factory (debugName) {
         return new JSFactory({debugName});
@@ -755,52 +808,52 @@ const ast = {
             return typeof node === 'string';
         },
         isId (node) {
-            return node instanceof JSId;
+            return NODE_IS_ANCESTOR[node.type].id;
         },
         isChunk (node) {
-            return node instanceof JSChunk;
+            return NODE_IS_ANCESTOR[node.type].chunk;
         },
         isStatement (node) {
-            return node instanceof JSStatement;
+            return NODE_IS_ANCESTOR[node.type].statement;
         },
         isExpressionStatement (node) {
-            return node instanceof JSExpressionStatement;
+            return NODE_IS_ANCESTOR[node.type].expressionStatement;
         },
         isCheckStatus (node) {
-            return node instanceof JSCheckStatus;
+            return NODE_IS_ANCESTOR[node.type].checkStatus;
         },
         isStore (node) {
-            return node instanceof JSStore;
+            return NODE_IS_ANCESTOR[node.type].store;
         },
         isStoreArg (node) {
-            return node instanceof JSStoreArg;
+            return NODE_IS_ANCESTOR[node.type].storeArg;
         },
         isStoreVar (node) {
-            return node instanceof JSStoreVar;
+            return NODE_IS_ANCESTOR[node.type].storeVar;
         },
         isOperator (node) {
-            return node instanceof JSOperator;
+            return NODE_IS_ANCESTOR[node.type].operator;
         },
         isCast (node) {
-            return node instanceof JSCast;
+            return NODE_IS_ANCESTOR[node.type].cast;
         },
         isProperty (node) {
-            return node instanceof JSProperty;
+            return NODE_IS_ANCESTOR[node.type].property;
         },
         isBinaryOperator (node) {
-            return node instanceof JSBinaryOperator;
+            return NODE_IS_ANCESTOR[node.type].binaryOperator;
         },
         isCall (node) {
-            return node instanceof JSCall;
+            return NODE_IS_ANCESTOR[node.type].call;
         },
         isCallBlock (node) {
-            return node instanceof JSCallBlock;
+            return NODE_IS_ANCESTOR[node.type].callBlock;
         },
         isCallFunction (node) {
-            return node instanceof JSCallFunction;
+            return NODE_IS_ANCESTOR[node.type].callFunction;
         },
         isFactory (node) {
-            return node instanceof JSFactory;
+            return NODE_IS_ANCESTOR[node.type].factory;
         }
     }
 };
@@ -931,6 +984,8 @@ const NODE_DATA = {
     }
 };
 
+const NODE_NAMES = Object.keys(NODE_DATA);
+
 const NODE_KEYS = Object.entries(NODE_DATA).reduce((object, [name, data]) => {
     object[name] = data.keys || [];
     return object;
@@ -946,6 +1001,12 @@ const NODE_ANCESTORS = Object.entries(NODE_DATA).reduce((object, [name, data]) =
     }
     return object;
 }, {});
+
+const NODE_IS_ANCESTOR = Object.entries(NODE_ANCESTORS).reduce((object, [name, keys]) => {
+    object[name] = {};
+    for (let i = 0; i < NODE_NAMES.length; i++) object[name][NODE_NAMES[i]] = keys.indexOf(NODE_NAMES[i]) > -1;
+    return object;
+});
 
 const NODE_ENTER_KEYS = Object.entries(NODE_ANCESTORS).reduce((object, [name, keys]) => {
     object[name] = keys.concat(keys.map(enterTitleCase));
@@ -1135,19 +1196,25 @@ class Path {
         this.confirmPath();
         const parent = this.parentNode;
         const key = this.key;
-        if (Array.isArray(parent)) parent.splice(Number(key), 1);
+        if (Array.isArray(parent)) {
+            parent.splice(Number(key), 1);
+            if (key < parent.length) {
+                // Revisit this index. It is a different value now.
+                this.addChange(this.pathArrayCopy, parent[key]);
+            }
+        }
         else parent[key] = null;
         this.node = null;
     }
     replaceWith (newNode) {
         if (this.length === 1) {
             this.parents[0] = newNode;
-            this.addChange(this.pathArray, newNode);
+            this.addChange(this.pathArrayCopy, newNode);
             return new Path(this);
         }
         this.confirmPath();
-        this.parentNode[this.key] = newNode;
-        this.addChange(this.pathArray, newNode);
+        this.node = this.parentNode[this.key] = newNode;
+        this.addChange(this.pathArrayCopy, newNode);
         return new Path(this);
     }
     _insert (depth, index, newNode) {
@@ -1270,8 +1337,16 @@ class Transformer {
             // There are more leaves than branches. Test if we are at a leaf.
             if (item.keyIndex === -1) queued.shift();
             else {
-                const key = item.keys[item.keyIndex++];
-                if (item.keyIndex >= item.keys.length) queued.shift();
+                let keys;
+                let key;
+                if (Array.isArray(item.node)) {
+                    keys = item.node;
+                    key = item.keyIndex++;
+                } else {
+                    keys = item.keys;
+                    key = keys[item.keyIndex++];
+                }
+                if (item.keyIndex >= keys.length) queued.shift();
 
                 // path.goToKey(key);
                 path._takePathArray();
@@ -1498,7 +1573,7 @@ class Transformer {
     }
     exit () {
         const node = this.path.node;
-        const exitFunctions = this.visitTypes[this.nodeKeys(node)].exit;
+        const exitFunctions = this.visitTypes[this.nodeType(node)].exit;
         this.visit(exitFunctions);
         this.queueChanges();
     }
@@ -1541,6 +1616,27 @@ class JSInlineOperators {
             path.replaceWith(ast.binaryOperator(operator, ast.cast('toNumber', store1Id), ast.cast('toNumber', store2Id)));
         }
     }
+    callBlock (node, path, state) {
+        const info = state.opMap[node.args];
+        if (
+            node.context === 'null' ||
+            info && info.op._blockFunctionUnbound.toString().indexOf('this') === -1
+        ) path.replaceWith(ast.callFunction(node.func, node.args));
+    }
+    storeArg (node, path, state) {
+        if (node.name === 'a_') path.replaceWith(ast.expressionStatement(node.expr));
+    }
+    checkStatus (node, path, state) {
+        const lastSibling = path.parentNode[path.key - 1];
+        if (
+            !lastSibling ||
+            ast.type.isStoreArg(lastSibling) && lastSibling.key !== 'STATEMENT' ||
+            ast.type.isCall(lastSibling.expr) && /^(operator|data|argument)/.test(lastSibling.expr.func)
+        ) path.remove();
+    }
+    exitCast (node, path, state) {
+        if (node.expect === 'toNumber' && typeof node.value === 'number') path.replaceWith(node.value);
+    }
     property (node, path, state) {
         if (typeof node.lhs === 'string' && typeof node.member === 'string') {
             if (!state.paths) {
@@ -1552,13 +1648,15 @@ class JSInlineOperators {
             const storePathArray = state.paths[node.lhs] && state.paths[node.lhs][node.member];
 
             if (!storePathArray) {
+                const info = state.opMap[node.lhs];
+                if (info && !info.args[node.member]) path.replaceWith(Cast.toNumber(info.op._argValues[node.member]));
                 // const info = state.opInfos.find(info => info.parentId === node.lhs && info.op._parentKey === node.member);
                 // if (info) path.replaceWith(Cast.toNumber(info.op._argValues[node.member]));
             } else {
                 const storePath = new Path(path).goTo(storePathArray);
                 const storeExpr = storePath.node.expr;
 
-                if (storeExpr instanceof JSCall || storeExpr instanceof JSProperty || storeExpr instanceof JSBinaryOperator) {
+                if (ast.type.isCall(storeExpr) || ast.type.isProperty(storeExpr) || ast.type.isBinaryOperator(storeExpr)) {
                     path.replaceWith(ast.cloneDeep(storeExpr));
                     storePath.remove();
                 } else {
@@ -1580,11 +1678,8 @@ class JSPrinter {
     string (node, path, state) {
         state.source += node;
     }
-    array (node, path, state) {
-        if (path.key === 'refs') path.skip();
-    }
     checkStatus (node, path, state) {
-        state.source += 'if (thread.status !== 0) return;';
+        state.source += 'if (thread.status !== 0) return;' + (node.unused ? ' /* unused */' : '');
     }
     expressionStatement ({expr}, path, state) {
         path.replaceWith(ast.chunk([expr, code.t(';')]));
@@ -1595,6 +1690,7 @@ class JSPrinter {
     }
     storeVar ({uses, name, expr}, path, state) {
         const {t} = code;
+        if (uses === 0) return path.replaceWith(t(''));
         if (uses === 0) return path.replaceWith(ast.chunk([t('/* skipping unused var '), name, t('. */')]));
         path.replaceWith(ast.chunk([t('var '), name, t(' = '), expr, t(';'), t(` /* uses: ${uses} */`)]));
     }
@@ -1630,332 +1726,73 @@ class JSPrinter {
     }
 }
 
+const bind = function (map, statements, name, value) {
+    map[name] = value;
+    statements.push(ast.binding(name));
+};
+
 const compile = function (blockCached) {
     const ops = blockCached._allOps;
-
-    // const bindings = {contexts: {}, functions: {}, args: {}, out: {}};
-    // const contexts = [];
-    // let source = '';
-    // let commandParent = 0;
 
     let start = Date.now();
 
     const bindings = {};
-    const factoryAST = new JSFactory({
-        debugName: `${blockCached.opcode}_${ops.length}`
-    });
+    const factoryAST = ast.factory(`${blockCached.opcode}_${ops.length}`);
 
     factoryAST.dereferences.push(
         ast.storeVar('thread', ast.property('blockUtility', 'thread'))
     );
 
-    // const findVar = function (name) {
-    //     return (
-    //         [].concat.apply([], factoryAST.chunks.map(chunk => chunk.statements.filter(store => store instanceof JSStoreVar))).find(store => store.name === name) ||
-    //         factoryAST.dereferences.find(store => store.name === name) ||
-    //         factoryAST.bindings.find(store => store.name === name)
-    //     );
-    // }
-    //
-    // const addRef = function (name) {
-    //     const node = findVar(name);
-    //     if (node) node.uses++;
-    // };
-    //
-    // const removeRef = function (name) {
-    //     const node = findVar(name);
-    //     if (node) node.uses--;
-    // };
+    const COMMAND_PARENT_ID = 'a_';
 
-    const bind = function (i, name, value) {
-        if (value && !bindings[name]) {
-            bindings[name] = value;
-            factoryAST.bindings.push(ast.storeVar(name, ast.property('bindings', name)));
-        }
-    };
+    bind(bindings, factoryAST.bindings, 'toNumber', Cast.toNumber);
+    bind(bindings, factoryAST.bindings, COMMAND_PARENT_ID, {mutation: null, STATEMENT: null});
 
-    bind(-1, 'toNumber', Cast.toNumber);
-    bind(-1, 'commandArg', {mutation: null, VALUE: null});
+    const opInfos = [], opMap = [];
 
-    const opInfos = [];
-
-    for (let i = 0; i < ops.length; i++) {
+    for (let i = ops.length - 1; i > -1; i--) {
         const op = ops[i];
         const argValues = op._argValues;
+        const parentValues = op._parentValues;
         const func = op._blockFunctionUnbound;
         const context = op._blockFunctionContext;
 
-        const id = findId(bindings, argValues, `arg_${op.opcode}_${i}`, 'arg_');
-        const contextId = findId(bindings, context, context && context.constructor.name, 'ctx_');
-        const functionId = findId(bindings, func, op.opcode, 'fn_');
+        const id = `a${i}`;
+        const parentId = op._parentOffset ? `a${i + op._parentOffset}` : COMMAND_PARENT_ID;
+        // const id = `${op.opcode}_${op._safeId}`;
+        // const parentId = op._parentSafeId ? `${op._parentOpcode}_${op._parentSafeId}` : COMMAND_PARENT_ID;
+        const contextId = context ? findId(bindings, context, context.constructor.name, 'ctx_') : 'null';
+        const functionId = op.opcode;
 
-        opInfos[i] = {op, id, parentId: null, contextId, functionId};
+        bind(bindings, factoryAST.bindings, id, argValues);
+        if (typeof bindings[functionId] !== 'function') {
+            bind(bindings, factoryAST.bindings, functionId, func);
+            if (typeof bindings[contextId] === 'undefined' && context) {
+                bind(bindings, factoryAST.bindings, contextId, context);
+            }
+        }
 
-        bind(i, contextId, context);
-        bind(i, functionId, func);
-        bind(i, id, argValues);
-    }
+        opMap[id] = opInfos[i] = {op, id, parentId, contextId, functionId, args: {}};
+        if (op._parentOffset) opMap[parentId].args[op._parentKey] = id;
 
-    for (let j = 0; j < ops.length; j++) {
-        const op = ops[j];
-        const parentValues = op._parentValues;
-
-        const parentI = ops.findIndex(({_argValues}) => _argValues === parentValues);
-        const parentOp = ops[parentI];
-        opInfos[j].parentId = parentI > -1 ?
-            findId(bindings, parentValues, `arg_${parentOp.opcode}_${parentI}`) :
-            'commandArg';
-
-        const {id, parentId, contextId, functionId} = opInfos[j];
-        factoryAST.chunks.push([
-            ast.storeArg(parentId, op._parentKey, ast.callBlock(contextId, functionId, id)),
+        factoryAST.chunks.unshift([
+            ast.storeArg(
+                parentId, op._parentKey,
+                ast.callBlock(contextId, functionId, id)
+            ),
             ast.checkStatus()
         ]);
     }
 
-    const inlineState = {opInfos, paths: null};
-    new Transformer().transform(factoryAST, [new JSInlineOperators()], [inlineState]);
+    const inlineState = {opInfos, opMap, paths: {}};
+    new Transformer().transform(factoryAST, [new JSFindArg(), new JSInlineOperators()], [inlineState, inlineState]);
     const countRefs = {vars: {}};
     new Transformer().transform(factoryAST, [new JSCountRefs()], [countRefs]);
     const renderState = {source: ''};
     new Transformer().transform(factoryAST, [new JSPrinter()], [renderState]);
+
     (window.AST_COMPILE = (window.AST_COMPILE || [])).push([factoryAST, renderState]);
-    console.log(Date.now() - start);
-
-    // for (let i = 0; i < factoryAST.chunks.length; i++) {
-    //     const op = ops[i];
-    //     const chunk = factoryAST.chunks[i];
-    //
-    //     const context = op._blockFunctionContext;
-    //     const func = op._blockFunctionUnbound;
-    //     const funcsrc = func.toString();
-    //
-    //     const statement = chunk.statements[0];
-    //     let call;
-    //     if (statement instanceof JSStatement) {
-    //         call = statement.expr;
-    //     }
-    //
-    //     if (!/this/.test(funcsrc)) {
-    //         statement.expr = new JSCallFunction({
-    //             func: call.func,
-    //             args: call.args
-    //         });
-    //         removeRef(call.context);
-    //     } else if (context) {
-    //         const methodId = [
-    //             ...Object.getOwnPropertyNames(context),
-    //             ...Object.getOwnPropertyNames(Object.getPrototypeOf(context))
-    //         ].find(key => context[key] === func);
-    //         if (methodId && safeId(methodId) === methodId) {
-    //             statement.expr = new JSCallFunction({
-    //                 func: new JSProperty({
-    //                     lhs: call.context,
-    //                     member: methodId
-    //                 }),
-    //                 args: call.args
-    //             });
-    //             removeRef(call.func);
-    //         }
-    //     }
-    //
-    //     if (
-    //         // this opcode does not modify the thread status
-    //         /^(operator|data|argument)/.test(op.opcode) ||
-    //         // no need to check the last operation the function is done
-    //         i === ops.length - 1
-    //     ) {
-    //         const before = chunk.statements.length;
-    //         chunk.statements = chunk.statements
-    //             .filter(stmt => !(stmt instanceof JSCheckStatus));
-    //         const after = chunk.statements.length;
-    //         for (let j = 0; j < (before - after); j++) removeRef('thread');
-    //     }
-    //
-    //     if (
-    //         op.opcode === 'vm_may_continue' &&
-    //         (
-    //             // is the first operation
-    //             i === 0 ||
-    //             // or last opcode does not modify the stack
-    //             /^(operator|data|argument)/.test(ops[i - 1].opcode)
-    //         )
-    //     ) {
-    //         const call = chunk.statements[0].expr;
-    //         call.context && removeRef(call.context);
-    //         call.func && removeRef(call.func);
-    //         removeRef(call.args);
-    //         if (chunk.statements.length === 1) addRef('thread');
-    //
-    //         if (i === ops.findIndex(({opcode}) => opcode === 'vm_may_continue') && i < ops.length - 1) {
-    //             // the first vm_may_continue operation
-    //             chunk.statements = [
-    //                 new JSExpressionStatement({
-    //                     expr: `if (thread.continuous) thread.reuseStackForNextBlock('${op._argValues.NEXT_STACK}')`
-    //                 }),
-    //                 new JSExpressionStatement({
-    //                     expr: `else return thread.status = ${Thread.STATUS_INTERRUPT}`
-    //                 })
-    //             ];
-    //             if (i === ops.length - 1) {
-    //                 // also the last
-    //                 chunk.statements[1] = new JSExpressionStatement({
-    //                     expr: `thread.status = ${Thread.STATUS_INTERRUPT}`
-    //                 });
-    //             }
-    //         } else if (i < ops.length - 1) {
-    //             // not the first or last operation
-    //             chunk.statements = [
-    //                 new JSExpressionStatement({
-    //                     expr: `thread.reuseStackForNextBlock('${op._argValues.NEXT_STACK}')`
-    //                 })
-    //             ];
-    //         } else {
-    //             // not the first but the last operation
-    //             chunk.statements = [
-    //                 new JSExpressionStatement({
-    //                     expr: `thread.reuseStackForNextBlock(null)`
-    //                 }),
-    //                 new JSExpressionStatement({
-    //                     expr: `thread.status = ${Thread.STATUS_INTERRUPT}`
-    //                 })
-    //             ];
-    //             if (i === ops.findIndex(({opcode}) => opcode === 'vm_may_continue')) {
-    //                 chunk.statements[0] = new JSExpressionStatement({
-    //                     expr: `if (thread.continuous) thread.reuseStackForNextBlock(null)`
-    //                 });
-    //             }
-    //         }
-    //     }
-    //
-    //     if (op.opcode === 'data_variable' || op.opcode === 'data_setvariableto') {
-    //         const argValues = op._argValues;
-    //         const localId = `local_${safeId(argValues.VARIABLE.name)}`;
-    //         if (!findVar(localId)) {
-    //             chunk.statements.unshift(new JSStoreVar({
-    //                 name: localId,
-    //                 expr: `target.lookupOrCreateVariable('${argValues.VARIABLE.id}', '${argValues.VARIABLE.name}')`
-    //             }));
-    //             if (!findVar('target')) {
-    //                 chunk.statements.unshift(new JSStoreVar({
-    //                     name: 'target',
-    //                     expr: 'blockUtility.target'
-    //                 }));
-    //             }
-    //             addRef('target');
-    //         }
-    //         if (op.opcode === 'data_variable') {
-    //             const callIndex = chunk.statements.findIndex(st => st instanceof JSStoreArg);
-    //             const call = chunk.statements[callIndex].expr;
-    //             call.context && removeRef(call.context);
-    //             call.func && removeRef(call.func);
-    //             removeRef(call.args);
-    //             chunk.statements[callIndex].expr = new JSProperty({
-    //                 lhs: localId,
-    //                 member: 'value'
-    //             });
-    //         } else {
-    //             const callIndex = chunk.statements.findIndex(st => st instanceof JSExpressionStatement);
-    //             const call = chunk.statements[callIndex].expr;
-    //             call.context && removeRef(call.context);
-    //             call.func && removeRef(call.func);
-    //             chunk.statements.splice(callIndex, 1,
-    //                 new JSStoreArg({
-    //                     name: localId,
-    //                     key: 'value',
-    //                     expr: `${call.args}.VALUE`
-    //                 }),
-    //                 new JSExpressionStatement({
-    //                     expr: `if (${localId}.isCloud) blockUtility.ioQuery('cloud', 'requestUpdateVariable', [${localId}.name, ${call.args}.VALUE])`
-    //                 })
-    //             );
-    //         }
-    //         addRef(localId);
-    //     }
-    //
-    //     if (/^operator_(add|subtract|multiply|divide)/.test(op.opcode)) {
-    //         const argValues = op._argValues;
-    //         const store1Index = ops.findIndex(({_parentValues, _parentKey}) => _parentValues === argValues && _parentKey === 'NUM1');
-    //         const store2Index = ops.findIndex(({_parentValues, _parentKey}) => _parentValues === argValues && _parentKey === 'NUM2');
-    //
-    //         const id = findId(bindings, argValues);
-    //         // let store1Id = `${id}.NUM1`;
-    //         let store1Id = `${Cast.toNumber(argValues.NUM1)}`;
-    //         if (store1Index > -1) {
-    //             const chunk1 = factoryAST.chunks[store1Index];
-    //             const stmtIndex = chunk1.statements.findIndex(st => st instanceof JSStoreArg);
-    //             const stmt1 = chunk1.statements[stmtIndex];
-    //             if (stmt1) {
-    //                 if (stmt1.expr instanceof JSCall || stmt1.expr instanceof JSProperty) {
-    //                     chunk1.statements = chunk1.statements.slice(0, stmtIndex);
-    //                     store1Id = stmt1.expr;
-    //                 } else if (stmt1.expr instanceof JSBinaryOperator) {
-    //                     chunk1.statements = chunk1.statements.slice(0, stmtIndex);
-    //                     store1Id = `(${stmt1.expr})`;
-    //                 } else {
-    //                     store1Id = `var_${store1Index}`;
-    //                     chunk1.statements[stmtIndex] = new JSStoreVar({
-    //                         name: store1Id,
-    //                         expr: stmt1.expr
-    //                     });
-    //                     chunk1.statements[stmtIndex].uses = 1;
-    //                 }
-    //                 if (!/^operator_(add|subtract|multiply|divide|random|length|mod|round|mathop)$/.test(ops[store1Index].opcode)) {
-    //                     store1Id = `toNumber(${store1Id})`;
-    //                 }
-    //             }
-    //         }
-    //         // let store2Id = `${id}.NUM2`;
-    //         let store2Id = `${Cast.toNumber(argValues.NUM2)}`;
-    //         if (store2Index > -1) {
-    //             const chunk2 = factoryAST.chunks[store2Index];
-    //             const stmtIndex = chunk2.statements.findIndex(st => st instanceof JSStoreArg);
-    //             const stmt2 = chunk2.statements[stmtIndex];
-    //             if (stmt2) {
-    //                 if (stmt2.expr instanceof JSCall || stmt2.expr instanceof JSProperty) {
-    //                     chunk2.statements = chunk2.statements.slice(0, stmtIndex);
-    //                     store2Id = stmt2.expr;
-    //                 } else if (stmt2.expr instanceof JSBinaryOperator) {
-    //                     chunk2.statements = chunk2.statements.slice(0, stmtIndex);
-    //                     store2Id = `(${stmt2.expr})`;
-    //                 } else {
-    //                     store2Id = `var_${store2Index}`;
-    //                     chunk2.statements[stmtIndex] = new JSStoreVar({
-    //                         name: store2Id,
-    //                         expr: stmt2.expr
-    //                     });
-    //                     chunk2.statements[stmtIndex].uses = 1;
-    //                 }
-    //                 if (!/^operator_(add|subtract|multiply|divide|random|length|mod|round|mathop)$/.test(ops[store2Index].opcode)) {
-    //                     store2Id = `toNumber(${store2Id})`;
-    //                 }
-    //             }
-    //         }
-    //
-    //         let operator = '+';
-    //         if (op.opcode === 'operator_subtract') operator = '-';
-    //         if (op.opcode === 'operator_multiply') operator = '*';
-    //         if (op.opcode === 'operator_divide') operator = '/';
-    //
-    //         const expr = chunk.statements[0].expr;
-    //         if (store1Index > -1 && store2Index > -1) {
-    //             removeRef(expr.args);
-    //         }
-    //         if (store1Index > -1 || store2Index > -1) {
-    //             bind(i, 'toNumber', Cast.toNumber);
-    //             addRef('toNumber');
-    //         }
-    //
-    //         chunk.statements[0].expr = new JSBinaryOperator({
-    //             operator,
-    //             input1: store1Id,
-    //             input2: store2Id
-    //         });
-    //     }
-    // }
-
-    // const renderState = {source: ''};
-    // new Transformer().transform(factoryClone, [new JSPrinter()], [renderState]);
+    // console.log(Date.now() - start);
 
     const factory = new Function('bindings', renderState.source);
 
@@ -1968,11 +1805,7 @@ const compile = function (blockCached) {
     });
     compileCached._blockFunctionUnbound = factory(bindings);
     (window.COMPILED = (window.COMPILED || {}))[compileCached._blockFunctionUnbound.name] = factory.toString();
-    // return;
-    // console.log(factory.toString());
-    // window.LONGEST_COMILE = Math.max(window.LONGEST_COMILE | 0, blockCached._allOps.length);
-    // window.COMILES = (window.COMILES | 0) + 1;
-    // console.log(bindings, compileCached._blockFunctionUnbound);
+
     blockCached._allOps = [compileCached];
 };
 
