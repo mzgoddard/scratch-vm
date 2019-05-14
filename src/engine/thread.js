@@ -412,7 +412,9 @@ class Thread {
         if (typeof stackFrame.params[paramName] !== 'undefined') {
             return stackFrame.params[paramName];
         }
-        return null;
+        // When the parameter is not found in the most recent procedure call,
+        // the default is always 0.
+        return 0;
     }
 
     /**
