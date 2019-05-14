@@ -1135,6 +1135,23 @@ const nodeKeys = function (node) {
     return NODE_KEYS[node.type] || Object.keys(node);
 };
 
+const earlierPath = function (earlyPath, laterPath, length = Math.min(earlyPath.length, laterPath.length)) {
+    let i = 1;
+    for (; i < length && earlyPath.pathArray[i] === laterPath.pathArray[i]; i++) {}
+    if (i < length) {
+        const key = earlyPath.pathArray[i];
+        const laterKey = laterPath.pathArray[i];
+        if (typeof key === 'number') {
+            return key < laterKey;
+        } else {
+            const parent = earlyPath.parents[i - 1];
+            const siblings = nodeKeys(parent);
+            return siblings.indexOf(key) < siblings.indexOf(laterKey);
+        }
+    }
+    return earlyPath.length < laterPath.length;
+};
+
 class Path {
     constructor (parentPath) {
         const {pathArray, parents} = parentPath;
@@ -1338,7 +1355,25 @@ class Path {
     _insert (depth, index, newNode) {
         this.confirmPath();
         const parent = this.parents[depth];
-        if (Array.isArray(parent)) parent.splice(Number(index), 0, newNode);
+        if (Array.isArray(parent)) {
+            parent.splice(Number(index), 0, newNode);
+            const insertDepth = depth + 1;
+            if (this.length > insertDepth && this.pathArray[insertDepth] <= index) {
+                this._takePathArray();
+                this.pathArray[insertDepth] += 1;
+            }
+            if (this.parentPath.length > insertDepth && this.parentPath.pathArray[insertDepth] <= index) {
+                // confirmPath
+                let i = 0;
+                const parentPath = this.parentPath
+                const parentPathArray = parentPath.pathArray;
+                for (; i < insertDepth && parentPathArray[i] === this.pathArray[i]; i++) {}
+                if (i === insertDepth) {
+                    parentPath._takePathArray();
+                    parentPath.pathArray[insertDepth] += 1;
+                }
+            }
+        }
         else parent[index] = newNode;
         const newPathArray = this.pathArray.slice();
         if (depth < newPathArray.length) {
@@ -1346,7 +1381,7 @@ class Path {
             newPathArray[depth + 1] = index;
         }
         const newPath = new Path(this).goTo(newPathArray);
-        if (newPath.earlierPath(this)) this.addChange(newPathArray, newNode);
+        this.addChange(newPathArray, newNode);
         return newPath;
     }
     insertSibling (index, newNode) {
@@ -1471,13 +1506,18 @@ class Transformer {
         this.initVisitors(visitors, states);
         this.queue(new QueuedEnter(this.path.pathArrayCopy, root));
         this.isUnchanged = true;
+        this.item = null;
 
         // const visited = new Set();
         while (
             this.queueIndex > 0 && this.queueIndex < 100000 &&
             path.length > 0 && path.length < 100
         ) {
-            const item = queued[this.queueIndex - 1];
+            const key = this.path.key;
+
+
+
+            const item = this.item = queued[this.queueIndex - 1];
             // if (item.keys.length === 0 && item.keyIndex > 0) {
             //     this.queueIndex--;
             //     continue;
@@ -1599,7 +1639,11 @@ class Transformer {
         const length = this.path.changeIndex;
         if (length > 0) {
             const changedNodes = this.path.changedNodes;
-            for (let i = 0; i < length; i++) this.queued[this.queueIndex++] = changedNodes[i];
+            for (let i = 0; i < length; i++) {
+                if (earlierPath(changedNodes[i].pathArray, this.thePath.pathArray)) {
+                    this.queued[this.queueIndex++] = changedNodes[i];
+                }
+            }
             this.path.changeIndex = 0;
             this.isUnchanged = false;
         }
@@ -1924,26 +1968,29 @@ class JSInlineOperators {
             const {id, name} = info.op._argValues.LIST;
             const dataId = `data_list_${safeId(name)}`;
             const indexId = `data_index_${node.args}_${safeId(name)}`;
-            path.replaceWith(ast.ifElse(
-                ast.binaryOperator('===', indexId, 'LIST_INVALID'),
-                `''`,
-                ast.property(ast.property(dataId, 'value'), ast.binaryOperator('-', indexId, 1))
-            ));
+            const {op2, ifElse, p, storeVar, cast2} = ast;
             let parentPath = path.parent;
-            parentPath = parentPath.insertBefore(ast.storeVar(
-                indexId,
-                ast.cast2('toListIndex',
-                    ast.property(node.args, 'INDEX'),
-                    ast.property(ast.property(dataId, 'value'), 'length')
-                )
-            ));
             if (!state.paths[dataId]) {
-                parentPath = parentPath.insertBefore(ast.storeVar(
+                // var dataId = target.lookupOrCreateList('id', 'name')
+                parentPath.insertBefore(storeVar(
                     dataId,
-                    ast.property('target', `lookupOrCreateList('${id}', '${name}')`)
+                    p('target', `lookupOrCreateList('${id}', '${name}')`)
                 ));
                 state.paths[dataId] = parentPath.pathArrayCopy;
             }
+            // var indexId = toListIndex(args.INDEX, dataId.value.length)
+            parentPath.insertBefore(storeVar(
+                indexId,
+                cast2('toListIndex', p(node.args, 'INDEX'), p(p(dataId, 'value'), 'length'))
+            ));
+            // indexId === LIST_INVALID ? '' dataId.value[indexId - 1]
+            path.replaceWith(ifElse(
+                op2('===', indexId, 'LIST_INVALID'),
+                `''`,
+                // dataId.value[indexId - 1]
+                p(p(dataId, 'value'), op2('-', indexId, 1))
+            ));
+            debugger;
         }
     }
     callBlock (node, path, state) {
