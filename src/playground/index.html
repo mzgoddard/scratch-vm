@@ -11,7 +11,7 @@
 
         // Start tracking loading of Scratch before the body dom is evaluated.
         window.ScratchVMLoadStart = Date.now();
-        if (window.performance) {
+        if (window.performance && window.performance.mark) {
             // Mark for browser performance inspectors and if we want to use
             // other performance apis.
             performance.mark('Scratch.LoadStart');

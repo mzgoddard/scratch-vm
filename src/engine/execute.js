@@ -1140,6 +1140,7 @@ class Path {
         const {pathArray, parents} = parentPath;
         this.parentPath = this;
         this.changedNodes = [];
+        this.changeIndex = 0;
 
         this.pathArray = pathArray;
 
@@ -1213,7 +1214,7 @@ class Path {
         return this;
     }
     addChange (pathArray, node) {
-        this.changedNodes.push(new QueuedEnter(pathArray, node));
+        this.changedNodes[this.parentPath.changeIndex++] = new QueuedEnter(pathArray, node);
     }
     _takePathArray () {
         if (!this.ownsArray) {
@@ -1391,25 +1392,57 @@ class QueuedVisit {
         this.mode = mode;
         this.pathArray = pathArray;
         this.node = node;
-        this.isArray = Array.isArray(node);
+        this.isArray = node === keys;
         this.keys = keys;
         this.keyIndex = 0;
     }
 }
+const keysFree = [];
+let keysFreeIndex = 0;
+// const keysFree = NODE_NAMES.reduce((free, key) => {
+//     free[key] = [];
+//     return free;
+// }, {});
 class QueuedKeys extends QueuedVisit {
     constructor (pathArray, node, keys) {
         super('enter', pathArray, node, keys);
     }
 }
+const queuedKeysFromPath = function (path, node, keys) {
+    if (keysFreeIndex) {
+        const free = keysFree[(keysFreeIndex--) - 1];
+        if (path.ownsArray) {
+            const pathArray = free.pathArray;
+            const _pathArray = path.pathArray;
+            const l = _pathArray.length;
+            for (let i = 1; i < l; i++) pathArray[i] = _pathArray[i];
+            if (pathArray.length > l) pathArray.length = l;
+        } else {
+            free.pathArray = path.pathArray;
+        }
+        free.node = node;
+        free.isArray = node === keys;
+        free.keys = keys;
+        free.keyIndex = 0;
+        return free;
+    } else {
+        return new QueuedKeys(path.pathArrayCopy, node, keys);
+    }
+};
+const queuedKeysRelease = function (visit) {
+    keysFree[keysFreeIndex++] = visit;
+};
 const QUEUED_EMPTY_KEYS = [];
 class QueuedEnter extends QueuedVisit {
     constructor (pathArray, node) {
         super('enter', pathArray, node, QUEUED_EMPTY_KEYS);
+        this.keyIndex = -1;
     }
 }
 class QueuedExit extends QueuedVisit {
     constructor (pathArray, node) {
         super('exit', pathArray, node, QUEUED_EMPTY_KEYS);
+        this.keyIndex = -1;
     }
 }
 const nodeType = function (node) {
@@ -1425,11 +1458,13 @@ class Transformer {
         this.visitors = null;
         this.states = null;
         this.i = 0;
+        this.queueIndex = 0;
         this.queued = null;
         this.isUnchanged = true;
     }
     transform (root, visitors, states) {
         this.i = 0;
+        this.queueIndex = 0;
         const queued = this.queued = []
         const path = this.path = Path.fromRoot(root);
         this.cache = {node: {}, keys: {}, enter: {}, exit: {}};
@@ -1439,12 +1474,29 @@ class Transformer {
 
         // const visited = new Set();
         while (
-            queued.length > 0 && queued.length < 100000 &&
+            this.queueIndex > 0 && this.queueIndex < 100000 &&
             path.length > 0 && path.length < 100
         ) {
-            const item = queued[0];
+            const item = queued[this.queueIndex - 1];
+            // if (item.keys.length === 0 && item.keyIndex > 0) {
+            //     this.queueIndex--;
+            //     continue;
+            // } else if (item.keyIndex >= item.keys.length) {
+            //     queuedKeysRelease(item);
+            //     this.queueIndex--;
+            //     continue;
+            // }
+            // if (item.keyIndex > item.keys.length && item.keys.length === 0) {
+            // if (item.keyIndex > item.keys.length && item.keyIndex === 0) {
+            //     this.queueIndex--;
+            //     continue;
+            // } else
             if (item.keyIndex >= item.keys.length && item.keyIndex > 0) {
-                queued.shift();
+                queuedKeysRelease(item);
+                this.queueIndex--;
+                continue;
+            } else if (item.keyIndex >= item.keys.length) {
+                this.queueIndex--;
                 continue;
             }
 
@@ -1462,19 +1514,14 @@ class Transformer {
             const length = item.pathArray.length;
             if (path.parents[length - 1] !== item.node) {
                 // Queued visit is out of date
-                queued.shift();
+                this.queueIndex--;
                 continue;
             }
 
             // There are more leaves than branches. Test if we are at a leaf.
             const index = item.keyIndex++;
-            if (index < item.keys.length) {
-                let key;
-                if (item.isArray) {
-                    key = index;
-                } else {
-                    key = item.keys[index];
-                }
+            if (index > -1) {
+                let key = item.isArray ? index : item.keys[index];
 
                 const node = item.node[key];
 
@@ -1546,14 +1593,15 @@ class Transformer {
         return Boolean(this.visitKeys[key]);
     }
     queue (queuedVisit) {
-        this.queued.unshift(queuedVisit);
+        this.queued[this.queueIndex++] = queuedVisit;
     }
     queueChanges () {
-        const changedNodes = this.path.changedNodes;
-        if (changedNodes.length > 0) {
+        const length = this.path.changeIndex;
+        if (length > 0) {
+            const changedNodes = this.path.changedNodes;
+            for (let i = 0; i < length; i++) this.queued[this.queueIndex++] = changedNodes[i];
+            this.path.changeIndex = 0;
             this.isUnchanged = false;
-            for (let i = 0; i < changedNodes.length; i++) this.queue(changedNodes[i]);
-            changedNodes.length = 0;
         }
     }
     visit (visitFunctions) {
@@ -1693,7 +1741,8 @@ class Transformer {
         if (enterFunctions.length > 0) this.queueChanges();
 
         const nodeKeys = visitTypes.keys || node;
-        if (nodeKeys.length > 0) this.queue(new QueuedKeys(this.path.pathArrayCopy, node, nodeKeys));
+        // if (nodeKeys.length > 0) this.queue(new QueuedKeys(this.path.pathArrayCopy, node, nodeKeys));
+        if (nodeKeys.length > 0) this.queue(queuedKeysFromPath(this.path, node, nodeKeys));
     }
     exit () {
         const node = this.path.node;
@@ -2171,13 +2220,38 @@ const compile = function (blockCached) {
         ]);
     }
 
+    const perf = {
+        start: performance.now(),
+        end: 0,
+        baseline: 0,
+        inline: 0,
+        count: 0,
+        optimized: 0,
+        minimized: 0
+    };
+    let last = perf.start;
+    perf.baseline = -last;
+    const baselineState = {
+        source: '',
+        minimize: false
+    };
+    new Transformer().transform(ast.cloneDeep(factoryAST), [new JSPrinter()], [baselineState]);
+    const baseline = baselineState.source;
+    perf.baseline += (last = performance.now());
+
+    perf.inline = -last;
     const inlineState = {bindings, opInfos, opMap, paths: {}};
     new Transformer().transform(factoryAST, [new JSFindArg(), new JSInlineOperators()], [inlineState, inlineState]);
+    perf.inline += (last = performance.now());
+
+    perf.count = -last;
     const countRefs = {vars: {
         bindings: {uses: 0},
         blockUtility: {uses: 0}
     }, strings: []};
     new Transformer().transform(factoryAST, [new JSCountRefs()], [countRefs]);
+    perf.count += (last = performance.now());
+
     // console.log(countRefs.strings, ast.cloneDeep(factoryAST));
     // console.log(ast.cloneDeep(factoryAST));
     let mangled = Object.entries(countRefs.vars);
@@ -2190,15 +2264,27 @@ const compile = function (blockCached) {
         bindings: 'b',
         blockUtility: 'u'
     });
+
     const factoryClone = ast.cloneDeep(factoryAST);
     const renderState = {
         source: '',
         vars: countRefs.vars,
         nextMangle: mangled.length,
         mangled,
-        minimize: true
+        minimize: false
     };
-    new Transformer().transform(factoryAST, [new JSMangle(), new JSPrinter()], [renderState, renderState]);
+
+    perf.optimized = -last;
+    new Transformer().transform(ast.cloneDeep(factoryAST), [new JSPrinter()], [renderState]);
+    const optimized = renderState.source;
+    perf.optimized += (last = performance.now());
+
+    perf.minimized = -last;
+    renderState.source = '';
+    renderState.minimize = true;
+    new Transformer().transform(ast.cloneDeep(factoryAST), [new JSMangle(), new JSPrinter()], [renderState, renderState]);
+    const minimized = renderState.source;
+    perf.minimized += (perf.end = last = performance.now());
 
     (window.AST_COMPILE = (window.AST_COMPILE || [])).push([inlineState, countRefs, renderState, factoryClone, factoryAST]);
     // console.log(Date.now() - start);
@@ -2213,6 +2299,9 @@ const compile = function (blockCached) {
         mutation: null
     });
     compileCached._blockFunction = compileCached._blockFunctionUnbound = factory(bindings);
+    (window.PERF = (window.PERF || {}))[compileCached._blockFunctionUnbound.name] = perf;
+    (window.BASELINE = (window.BASELINE || {}))[compileCached._blockFunctionUnbound.name] = baseline;
+    (window.OPTIMIZED = (window.OPTIMIZED || {}))[compileCached._blockFunctionUnbound.name] = optimized;
     (window.COMPILED = (window.COMPILED || {}))[compileCached._blockFunctionUnbound.name] = factory.toString();
 
     blockCached._allOps = [compileCached];

@@ -1,5 +1,5 @@
 // Track loading time with timestamps and if possible the performance api.
-if (window.performance) {
+if (window.performance && window.performance.mark) {
     // Mark with the performance API when benchmark.js and its dependecies start
     // evaluation. This can tell us once measured how long the code spends time
     // turning into execution code for the first time. Skipping evaluation of
@@ -174,7 +174,7 @@ class LoadingProgress {
 
             result.then(() => {
                 if (_this.dataLoaded === 0) {
-                    if (window.performance) {
+                    if (window.performance && window.performance.mark && window.performance.measure) {
                         // How long did loading the data file take?
                         performance.mark('Scratch.LoadDataEnd');
                         performance.measure('Scratch.LoadData', 'Scratch.LoadDataStart', 'Scratch.LoadDataEnd');
@@ -188,7 +188,7 @@ class LoadingProgress {
                 }
 
                 if (_this.contentComplete && _this.contentComplete === _this.contentTotal) {
-                    if (window.performance) {
+                    if (window.performance && window.performance.mark && window.performance.measure) {
                         // How long did it take to download the html, js, and
                         // all the project assets?
                         performance.mark('Scratch.DownloadEnd');
@@ -207,7 +207,7 @@ class LoadingProgress {
             // Currently LoadingProgress tracks when the data has been loaded
             // and not when the data has been decoded. It may be difficult to
             // track that but it isn't hard to track when its all been decoded.
-            if (window.performance) {
+            if (window.performance && window.performance.mark && window.performance.measure) {
                 // How long did it take to load and hydrate the html, js, and
                 // all the project assets?
                 performance.mark('Scratch.LoadEnd');
@@ -746,7 +746,7 @@ window.onhashchange = function () {
     location.reload();
 };
 
-if (window.performance) {
+if (window.performance && window.performance.mark && window.performance.measure) {
     performance.mark('Scratch.EvalEnd');
     performance.measure('Scratch.Eval', 'Scratch.EvalStart', 'Scratch.EvalEnd');
 }
