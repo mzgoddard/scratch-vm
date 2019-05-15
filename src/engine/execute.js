@@ -109,7 +109,14 @@ const handlePromise = (thread, blockCached) => {
 };
 
 const safeId = function (id) {
-    return `_${String(id).replace(/[^_\w]/g, '_')}`;
+    let hash = 0x00000000;
+    for (let i = 0; i < id.length; i++) {
+        hash = Math.abs((
+            hash + (id.charCodeAt(i) * Math.pow(31, id.length - i - 1))
+        ) & 0xffffffff);
+    }
+    return `_${hash}`;
+    // return `_${String(id).replace(/[^_\w]/g, c => c.charCodeAt(0))}`;
 };
 
 /**
@@ -1487,6 +1494,295 @@ const nodeType = function (node) {
     else if (node === null) return 'null';
     return 'unknown';
 };
+const EMPTY_VISIT = {
+    
+}
+let freePathIndex = 0;
+let freePathTrees = [];
+let washPathIndex = 0;
+let washPathTrees = [];
+class PathTree {
+    constructor (depth = 0) {
+        this.depth = depth;
+
+        this.parent = null;
+
+        this.node = null;
+        this.type = '';
+        this.keys = null;
+        this.isArray = null;
+
+        // this.ready = false;
+        this.changed = false;
+        // this.visit = false;
+
+        // state walking through members
+        this._index = -1;
+        this.children = [];
+        this.lastChild = -1;
+    }
+    static create (depth) {
+        if (freePathIndex > 0) {
+            window.RECYCLED_NODES = (window.RECYCLED_NODES | 0) + 1;
+            const path = freePathTrees[--freePathIndex];
+            path.depth = depth;
+            return path;
+        } else {
+            window.CREATED_NODES = (window.CREATED_NODES | 0) + 1;
+            return new PathTree(depth);
+        }
+    }
+    static release (path) {
+        window.RELEASED_NODES = (window.RELEASED_NODES | 0) + 1;
+        path.clear();
+        // for (let i = 0; i < path.lastChild; i++) {
+        //     if (path.children[i]) {
+        //         // PathTree.release(path.children[i]);
+        //         // path.children[i] = null;
+        //     }
+        // }
+        // path.visit = false;
+        // washPathTrees[washPathIndex++] = path;
+        return null;
+    }
+    static recharge (path) {
+        window.RECHARGED_NODES = (window.RECHARGED_NODES | 0) + 1;
+        path.clear();
+
+        washPathTrees[washPathIndex++] = path;
+
+        let index = freePathIndex;
+        let trees = freePathTrees;
+        freePathIndex = washPathIndex;
+        freePathTrees = washPathTrees;
+        washPathIndex = index;
+        washPathTrees = trees;
+    }
+    set (parent, node) {
+        this.parent = parent;
+
+        this.node = node;
+        this.type = nodeType(node);
+        this.keys = NODE_KEYS[this.type] || node;
+        this.isArray = this.keys === node;
+
+        this._index = -1;
+        this.lastChild = 0;
+    }
+    store (node) {
+        this.node = node;
+        this.type = nodeType(node);
+        this.keys = NODE_KEYS[this.type] || node;
+        this.isArray = this.keys === node;
+    }
+    clear () {
+        this._index = Infinity;
+        // this.visit = false;
+        this.changed = false;
+        for (let i = 0; i < this.lastChild; i++) {
+            if (this.children[i] && this.children[i].active) this.children[i].clear();
+        }
+    }
+    next () {
+        if (this.changed) {
+            const activeIndex = this.activeChildIndex;
+            if (activeIndex === -1 || activeIndex >= this._index) {
+                this.changed = false;
+            }
+        } else if (this._index < this.keys.length) {
+            this._index = Math.min(this._index + 1, this.lastChild + 1);
+        }
+    }
+    _attach (index) {
+        if (index >= this.keys.length) throw new Error('Can only attach children that exist');
+        let child = this.children[index];
+        if (!child) {
+            window.NEW_NODES = (window.NEW_NODES | 0) + 1;
+            child = this.children[index] = PathTree.create(this.depth + 1);
+            child.set(this, this.node[this.isArray ? index : this.keys[index]]);
+            this.lastChild = Math.max(this.lastChild, index + 1);
+        } else if (index === this.lastChild) {
+            window.REUSED_NODES = (window.REUSED_NODES | 0) + 1;
+            child.set(this, this.node[this.isArray ? index : this.keys[index]]);
+            this.lastChild = Math.max(this.lastChild, index + 1);
+        }
+        return child;
+    }
+    attachQuiet (index) {
+        return this._attach(index);
+    }
+    attach (index) {
+        return this._attach(index);
+    }
+    detach (index) {
+        // This index will never execute more than once
+        const child = this.children[index];
+        // if (!child) throw new Error('Cannot detach a unset path');
+        if (child && child.active) child.clear();
+        return this;
+    }
+    get index () {
+        if (!this.changed) return this._index;
+        return Math.min(this._index, this.activeChildIndex);
+    }
+    push () {
+        return this._attach(this.index);
+        // const index = ;
+        // const child = this.children[index];
+        // if (child) return child;
+        // return this.attach(index);
+    }
+    pop () {
+        if (this._index === Infinity) return this.parent;
+        return this.parent.detach(this.keyIndex);
+    }
+
+    get activeChildIndex () {
+        if (this._index === Infinity) return Infinity;
+        for (let i = 0; i < this._index; i++) {
+            if (this.children[i] && this.children[i].active) return i;
+        }
+        return this._index;
+    }
+    get activeChild () {
+        return this.children[this.activeChildIndex];
+    }
+    get ready () {
+        return this.lastChild > -1;
+    }
+    get cleared () {
+        return this._index === Infinity;
+    }
+    get visit () {
+        return this._index === -1 || this._index === this.lastChild;
+    }
+    get active () {
+        // this.ready && !this.cleared
+        return this._index !== Infinity;
+    }
+    get keyIndex () {
+        return this.parent.children.indexOf(this);
+    }
+    get key () {
+        return this.parent.isArray ? this.keyIndex : this.parent.keys[this.keyIndex];
+    }
+    get parentKey () {
+        return this.parent.key;
+    }
+    get parentNode () {
+        return this.parent.node;
+    }
+    get root () {
+        let parent = this;
+        while (parent && parent.depth > 0) parent = parent.parent;
+        return parent;
+    }
+    get rootNode () {
+        return this.root.node;
+    }
+
+    skip () {
+        this.clear();
+    }
+    stop () {
+        this.root.clear();
+    }
+
+    assertActive () {
+        let path = this;
+        while (path.parent && (path.active || path.keyIndex > -1)) path = path.parent;
+        if (path.depth > 0) throw new Error('Path must be active to modify the tree');
+    }
+    assertArray () {
+        this.assertActive();
+        if (!this.isArray) throw new Error('Path must be an array');
+    }
+
+    changeTree () {
+        let parent = this;
+        parent.changed = true;
+        while (parent.parent && (parent.keyIndex < parent.parent._index)) {
+            parent = parent.parent;
+            parent.changed = true;
+        }
+    }
+
+    setKey (key, node) {
+        this.assertActive();
+        this.node[key] = node;
+        const index = this.isArray ? key : this.keys.indexOf(key);
+        this.detach(index);
+        PathTree.release(this.children[index]);
+        this.children[index] = null;
+        this.changeTree();
+        return this.attach(index);
+    }
+    getKey (key) {
+        this.assertActive();
+        return this.attachQuiet(this.isArray ? key : this.keys.indexOf(key));
+    }
+
+    remove () {
+        this.assertActive();
+        const index = this.keyIndex;
+        if (index === -1) throw new Error('Cannot remove path that is not in parent');
+        this.parent.detach(index);
+        if (this.parent.isArray) {
+            if (index <= this.parent._index) {
+                this.parent._index--;
+            }
+            if (index <= this.parent.lastChild) {
+                this.parent.lastChild--;
+            }
+            this.parent.node.splice(index, 1);
+            PathTree.release(this.parent.children[index]);
+            this.parent.children.splice(index, 1);
+        } else {
+            this.parent.node[this.key] = null;
+            this.parent.children[index] = null;
+        }
+    }
+
+    replaceWith (node) {
+        this.assertActive();
+        const index = this.keyIndex;
+        if (index === -1) throw new Error('Cannot replace path that is not in parent');
+        this.parent.node[this.key] = node;
+        this.parent.detach(index);
+        PathTree.release(this.parent.children[index]);
+        this.parent.children[index] = null;
+        this.changeTree();
+        return this.parent.attach(index);
+    }
+
+    insertChild (index, node) {
+        this.assertArray();
+        if (index <= this._index) this._index++;
+        this.node.splice(index, 0, node);
+        this.children.splice(index, 0, null);
+        this.changeTree();
+        return this.attach(index);
+    }
+    prependChild (node) {
+        return this.insertChild(0, node);
+    }
+    appendChild (node) {
+        return this.insertChild(this.keys.length, node);
+    }
+
+    insertFirst (node) {
+        return this.parent.prependChild(node);
+    }
+    insertLast (node) {
+        return this.parent.appendChild(node);
+    }
+    insertBefore (node) {
+        return this.parent.insertChild(this.key, node);
+    }
+    insertAfter (node) {
+        return this.parent.insertChild(this.key + 1, node);
+    }
+}
 class Transformer {
     constructor () {
         this.path = null;
@@ -1496,6 +1792,8 @@ class Transformer {
         this.queueIndex = 0;
         this.queued = null;
         this.isUnchanged = true;
+        this.index = 0;
+        this.length = 0;
     }
     transform (root, visitors, states) {
         this.i = 0;
@@ -1508,72 +1806,39 @@ class Transformer {
         this.isUnchanged = true;
         this.item = null;
 
+        const iteratorStack = [];
+
+        this.path = PathTree.create(-1);
+        this.path.node = {root};
+        this.path.keys = ['root'];
+        this.path.lastChild = 0;
+        this.path._index = -1;
+        this.path.next();
+        this.path = this.path.push();
+
         // const visited = new Set();
+        let dog = 0;
+        this.index = this.path.index;
+        this.length = this.path.keys.length;
         while (
-            this.queueIndex > 0 && this.queueIndex < 100000 &&
-            path.length > 0 && path.length < 100
+            dog++ < 100000 && (
+                this.path.depth > -1 ||
+                this.path._index < this.path.keys.length
+            ) && this.path.depth < 100
         ) {
-            const key = this.path.key;
-
-
-
-            const item = this.item = queued[this.queueIndex - 1];
-            // if (item.keys.length === 0 && item.keyIndex > 0) {
-            //     this.queueIndex--;
-            //     continue;
-            // } else if (item.keyIndex >= item.keys.length) {
-            //     queuedKeysRelease(item);
-            //     this.queueIndex--;
-            //     continue;
-            // }
-            // if (item.keyIndex > item.keys.length && item.keys.length === 0) {
-            // if (item.keyIndex > item.keys.length && item.keyIndex === 0) {
-            //     this.queueIndex--;
-            //     continue;
-            // } else
-            if (item.keyIndex >= item.keys.length && item.keyIndex > 0) {
-                queuedKeysRelease(item);
-                this.queueIndex--;
-                continue;
-            } else if (item.keyIndex >= item.keys.length) {
-                this.queueIndex--;
-                continue;
-            }
-
-            if (this.isUnchanged) {
-                const mismatch = path.mismatchIndex(item.pathArray);
-                if ((item.keys.length > 0 && path.length - mismatch > 1) ||
-                    path.length - mismatch > 0) {
-                    path._goTo(mismatch, item.pathArray);
-                }
+            if (this.path._index === -1) {
+                if (this.path.visit) this.visit(this.visitTypes[this.path.type].enter);
+                this.path.next();
+            } else if (this.path.index < this.path.keys.length) {
+                this.path = this.path.push();
+                this.path.parent.next();
             } else {
-                path.goTo(item.pathArray);
-                this.isUnchanged = true;
+                if (this.path.visit) this.visit(this.visitTypes[this.path.type].exit);
+                this.path = this.path.pop();
             }
-
-            const length = item.pathArray.length;
-            if (path.parents[length - 1] !== item.node) {
-                // Queued visit is out of date
-                this.queueIndex--;
-                continue;
-            }
-
-            // There are more leaves than branches. Test if we are at a leaf.
-            const index = item.keyIndex++;
-            if (index > -1) {
-                let key = item.isArray ? index : item.keys[index];
-
-                const node = item.node[key];
-
-                // path.goToKey(key);
-                path._takePathArray();
-                path.pathArray[length] = key;
-                path.parents[length] = node;
-            }
-
-            if (item.mode === 'enter') this.enter();
-            else this.exit();
         }
+
+        PathTree.recharge(this.path);
     }
     getPrototypeAncestry (proto) {
         const ancestry = [];
@@ -1651,7 +1916,7 @@ class Transformer {
     visit (visitFunctions) {
         const {path} = this;
         const node = path.node;
-        for (let j = 0; node === path.node && j < visitFunctions.length; j += 2) {
+        for (let j = 0; path.active && j < visitFunctions.length; j += 2) {
             visitFunctions[j](node, path, visitFunctions[j + 1]);
         }
     }
@@ -1804,8 +2069,12 @@ class JSCountRefs {
         if (refNode) refNode.uses++;
     }
     storeVar (node, path, state) {
-        node.uses = 0;
-        state.vars[node.name] = node;
+        if (!state.vars[node.name]) {
+            node.uses = 0;
+            state.vars[node.name] = node;
+        } else {
+            node.uses = -1;
+        }
     }
     checkStatus (node, path, state) {
         const refNode = state.vars.thread;
@@ -1815,7 +2084,7 @@ class JSCountRefs {
 class JSFindArg {
     exitStoreArg (node, path, state) {
         state.paths[node.name] = state.paths[node.name] || {};
-        state.paths[node.name][node.key] = path.pathArrayCopy;
+        state.paths[node.name][node.key] = path;
     }
 }
 const findArg = new JSFindArg();
@@ -1823,8 +2092,12 @@ class JSInlineOperators {
     call (node, path, state) {
         const info = state.opMap[node.args];
         if (info && info.op.opcode === 'vm_may_continue') {
-            const chunkParent = path.parents[path.length - 4];
-            const chunkIndex = path.pathArray[path.length - 3];
+            let chunkPath = path.parent;
+            while (chunkPath.type !== 'array') {
+                chunkPath = chunkPath.parent;
+            }
+            const chunkParent = chunkPath.parentNode;
+            const chunkIndex = chunkPath.key;
 
             const afterAnother = chunkParent.some((chunk, index) => (
                 index < chunkIndex &&
@@ -1839,6 +2112,7 @@ class JSInlineOperators {
 
             const lastChunk = chunkParent[chunkIndex - 1];
             if (!lastChunk) return;
+
             let i = lastChunk.length - 1;
             for (; i >= 0; i--) {
                 const statement = lastChunk[i];
@@ -1858,7 +2132,7 @@ class JSInlineOperators {
             }
         }
         if (info && /^argument/.test(info.op.opcode)) {
-            path.replaceWith(ast.cast2('definedOr', ast.cast2('getParam', 'thread', ast.p(node.args, 'VALUE')), 0));
+            path = path.replaceWith(ast.cast2('definedOr', ast.cast2('getParam', 'thread', ast.p(node.args, 'VALUE')), 0));
         }
         if (info && /^operator_(add|subtract|multiply|divide)/.test(info.op.opcode)) {
             const store1Id = ast.property(node.args, 'NUM1');
@@ -1869,7 +2143,7 @@ class JSInlineOperators {
             if (info.op.opcode === 'operator_multiply') operator = '*';
             if (info.op.opcode === 'operator_divide') operator = '/';
 
-            path.replaceWith(ast.binaryOperator(operator, ast.cast('toNumber', store1Id), ast.cast('toNumber', store2Id)));
+            path = path.replaceWith(ast.binaryOperator(operator, ast.cast('toNumber', store1Id), ast.cast('toNumber', store2Id)));
         }
         if (info && /^operator_(lt|equals|gt)/.test(info.op.opcode)) {
             let operator = '<';
@@ -1897,7 +2171,7 @@ class JSInlineOperators {
             const NUM1 = ast.number(ast.property(node.args, 'NUM1'));
             const NUM2 = ast.number(ast.property(node.args, 'NUM2'));
 
-            path.replaceWith(ast.cast2('scratchMod', NUM1, NUM2));
+            path = path.replaceWith(ast.cast2('scratchMod', NUM1, NUM2));
         }
         if (info && info.op.opcode === 'operator_mathop') {
             const operator = Cast.toString(info.op._argValues.OPERATOR).toLowerCase();
@@ -1938,10 +2212,8 @@ class JSInlineOperators {
         if (info && info.op.opcode === 'data_variable') {
             const {id, name} = info.op._argValues.VARIABLE;
             const dataId = `data_${safeId(name)}`;
-            path.replaceWith(ast.property(dataId, 'value'));
-            if (!state.paths[dataId]) {
-                state.paths[dataId] = path.parent.insertBefore(ast.storeVar(dataId, ast.p('target', `lookupOrCreateVariable('${id}', '${name}')`))).pathArrayCopy;
-            }
+            path.parent.insertBefore(ast.storeVar(dataId, ast.p('target', `lookupOrCreateVariable('${id}', '${name}')`)));
+            path = path.replaceWith(ast.property(dataId, 'value'));
         }
         if (info && info.op.opcode === 'data_setvariableto') {
             const {id, name} = info.op._argValues.VARIABLE;
@@ -1959,10 +2231,8 @@ class JSInlineOperators {
             //             `'requestUpdateVariable'`,
             //             ast.array([`'${name}'`, ast.property(node.args, 'VALUE')])
             //         ])));
-            parentPath.replaceWith(ast.storeArg(dataId, 'value', ast.property(node.args, 'VALUE')));
-            if (!state.paths[dataId]) {
-                state.paths[dataId] = parentPath.insertBefore(ast.storeVar(dataId, ast.property('target', `lookupOrCreateVariable('${id}', '${name}')`))).pathArrayCopy;
-            }
+            parentPath.insertBefore(ast.storeVar(dataId, ast.p('target', `lookupOrCreateVariable('${id}', '${name}')`)));
+            parentPath.replaceWith(ast.storeArg(dataId, 'value', ast.p(node.args, 'VALUE')));
         }
         if (info && info.op.opcode === 'data_itemoflist') {
             const {id, name} = info.op._argValues.LIST;
@@ -1970,27 +2240,23 @@ class JSInlineOperators {
             const indexId = `data_index_${node.args}_${safeId(name)}`;
             const {op2, ifElse, p, storeVar, cast2} = ast;
             let parentPath = path.parent;
-            if (!state.paths[dataId]) {
-                // var dataId = target.lookupOrCreateList('id', 'name')
-                parentPath.insertBefore(storeVar(
-                    dataId,
-                    p('target', `lookupOrCreateList('${id}', '${name}')`)
-                ));
-                state.paths[dataId] = parentPath.pathArrayCopy;
-            }
+            // var dataId = target.lookupOrCreateList('id', 'name')
+            parentPath.insertBefore(storeVar(
+                dataId,
+                p('target', `lookupOrCreateList('${id}', '${name}')`)
+            ));
             // var indexId = toListIndex(args.INDEX, dataId.value.length)
             parentPath.insertBefore(storeVar(
                 indexId,
                 cast2('toListIndex', p(node.args, 'INDEX'), p(p(dataId, 'value'), 'length'))
             ));
             // indexId === LIST_INVALID ? '' dataId.value[indexId - 1]
-            path.replaceWith(ifElse(
+            path = path.replaceWith(ifElse(
                 op2('===', indexId, 'LIST_INVALID'),
                 `''`,
                 // dataId.value[indexId - 1]
                 p(p(dataId, 'value'), op2('-', indexId, 1))
             ));
-            debugger;
         }
     }
     callBlock (node, path, state) {
@@ -2027,16 +2293,16 @@ class JSInlineOperators {
         if (!state.paths[node.expect]) {
             if (Cast[node.expect]) {
                 if (!state.bindings[node.expect]) state.bindings[node.expect] = Cast[node.expect];
-                state.paths[node.expect] = new Path(path).goTo(['root', 'bindings']).appendChild(ast.storeVar(node.expect, ast.p('bindings', node.expect)));
+                state.paths[node.expect] = path.root.getKey('bindings').appendChild(ast.storeVar(node.expect, ast.p('bindings', node.expect)));
             }
             if (node.expect === 'floor10') {
-                state.paths.floor10 = new Path(path).goTo(['root', 'bindings']).appendChild(
+                state.paths.floor10 = path.root.getKey('bindings').appendChild(
                     ast.storeVar('floor10',
                         'function (value) {return value - (value % 1e-10);};'
                     ));
             }
             if (node.expect === 'scratchTan') {
-                state.paths.scratchTan = new Path(path).goTo(['root', 'bindings']).appendChild(
+                state.paths.scratchTan = path.root.getKey('bindings').appendChild(
                     ast.storeVar('scratchTan',
                         [
                             'function (value) {return (',
@@ -2057,10 +2323,10 @@ class JSInlineOperators {
         if (!state.paths[node.expect]) {
             if (Cast[node.expect]) {
                 if (!state.bindings[node.expect]) state.bindings[node.expect] = Cast[node.expect];
-                state.paths[node.expect] = new Path(path).goTo(['root', 'bindings']).appendChild(ast.storeVar(node.expect, ast.p('bindings', node.expect)));
+                state.paths[node.expect] = path.root.getKey('bindings').appendChild(ast.storeVar(node.expect, ast.p('bindings', node.expect)));
             }
             if (node.expect === 'definedOr') {
-                state.paths.definedOr =  new Path(path).goTo(['root', 'bindings']).appendChild(
+                state.paths.definedOr =  path.root.getKey('bindings').appendChild(
                     ast.storeVar('definedOr',
                         [
                             'function (v, d) {return typeof v === \'undefined\' ? d : v;}'
@@ -2068,7 +2334,7 @@ class JSInlineOperators {
                     ));
             }
             if (node.expect === 'getParam') {
-                state.paths.getParam =  new Path(path).goTo(['root', 'bindings']).appendChild(
+                state.paths.getParam =  path.root.getKey('bindings').appendChild(
                     ast.storeVar('getParam',
                         [
                             'function (t, k) {return t.stackFrame.params[k];}'
@@ -2077,7 +2343,7 @@ class JSInlineOperators {
             }
             if (node.expect === 'scratchMod') {
                 // (NUM1 % NUM2) + ((NUM1 < 0 !== NUM2 < 0) ? NUM2 : 0)
-                state.paths.scratchTan = new Path(path).goTo(['root', 'bindings']).appendChild(
+                state.paths.scratchTan = path.root.getKey('bindings').appendChild(
                     ast.storeVar('scratchMod',
                         [
                             'function (n, m) {return (n % m) + ((n < 0 !== m < 0) ? m : 0);}'
@@ -2095,9 +2361,9 @@ class JSInlineOperators {
             }
 
             const info = state.opMap[node.lhs];
-            const storePathArray = state.paths[node.lhs] && state.paths[node.lhs][node.member];
+            const storePath = state.paths[node.lhs] && state.paths[node.lhs][node.member];
 
-            if (!storePathArray) {
+            if (!storePath) {
                 if (info && !info.args[node.member]) {
                     if (typeof info.op._argValues[node.member] === 'number') {
                         path.replaceWith(info.op._argValues[node.member]);
@@ -2106,7 +2372,7 @@ class JSInlineOperators {
                     }
                 }
             } else if (info) {
-                const storePath = new Path(path).goTo(storePathArray);
+                // const storePath = new Path(path).goTo(storePathArray);
                 const storeExpr = storePath.node.expr;
 
                 if (ast.type.isOperator(storeExpr)) {
@@ -2154,7 +2420,7 @@ class JSPrinter {
     }
     storeVar ({uses, name, expr}, path, state) {
         const {t} = code;
-        if (uses === 0 && state.minimize) return path.skip();
+        if (uses < 0 || uses === 0 && state.minimize) return path.skip();
         if (uses === 0) return path.replaceWith(ast.chunk([t('/* skipping unused var '), name, t('. */')]));
         path.replaceWith(ast.chunk([t('var '), name, t(' = '), expr, t(';'), state.minimize ? '' : t(` /* uses: ${uses} */`)]));
     }
@@ -2282,7 +2548,7 @@ const compile = function (blockCached) {
         source: '',
         minimize: false
     };
-    new Transformer().transform(ast.cloneDeep(factoryAST), [new JSPrinter()], [baselineState]);
+    // new Transformer().transform(ast.cloneDeep(factoryAST), [new JSPrinter()], [baselineState]);
     const baseline = baselineState.source;
     perf.baseline += (last = performance.now());
 
@@ -2299,11 +2565,8 @@ const compile = function (blockCached) {
     new Transformer().transform(factoryAST, [new JSCountRefs()], [countRefs]);
     perf.count += (last = performance.now());
 
-    // console.log(countRefs.strings, ast.cloneDeep(factoryAST));
-    // console.log(ast.cloneDeep(factoryAST));
     let mangled = Object.entries(countRefs.vars);
     mangled = mangled.sort(([,{uses}], [,{uses: uses2}]) => uses2 - uses);
-    // console.log(mangled);
     mangled = mangled.reduce((map, [name], index) => {
         if (!map[name]) map[name] = `m${index}`;
         return map;
@@ -2322,7 +2585,7 @@ const compile = function (blockCached) {
     };
 
     perf.optimized = -last;
-    new Transformer().transform(ast.cloneDeep(factoryAST), [new JSPrinter()], [renderState]);
+    // new Transformer().transform(ast.cloneDeep(factoryAST), [new JSPrinter()], [renderState]);
     const optimized = renderState.source;
     perf.optimized += (last = performance.now());
 
@@ -2334,7 +2597,6 @@ const compile = function (blockCached) {
     perf.minimized += (perf.end = last = performance.now());
 
     (window.AST_COMPILE = (window.AST_COMPILE || [])).push([inlineState, countRefs, renderState, factoryClone, factoryAST]);
-    // console.log(Date.now() - start);
 
     const factory = new Function(mangled['bindings'] || 'bindings', renderState.source);
 
