@@ -1495,12 +1495,23 @@ const nodeType = function (node) {
     return 'unknown';
 };
 const EMPTY_VISIT = {
-    
+
 }
 let freePathIndex = 0;
 let freePathTrees = [];
 let washPathIndex = 0;
 let washPathTrees = [];
+
+const AVAILABLE = 0;
+const POPPED = 1;
+const ACTIVE = 2;
+const REVIEW = 3;
+
+const AT_HEAD = 0;
+const IN_RANGE = 1;
+const AT_TAIL = 2;
+const OUT_OF_RANGE = 3;
+
 class PathTree {
     constructor (depth = 0) {
         this.depth = depth;
@@ -1512,27 +1523,25 @@ class PathTree {
         this.keys = null;
         this.isArray = null;
 
-        // this.ready = false;
-        this.changed = false;
-        // this.visit = false;
-
         // state walking through members
+        this.state = AVAILABLE;
         this._index = -1;
         this.children = [];
         this.lastChild = -1;
     }
     static create (depth) {
-        if (freePathIndex > 0) {
-            window.RECYCLED_NODES = (window.RECYCLED_NODES | 0) + 1;
-            const path = freePathTrees[--freePathIndex];
-            path.depth = depth;
-            return path;
-        } else {
+        // if (freePathIndex > 0) {
+        //     window.RECYCLED_NODES = (window.RECYCLED_NODES | 0) + 1;
+        //     const path = freePathTrees[--freePathIndex];
+        //     path.depth = depth;
+        //     return path;
+        // } else {
             window.CREATED_NODES = (window.CREATED_NODES | 0) + 1;
             return new PathTree(depth);
-        }
+        // }
     }
     static release (path) {
+        return;
         window.RELEASED_NODES = (window.RELEASED_NODES | 0) + 1;
         path.clear();
         // for (let i = 0; i < path.lastChild; i++) {
@@ -1541,11 +1550,11 @@ class PathTree {
         //         // path.children[i] = null;
         //     }
         // }
-        // path.visit = false;
         // washPathTrees[washPathIndex++] = path;
         return null;
     }
     static recharge (path) {
+        return;
         window.RECHARGED_NODES = (window.RECHARGED_NODES | 0) + 1;
         path.clear();
 
@@ -1559,6 +1568,7 @@ class PathTree {
         washPathTrees = trees;
     }
     set (parent, node) {
+        this.state = ACTIVE;
         this.parent = parent;
 
         this.node = node;
@@ -1576,20 +1586,31 @@ class PathTree {
         this.isArray = this.keys === node;
     }
     clear () {
+        this.state = POPPED;
         this._index = Infinity;
-        // this.visit = false;
-        this.changed = false;
         for (let i = 0; i < this.lastChild; i++) {
-            if (this.children[i] && this.children[i].active) this.children[i].clear();
+            if (this.children[i] && this.children[i].isActive) this.children[i].clear();
+        }
+    }
+    reset () {
+        this.state = AVAILABLE;
+        this.node = null;
+        this._index = 1;
+        this.keys = EMPTY_KEYS;
+        for (let i = 0; i < this.lastChild; i++) {
+            if (this.children[i] && !this.children[i].isAvailable) this.children[i].reset();
         }
     }
     next () {
-        if (this.changed) {
+        if (this.isReview) {
             const activeIndex = this.activeChildIndex;
             if (activeIndex === -1 || activeIndex >= this._index) {
-                this.changed = false;
+                this.state = ACTIVE;
+            } else {
+                return;
             }
-        } else if (this._index < this.keys.length) {
+        }
+        if (this._index <= this.keys.length) {
             this._index = Math.min(this._index + 1, this.lastChild + 1);
         }
     }
@@ -1599,11 +1620,12 @@ class PathTree {
         if (!child) {
             window.NEW_NODES = (window.NEW_NODES | 0) + 1;
             child = this.children[index] = PathTree.create(this.depth + 1);
-            child.set(this, this.node[this.isArray ? index : this.keys[index]]);
-            this.lastChild = Math.max(this.lastChild, index + 1);
-        } else if (index === this.lastChild) {
+        } else {
             window.REUSED_NODES = (window.REUSED_NODES | 0) + 1;
+        }
+        if (child.isAvailable) {
             child.set(this, this.node[this.isArray ? index : this.keys[index]]);
+            if (index < this._index - 1) child._index = child.keys.length + 1;
             this.lastChild = Math.max(this.lastChild, index + 1);
         }
         return child;
@@ -1618,12 +1640,8 @@ class PathTree {
         // This index will never execute more than once
         const child = this.children[index];
         // if (!child) throw new Error('Cannot detach a unset path');
-        if (child && child.active) child.clear();
+        if (child && !child.isAvailable) child.reset();
         return this;
-    }
-    get index () {
-        if (!this.changed) return this._index;
-        return Math.min(this._index, this.activeChildIndex);
     }
     push () {
         return this._attach(this.index);
@@ -1637,12 +1655,50 @@ class PathTree {
         return this.parent.detach(this.keyIndex);
     }
 
+    get isAvailable () {
+        return this.state === AVAILABLE;
+    }
+    get isActive () {
+        return this.state >= ACTIVE;
+    }
+    get isReview () {
+        return this.state === REVIEW;
+    }
+    get isPopped () {
+        return this.state === POPPED;
+    }
+    get atHead () {
+        return this._index === -1;
+    }
+    get inRange () {
+        return this.index < this.keys.length;
+    }
+    get atTail () {
+        return this.index === this.keys.length;
+    }
+    get outOfRange () {
+        return this.index > this.keys.length;
+    }
+    get visitStage () {
+        if (this._index === -1) return AT_HEAD;
+        const index = this.index;
+        const length = this.keys.length;
+        if (index < length) return IN_RANGE;
+        else if (index === length) return AT_TAIL;
+        else return OUT_OF_RANGE;
+    }
+
+    get index () {
+        if (!this.isReview) return this._index;
+        return Math.min(this._index, this.activeChildIndex);
+    }
     get activeChildIndex () {
-        if (this._index === Infinity) return Infinity;
-        for (let i = 0; i < this._index; i++) {
-            if (this.children[i] && this.children[i].active) return i;
+        const max = Math.min(this._index, this.lastChild);
+        if (this.isPopped) return max;
+        for (let i = 0; i < max; i++) {
+            if (this.children[i] && this.children[i].isActive) return i;
         }
-        return this._index;
+        return max;
     }
     get activeChild () {
         return this.children[this.activeChildIndex];
@@ -1682,16 +1738,16 @@ class PathTree {
     }
 
     skip () {
-        this.clear();
+        this.reset();
     }
     stop () {
-        this.root.clear();
+        this.root.reset();
     }
 
     assertActive () {
         let path = this;
-        while (path.parent && (path.active || path.keyIndex > -1)) path = path.parent;
-        if (path.depth > 0) throw new Error('Path must be active to modify the tree');
+        while (path.parent && (path.isActive || path.keyIndex > -1)) path = path.parent;
+        if (path.depth > -1) throw new Error('Path must be active to modify the tree');
     }
     assertArray () {
         this.assertActive();
@@ -1700,26 +1756,37 @@ class PathTree {
 
     changeTree () {
         let parent = this;
-        parent.changed = true;
+        parent.state = REVIEW;
         while (parent.parent && (parent.keyIndex < parent.parent._index)) {
             parent = parent.parent;
-            parent.changed = true;
+            parent.state = REVIEW;
         }
     }
 
     setKey (key, node) {
         this.assertActive();
+        this.changeTree();
+
         this.node[key] = node;
         const index = this.isArray ? key : this.keys.indexOf(key);
         this.detach(index);
-        PathTree.release(this.children[index]);
-        this.children[index] = null;
-        this.changeTree();
         return this.attach(index);
     }
     getKey (key) {
         this.assertActive();
-        return this.attachQuiet(this.isArray ? key : this.keys.indexOf(key));
+        return this.attach(this.isArray ? key : this.keys.indexOf(key));
+    }
+
+    refresh () {
+        this.assertActive();
+        while (!this.isActive) {
+            let path = this;
+            while (!path.parent.isActive) path = path.parent;
+            const index = path.keyIndex;
+            // if (index >= path.parent.lastChild) throw new Error('Path appears to not be apart of the graph');
+            path.parent.attach(path.keyIndex);
+        }
+        return this;
     }
 
     remove () {
@@ -1735,32 +1802,30 @@ class PathTree {
                 this.parent.lastChild--;
             }
             this.parent.node.splice(index, 1);
-            PathTree.release(this.parent.children[index]);
             this.parent.children.splice(index, 1);
         } else {
+            if (index === this.parent._index - 1) this.parent._index -= 1;
             this.parent.node[this.key] = null;
-            this.parent.children[index] = null;
         }
     }
 
     replaceWith (node) {
         this.assertActive();
+        this.changeTree();
         const index = this.keyIndex;
         if (index === -1) throw new Error('Cannot replace path that is not in parent');
         this.parent.node[this.key] = node;
         this.parent.detach(index);
-        PathTree.release(this.parent.children[index]);
-        this.parent.children[index] = null;
-        this.changeTree();
         return this.parent.attach(index);
     }
 
     insertChild (index, node) {
         this.assertArray();
+        this.changeTree();
         if (index <= this._index) this._index++;
+        if (index <= this.lastChild) this.lastChild++;
         this.node.splice(index, 0, node);
         this.children.splice(index, 0, null);
-        this.changeTree();
         return this.attach(index);
     }
     prependChild (node) {
@@ -1783,6 +1848,12 @@ class PathTree {
         return this.parent.insertChild(this.key + 1, node);
     }
 }
+const visit = function (path, visitFunctions) {
+    const node = path.node;
+    for (let j = 0; path.isActive && node === path.node && j < visitFunctions.length; j += 2) {
+        visitFunctions[j](node, path, visitFunctions[j + 1]);
+    }
+};
 class Transformer {
     constructor () {
         this.path = null;
@@ -1796,49 +1867,59 @@ class Transformer {
         this.length = 0;
     }
     transform (root, visitors, states) {
-        this.i = 0;
-        this.queueIndex = 0;
-        const queued = this.queued = []
-        const path = this.path = Path.fromRoot(root);
+        // this.i = 0;
+        // this.queueIndex = 0;
+        // const queued = this.queued = []
+        // const path = this.path = Path.fromRoot(root);
         this.cache = {node: {}, keys: {}, enter: {}, exit: {}};
         this.initVisitors(visitors, states);
-        this.queue(new QueuedEnter(this.path.pathArrayCopy, root));
-        this.isUnchanged = true;
-        this.item = null;
+        // this.queue(new QueuedEnter(this.path.pathArrayCopy, root));
+        // this.isUnchanged = true;
+        // this.item = null;
 
-        const iteratorStack = [];
+        // const iteratorStack = [];
 
-        this.path = PathTree.create(-1);
+        const visitTypes = this.visitTypes;
+
+        this.path = Transformer.path || PathTree.create(-1);
+        Transformer.path = null;
         this.path.node = {root};
         this.path.keys = ['root'];
         this.path.lastChild = 0;
         this.path._index = -1;
+        this.path.state = ACTIVE;
         this.path.next();
-        this.path = this.path.push();
+        let path = this.path.push();
+        path.parent.next();
 
-        // const visited = new Set();
         let dog = 0;
-        this.index = this.path.index;
-        this.length = this.path.keys.length;
-        while (
-            dog++ < 100000 && (
-                this.path.depth > -1 ||
-                this.path._index < this.path.keys.length
-            ) && this.path.depth < 100
-        ) {
-            if (this.path._index === -1) {
-                if (this.path.visit) this.visit(this.visitTypes[this.path.type].enter);
-                this.path.next();
-            } else if (this.path.index < this.path.keys.length) {
-                this.path = this.path.push();
-                this.path.parent.next();
-            } else {
-                if (this.path.visit) this.visit(this.visitTypes[this.path.type].exit);
-                this.path = this.path.pop();
+        this.index = path.index;
+        this.length = path.keys.length;
+        let node;
+        while (dog++ < 100000 && path.depth > -1 && path.depth < 100) {
+            switch (path.visitStage) {
+            case AT_HEAD:
+                node = path.node;
+                if (path.visit) visit(path, visitTypes[path.type].enter);
+                if (node === path.node) path.next();
+                break;
+            case IN_RANGE:
+                path = path.push();
+                path.parent.next();
+                break;
+            case AT_TAIL:
+                node = path.node;
+                if (path.visit) visit(path, visitTypes[path.type].exit);
+                if (node === path.node) path = path.pop();
+                break;
+            case OUT_OF_RANGE:
+                path = path.pop();
             }
         }
 
-        PathTree.recharge(this.path);
+        Transformer.path = this.path;
+        this.path = null;
+        // PathTree.recharge();
     }
     getPrototypeAncestry (proto) {
         const ancestry = [];
@@ -1916,7 +1997,7 @@ class Transformer {
     visit (visitFunctions) {
         const {path} = this;
         const node = path.node;
-        for (let j = 0; path.active && j < visitFunctions.length; j += 2) {
+        for (let j = 0; path.isActive && node === path.node && j < visitFunctions.length; j += 2) {
             visitFunctions[j](node, path, visitFunctions[j + 1]);
         }
     }
@@ -2373,6 +2454,11 @@ class JSInlineOperators {
                 }
             } else if (info) {
                 // const storePath = new Path(path).goTo(storePathArray);
+                storePath.refresh();
+                if (!ast.type.isStoreArg(storePath.node) || storePath.node.name !== node.lhs || storePath.node.key !== node.member) {
+                    return;
+                }
+
                 const storeExpr = storePath.node.expr;
 
                 if (ast.type.isOperator(storeExpr)) {
@@ -2533,6 +2619,8 @@ const compile = function (blockCached) {
         ]);
     }
 
+    const transformer = new Transformer();
+
     const perf = {
         start: performance.now(),
         end: 0,
@@ -2548,13 +2636,13 @@ const compile = function (blockCached) {
         source: '',
         minimize: false
     };
-    // new Transformer().transform(ast.cloneDeep(factoryAST), [new JSPrinter()], [baselineState]);
+    // transformer.transform(ast.cloneDeep(factoryAST), [new JSPrinter()], [baselineState]);
     const baseline = baselineState.source;
     perf.baseline += (last = performance.now());
 
     perf.inline = -last;
     const inlineState = {bindings, opInfos, opMap, paths: {}};
-    new Transformer().transform(factoryAST, [new JSFindArg(), new JSInlineOperators()], [inlineState, inlineState]);
+    transformer.transform(factoryAST, [new JSFindArg(), new JSInlineOperators()], [inlineState, inlineState]);
     perf.inline += (last = performance.now());
 
     perf.count = -last;
@@ -2562,7 +2650,7 @@ const compile = function (blockCached) {
         bindings: {uses: 0},
         blockUtility: {uses: 0}
     }, strings: []};
-    new Transformer().transform(factoryAST, [new JSCountRefs()], [countRefs]);
+    transformer.transform(factoryAST, [new JSCountRefs()], [countRefs]);
     perf.count += (last = performance.now());
 
     let mangled = Object.entries(countRefs.vars);
@@ -2585,14 +2673,14 @@ const compile = function (blockCached) {
     };
 
     perf.optimized = -last;
-    // new Transformer().transform(ast.cloneDeep(factoryAST), [new JSPrinter()], [renderState]);
+    // transformer.transform(ast.cloneDeep(factoryAST), [new JSPrinter()], [renderState]);
     const optimized = renderState.source;
     perf.optimized += (last = performance.now());
 
     perf.minimized = -last;
     renderState.source = '';
     renderState.minimize = true;
-    new Transformer().transform(ast.cloneDeep(factoryAST), [new JSMangle(), new JSPrinter()], [renderState, renderState]);
+    transformer.transform(ast.cloneDeep(factoryAST), [new JSMangle(), new JSPrinter()], [renderState, renderState]);
     const minimized = renderState.source;
     perf.minimized += (perf.end = last = performance.now());
 
