@@ -195,6 +195,48 @@ class Cast {
      * @return {(number|string)} 1-based index for list, LIST_ALL, or LIST_INVALID.
      */
     static toListIndex (index, length) {
+        // if (typeof index === 'number') {
+        //     // to0 = n => n - (n % 1)
+        //     // to0 = n => n - (n - (n | 0))
+        //     // to0 = n => n | 0
+        //     // from0 = n => to0(n) + sign(n)
+        //     // from0 = n => n - (n % 1) + (n > 0) - (n < 0)
+        //     // from0 = n => (n | 0) + (n > 0) - (n < 0)
+        //     // sign = n => (n > 0) - (n < 0)
+        //     // sign = n => n / abs(n)
+        //     // neg = n => -(n < 0)
+        //     // div = (n, m) => n / m
+        //     // idiv = (n, m) => imul(n, 1 / m)
+        //     // mod = (n, m) => n - m * ((n / m) | 0)
+        //     // mod1 = n => n - (n | 0)
+        //     // floor = n => n - (n % 1) - (n < 0)
+        //     // floor = n => n - (n - (n | 0)) - (n < 0)
+        //     // floor = n => (n | 0) - (n < 0)
+        //     // floorP = (n, p) => n - (n % p) - (n < 0) * p
+        //     // ceil = n => (n | 0) + (n > 0)
+        //     // round = n => n - (n % 1) + (((n % 1) - 0.5) > 0) - (((n % 1) - 0.5) < 0)
+        //     // round = n => n - (n % 1) + ((n - (n | 0)) > 0.5) - ((n % 1) < 0.5)
+        //     // round = n => n - (n % 1) + sign(n - (n | 0) - 0.5)
+        //     // round = n => (n | 0) + sign(n - (n | 0) - 0.5)
+        //     // round = n => (n | 0) + ((n - (n | 0)) * 2 | 0)
+        //     // round = n => ((n * 2) | 0) - (n | 0)
+        //
+        //     // ((index - 1) / length | 0) === ((index - 1) / length < 0)
+        //     if (Math.ceil((index | 0) / length) === 1) return index | 0;
+        //     if (Math.floor((index - 1) / length) === 0) return index | 0;
+        // } else {
+        //     switch (index) {
+        //     case 'all':
+        //         return Cast.LIST_ALL;
+        //     case 'last':
+        //         if (length > 0) return length;
+        //     case 'random':
+        //     case 'any':
+        //         if (length > 0) return 1 + Math.floor(Math.random() * length);
+        //     }
+        // }
+        // return Cast.LIST_INVALID;
+
         if (typeof index !== 'number') {
             if (index === 'all') {
                 return Cast.LIST_ALL;

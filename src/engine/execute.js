@@ -1891,7 +1891,8 @@ class JSInlineOperators {
     exitCast (node, path, state) {
         if (node.expect === 'toNumber' && (
             typeof node.value === 'number' ||
-            ast.type.isBinaryOperator(node.value) && ['+', '-', '*', '/'].indexOf(node.value.operator)
+            ast.type.isBinaryOperator(node.value) && ['+', '-', '*', '<', '===', '>', '&&', '||'].indexOf(node.value.operator) ||
+            ast.type.isCast(node.value) && ['abs', 'floor', 'ceil', 'sin', 'cos', 'tan', 'pow'].indexOf(node.expect) > -1
         )) return path.replaceWith(node.value);
         if (node.expect === 'toNumber' && (
             typeof node.value === 'string' && !isNan(Number(node.value.substring(1, node.value.length - 1)))
@@ -1952,11 +1953,13 @@ class JSInlineOperators {
                     ));
             }
             if (node.expect === 'scratchMod') {
+                // (NUM1 % NUM2) + ((NUM1 * NUM2 < 0) * NUM2)
                 // (NUM1 % NUM2) + ((NUM1 < 0 !== NUM2 < 0) ? NUM2 : 0)
-                state.paths.scratchTan = path.root.getKey('bindings').appendChild(
+                state.paths.scratchMod = path.root.getKey('bindings').appendChild(
                     ast.storeVar('scratchMod',
                         [
-                            'function (n, m) {return (n % m) + ((n < 0 !== m < 0) ? m : 0);}'
+                            'function (n, m) {return (n % m) + ((n * m < 0) * m);}'
+                            // 'function (n, m) {return (n % m) + ((n < 0 !== m < 0) ? m : 0);}'
                         ]
                     ));
             }
