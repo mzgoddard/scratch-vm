@@ -124,6 +124,12 @@ class Cast {
      * @returns {number} Negative number if v1 < v2; 0 if equal; positive otherwise.
      */
     static compare (v1, v2) {
+        // const diff = v1 - v2;
+        // if (!!(1 / diff)) return diff;
+
+        // let n1 = Number(v1);
+        // if (!!(1 / n1 / n1)) return n1 - n2;
+
         let n1 = Number(v1);
         let n2 = Number(v2);
         if (n1 === 0 && Cast.isWhiteSpace(v1)) {
@@ -196,6 +202,14 @@ class Cast {
      */
     static toListIndex (index, length) {
         // if (typeof index === 'number') {
+        //     // to0 = n => n | 0
+        //     // from0 = n => (n | 0) + (n > 0) - (n < 0)
+        //     // sign = n => (n > 0) - (n < 0)
+        //     // mod1 = n => n - (n | 0)
+        //     // floor = n => (n | 0) - (n < 0)
+        //     // ceil = n => (n | 0) + (n > 0)
+        //     // round = n => ((n * 2) | 0) - (n | 0)
+        //
         //     // to0 = n => n - (n % 1)
         //     // to0 = n => n - (n - (n | 0))
         //     // to0 = n => n | 0
@@ -222,18 +236,44 @@ class Cast {
         //     // round = n => ((n * 2) | 0) - (n | 0)
         //
         //     // ((index - 1) / length | 0) === ((index - 1) / length < 0)
+        //     if (((index | 0) / length) | 0) + (index > 0) === 1
+        //     if ((index > 0) + (index <= length))
         //     if (Math.ceil((index | 0) / length) === 1) return index | 0;
         //     if (Math.floor((index - 1) / length) === 0) return index | 0;
+        //     if (!Math.floor((index - 1) / length)) return index | 0;
+        //     (((index / length) - 1) | 0) === 0
         // } else {
         //     switch (index) {
         //     case 'all':
         //         return Cast.LIST_ALL;
         //     case 'last':
         //         if (length > 0) return length;
+        //.        break;
         //     case 'random':
         //     case 'any':
         //         if (length > 0) return 1 + Math.floor(Math.random() * length);
+        //.        break;
+        //.    default:
+        //.        if ()
         //     }
+        // }
+        // return Cast.LIST_INVALID;
+
+        // -(numIndex - length)
+        // const numIndex = Math.floor(Cast.toNumber(index));
+        // if ((numIndex >= 1 && numIndex <= length)) {
+        //     return index;
+        // }
+        // switch (index) {
+        // case 'all':
+        //     return Cast.LIST_ALL;
+        // case 'last':
+        //     if (length > 0) return length;
+        //     break;
+        // case 'random':
+        // case 'any':
+        //     if (length > 0) return 1 + (Math.random() * length | 0);
+        //     break;
         // }
         // return Cast.LIST_INVALID;
 

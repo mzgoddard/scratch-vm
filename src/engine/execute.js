@@ -586,169 +586,21 @@ const memoify = function (fn) {
         return memo[value] || (memo[value] = fn(value));
     };
 };
-const camelCase = memoify(str => `${str[0].toLowerCase()}${str.substring(1)}`);
-const sansPrefix = memoify(str => camelCase(str.substring(2)));
+
 const titleCase = memoify(str => `${str[0].toUpperCase()}${str.substring(1)}`)
 const enterTitleCase = memoify(str => `enter${titleCase(str)}`);
 const exitTitleCase = memoify(str => `exit${titleCase(str)}`);
 
-class JSNode {
-    constructor () {
-        Object.defineProperty(this, 'type', {
-            enumerable: false,
-            writeable: false,
-            value: this.type
-        });
-    }
-    get type () {
-        return sansPrefix(this.constructor.name);
-    }
-    toString () {
-        return '';
-    }
-}
-class JSId extends JSNode {
-    constructor ({id}) {
-        super();
-        this.id = id;
-    }
-}
-class JSChunk extends JSNode {
-    constructor ({statements}) {
-        super();
-        this.statements = statements;
-    }
-    toString () {
-        return this.statements.join('');
-    }
-}
-class JSStatement extends JSNode {
-    constructor (expr) {
-        super();
-        this.expr = expr;
-    }
-}
-class JSExpressionStatement extends JSStatement {
-    toString () {
-        return `${this.expr};`;
-    }
-}
-class JSCheckStatus extends JSStatement {
-    constructor () {
-        super(['thread']);
-    }
-    toString () {
-        return 'if (thread.status !== 0) return;';
-    }
-}
-class JSStore extends JSStatement {
-    constructor (expr) {
-        super(expr);
-    }
-}
-class JSStoreArg extends JSStore {
-    constructor ({expr, name, key}) {
-        super(expr);
-        this.name = name;
-        this.key = key;
-    }
-    toString () {
-        return `${this.name}.${this.key} = ${this.expr};`;
-    }
-}
-class JSStoreVar extends JSStore {
-    constructor ({uses = 0, expr, name}) {
-        super(expr);
-        this.uses = uses;
-        this.name = name;
-    }
-    toString () {
-        if (this.uses === 0) return '';
-        return `var ${this.name} = ${this.expr};`;
-    }
-}
-class JSOperator extends JSNode {}
-class JSCast extends JSNode {
-    constructor ({expect, value}) {
-        super();
-        this.expect = expect;
-        this.value = value;
-    }
-}
-class JSProperty extends JSOperator {
-    constructor ({lhs, member}) {
-        super();
-        this.lhs = lhs;
-        this.member = member;
-    }
-    toString () {
-        return `${this.lhs}.${this.member}`;
-    }
-}
-class JSGetVariable extends JSOperator {}
-class JSBinaryOperator extends JSOperator {
-    constructor ({operator, input1, input2}) {
-        super();
-        this.operator = operator;
-        this.input1 = input1;
-        this.input2 = input2;
-    }
-    toString () {
-        return `${this.input1} ${this.operator} ${this.input2}`;
-    }
-}
-class JSCall extends JSOperator {}
-class JSCallBlock extends JSCall {
-    constructor ({context, func, args}) {
-        super();
-        this.context = context;
-        this.func = func;
-        this.args = args;
-    }
-    toString () {
-        return `${this.func}.call(${this.context}, ${this.args}, blockUtility)`;
-    }
-}
-class JSCallFunction extends JSCall {
-    constructor ({func, args}) {
-        super();
-        this.func = func;
-        this.args = args;
-    }
-    toString () {
-        return `${this.func}(${this.args}, blockUtility)`;
-    }
-}
-class JSFactory extends JSNode {
-    constructor ({debugName, bindings = [], dereferences = [], chunks = []}) {
-        super();
-        this.debugName = debugName;
-        this.bindings = bindings;
-        this.dereferences = dereferences;
-        this.chunks = chunks;
-    }
-    toString () {
-        return [
-            ...this.bindings,
-            `return function ${this.debugName} (_, blockUtility) {`,
-            ...this.dereferences,
-            ...this.chunks,
-            `};`
-        ].join('')
-    }
-}
 const ast = {
     clone (node) {
         if (Array.isArray(node)) {
-            return node.map(item => item instanceof JSNode ? item : ast.clone(item));
+            return node.slice();
         } else if (typeof node === 'object' && node) {
             const newNode = {};
             for (const key in node) {
-                if (!(node[key] instanceof JSNode)) {
-                    newNode[key] = ast.clone(node[key]);
-                } else newNode[key] = node[key];
+                if (Array.isArray(node[key])) newNode[key] = node[key].slice();
+                else newNode[key] = node[key];
             }
-            if (node instanceof JSNode) return new node.constructor(newNode);
             return newNode;
         }
         return node;
@@ -759,7 +611,6 @@ const ast = {
         } else if (typeof node === 'object' && node) {
             const newNode = {};
             for (const key in node) newNode[key] = ast.cloneDeep(node[key]);
-            if (node instanceof JSNode) return new node.constructor(newNode);
             return newNode;
         }
         return node;
@@ -968,13 +819,7 @@ const ast = {
         }
     }
 };
-class JSToken extends JSNode {
-    constructor ({token}) {
-        super();
-        this.token = token;
-    }
-}
-class JSWhitespace extends JSNode {}
+
 const code = {
     t (token) {
         return code.token(token);
@@ -996,29 +841,6 @@ const code = {
         };
     }
 };
-
-const NODE_TYPES = [
-    Boolean,
-    Number,
-    String,
-    Object,
-    Array,
-    JSId,
-    JSChunk,
-    JSExpressionStatement,
-    JSCheckStatus,
-    JSStoreArg,
-    JSStoreVar,
-    JSCast,
-    JSProperty,
-    JSBinaryOperator,
-    JSCallBlock,
-    JSCallFunction,
-    JSFactory,
-
-    JSToken,
-    JSWhitespace
-];
 
 const NODE_DATA = {
     null: {
@@ -1217,7 +1039,7 @@ const EMPTY_KEYS = [];
 
 const nodeType = function (node) {
     // node
-    if (node != null && typeof node.typeCode === 'number') return node.type;
+    if (node != null && node.typeCode > 0) return node.type;
     // string
     else if (typeof node === 'string') return 'string';
     // array
@@ -1227,12 +1049,10 @@ const nodeType = function (node) {
     // everything else
     else return 'null';
 };
-// const nodeType = function (node) {
-//     return NODE_NAMES[nodeCode(node)];
-// };
+
 const nodeCode = function (node) {
     // node
-    if (node != null && typeof node.typeCode === 'number') return node.typeCode;
+    if (node != null && node.typeCode > 0) return node.typeCode;
     // string
     else if (typeof node === 'string') return NODE_CODE_STRING;
     // array
@@ -1242,13 +1062,6 @@ const nodeCode = function (node) {
     // everything else
     else return NODE_CODE_NULL;
 };
-const EMPTY_VISIT = {
-
-}
-let freePathIndex = 0;
-let freePathTrees = [];
-let washPathIndex = 0;
-let washPathTrees = [];
 
 const AVAILABLE = 0;
 const POPPED = 1;
@@ -1283,10 +1096,10 @@ class PathTree {
 
         this.node = node;
         this.typeCode = nodeCode(node);
-        if (!(this.isArray = (this.typeCode === NODE_CODE_ARRAY))) {
-            this.keys = NODE_CODE_KEYS[this.typeCode];
-        } else {
+        if (this.isArray = (this.typeCode === NODE_CODE_ARRAY)) {
             this.keys = node;
+        } else {
+            this.keys = NODE_CODE_KEYS[this.typeCode];
         }
 
         this._index = -1;
@@ -1536,6 +1349,40 @@ class PathTree {
         return this.parent.insertChild(this.key + 1, node);
     }
 }
+
+const index = function (path) {
+    if (!path.isReview) return path._index;
+    return Math.min(path._index, path.activeChildIndex);
+}
+const activeChildIndex = function (path) {
+    const max = Math.min(path._index, path.lastChild);
+    if (path.isPopped) return max;
+    for (let i = 0; i < max; i++) {
+        if (path.children[i] && path.children[i].isActive) return i;
+    }
+    return max;
+}
+const atHead = function (path) {
+    return path._index === -1;
+}
+const inRange = function (path) {
+    return index(path) < path.keys.length;
+}
+const atTail = function (path) {
+    return index(path) === path.keys.length;
+}
+const outOfRange = function (path) {
+    return index(path) > path.keys.length;
+}
+const visitStage = function (path) {
+    if (path._index === -1) return AT_HEAD;
+    const index_ = index(path);
+    const length = path.keys.length;
+    if (index_ < length) return IN_RANGE;
+    else if (index_ === length) return AT_TAIL;
+    else return OUT_OF_RANGE;
+}
+
 const getPrototypeAncestry = function (proto) {
     const ancestry = [];
     while (proto && proto !== Object.prototype) {
@@ -1553,10 +1400,7 @@ const getAllPropertyNames = function (proto) {
     }
     return Array.from(keySet);
 };
-const visit = function (path, visitFunctions) {
-    const node = path.node;
-    // visitFunctions[0](node, path, visitFunctions[1]);
-    // let j = 2;
+const visit = function (node, path, visitFunctions) {
     for (let j = 0; j < visitFunctions.length && path.isActive && node === path.node; j += 2) {
         visitFunctions[j](node, path, visitFunctions[j + 1]);
     }
@@ -1587,26 +1431,26 @@ class Transformer {
         let node;
         let run = true;
         while (run) {
-            switch (path.visitStage) {
+            switch (visitStage(path)) {
             case IN_RANGE:
                 path = path.push();
                 if (path.depth > 100) throw new Error('Path is too deep');
                 path.parent.next();
-                if (!path.atHead) break;
+                if (!atHead(path)) break;
             case AT_HEAD:
                 node = path.node;
-                if (willEnter[path.typeCode]) visit(path, enter[path.typeCode]);
+                if (willEnter[path.typeCode]) visit(node, path, enter[path.typeCode]);
                 if (node === path.node) path.next();
-                if (!path.atTail) break;
+                if (!atTail(path)) break;
             case AT_TAIL:
                 node = path.node;
-                if (willExit[path.typeCode]) visit(path, exit[path.typeCode]);
+                if (willExit[path.typeCode]) visit(node, path, exit[path.typeCode]);
                 if (node !== path.node) break;
             case OUT_OF_RANGE:
                 do {
                     path = path.pop();
-                } while (path.depth > -1 && (path.outOfRange || (path.atTail && !willExit[path.typeCode])));
-                if (path.depth === -1 && path.atTail) run = false;
+                } while (path.depth > -1 && (outOfRange(path) || (atTail(path) && !willExit[path.typeCode])));
+                if (path.depth === -1 && atTail(path)) run = false;
             }
         }
     }
@@ -1696,6 +1540,9 @@ class JSFindArg {
     }
 }
 const findArg = new JSFindArg();
+const createHelper = function (state, path, name, body) {
+    state.paths[name] = path.root.getKey('bindings').appendChild(ast.storeVar(name, body));
+};
 class JSInlineOperators {
     call (node, path, state) {
         const info = state.opMap[node.args];
@@ -1807,9 +1654,9 @@ class JSInlineOperators {
                 return path.replaceWith(ast.math2('pow', 10, NUM));
             case 'sin':
             case 'cos':
-                // floor10(Math.sin((Math.PI * NUM) / 180))
+                // round10(Math.sin((Math.PI * NUM) / 180))
                 return path.replaceWith(
-                    ast.cast('floor10', ast.math(operator,
+                    ast.cast('round10', ast.math(operator,
                         ast.op2('/',
                             ast.op2('*', ast.p('Math', 'PI'), NUM),
                             180)
@@ -1892,7 +1739,10 @@ class JSInlineOperators {
         if (node.expect === 'toNumber' && (
             typeof node.value === 'number' ||
             ast.type.isBinaryOperator(node.value) && ['+', '-', '*', '<', '===', '>', '&&', '||'].indexOf(node.value.operator) ||
-            ast.type.isCast(node.value) && ['abs', 'floor', 'ceil', 'sin', 'cos', 'tan', 'pow'].indexOf(node.expect) > -1
+            ast.type.isCast(node.value) && ast.type.isProperty(node.value.expect) &&
+                node.value.expect.lhs === 'Math' && ['abs', 'floor', 'ceil', 'sin', 'cos', 'tan', 'pow'].indexOf(node.value.expect.member) > -1 ||
+            ast.type.isCast(node.value) && ['round10', 'scratchTan'].indexOf(node.value.expect) > -1 ||
+            ast.type.isCast2(node.value) && ['scratchMod'].indexOf(node.value.expect) > -1
         )) return path.replaceWith(node.value);
         if (node.expect === 'toNumber' && (
             typeof node.value === 'string' && !isNan(Number(node.value.substring(1, node.value.length - 1)))
@@ -1904,25 +1754,27 @@ class JSInlineOperators {
         if (!state.paths[node.expect]) {
             if (Cast[node.expect]) {
                 if (!state.bindings[node.expect]) state.bindings[node.expect] = Cast[node.expect];
-                state.paths[node.expect] = path.root.getKey('bindings').appendChild(ast.storeVar(node.expect, ast.p('bindings', node.expect)));
+                createHelper(state, path, node.expect, ast.p('bindings', node.expect));
             }
-            if (node.expect === 'floor10') {
-                state.paths.floor10 = path.root.getKey('bindings').appendChild(
-                    ast.storeVar('floor10',
-                        'function (value) {return value - (value % 1e-10);}'
-                    ));
+            if (node.expect === 'round10') {
+                createHelper(state, path, 'round10',
+                    'function (value) {return (value + (value % 1e-10) - ((2 * value) % 1e-10));}'
+                );
             }
             if (node.expect === 'scratchTan') {
-                state.paths.scratchTan = path.root.getKey('bindings').appendChild(
-                    ast.storeVar('scratchTan',
-                        [
-                            'function (value) {return (',
-                            '(Math.abs(value + 180) % 180 === 90)',
-                            'Math.sign((value + 360) % 360 - 180) * Infinity',
-                            ast.cast('floor10', 'Math.sin((Math.PI * value) / 180)'),
-                            ');}'
-                        ]
-                    ));
+                createHelper(state, path, 'scratchTan', [
+                    'function (value) {return (',
+                        '(Math.abs(value + 180) % 180 === 90)',
+                        'Math.sign((value + 360) % 360 - 180) * Infinity',
+                        ast.cast('round10', 'Math.sin((Math.PI * value) / 180)'),
+                    ');}'
+                ]);
+            }
+            if (node.expect === 'scratchMod1') {
+                // (NUM1 % 1) + (NUM1 < 0)
+                createHelper(state, path, 'scratchMod1', [
+                    'function (n) {return (n % 1) + (n < 0);}'
+                ]);
             }
         }
     }
@@ -1930,49 +1782,35 @@ class JSInlineOperators {
         if (node.expect === 'getParam' && node.input1 === 'thread' && ast.type.isString(node.input2)) {
             return path.replaceWith(ast.p(ast.p('thread', 'stackFrame.params'), node.input2));
         }
+        if (node.expect === 'scratchMod' && ast.type.isNumber(node.input2) && node.input2 === 1) {
+            return path.replaceWith(ast.cast('scratchMod1', node.input1));
+        }
 
         if (!state.paths[node.expect]) {
             if (Cast[node.expect]) {
                 if (!state.bindings[node.expect]) state.bindings[node.expect] = Cast[node.expect];
-                state.paths[node.expect] = path.root.getKey('bindings').appendChild(ast.storeVar(node.expect, ast.p('bindings', node.expect)));
+                createHelper(state, path, node.expect, ast.p('bindings', node.expect));
             }
             if (node.expect === 'definedOr') {
-                state.paths.definedOr =  path.root.getKey('bindings').appendChild(
-                    ast.storeVar('definedOr',
-                        [
-                            'function (v, d) {return typeof v === \'undefined\' ? d : v;}'
-                        ]
-                    ));
+                createHelper(state, path, 'definedOr', [
+                    'function (v, d) {return typeof v === \'undefined\' ? d : v;}'
+                ]);
             }
             if (node.expect === 'getParam') {
-                state.paths.getParam =  path.root.getKey('bindings').appendChild(
-                    ast.storeVar('getParam',
-                        [
-                            'function (t, k) {return t.stackFrame.params[k];}'
-                        ]
-                    ));
+                createHelper(state, path, 'getParam', [
+                    'function (t, k) {return t.stackFrame.params[k];}'
+                ]);
             }
             if (node.expect === 'scratchMod') {
                 // (NUM1 % NUM2) + ((NUM1 * NUM2 < 0) * NUM2)
-                // (NUM1 % NUM2) + ((NUM1 < 0 !== NUM2 < 0) ? NUM2 : 0)
-                state.paths.scratchMod = path.root.getKey('bindings').appendChild(
-                    ast.storeVar('scratchMod',
-                        [
-                            'function (n, m) {return (n % m) + ((n * m < 0) * m);}'
-                            // 'function (n, m) {return (n % m) + ((n < 0 !== m < 0) ? m : 0);}'
-                        ]
-                    ));
+                createHelper(state, path, 'scratchMod', [
+                    'function (n, m) {return (n % m) + ((n * m < 0) * m);}'
+                ]);
             }
         }
     }
     property (node, path, state) {
         if (typeof node.lhs === 'string' && typeof node.member === 'string') {
-            if (!state.paths) {
-                state.paths = {};
-                const finder = new Transformer();
-                finder.transform(path.parents[0], [findArg], [state]);
-            }
-
             const info = state.opMap[node.lhs];
             const storePath = state.paths[node.lhs] && state.paths[node.lhs][node.member];
 
@@ -2031,25 +1869,25 @@ class JSPrinter {
         path.replaceWith(['if (', 'thread', '.status !== 0) return;']);
     }
     expressionStatement ({expr}, path, state) {
-        path.replaceWith(ast.chunk([expr, code.t(';')]));
+        path.replaceWith([expr, ';']);
     }
     storeArg ({name, key, expr}, path, state) {
         const {t} = code;
-        path.replaceWith(ast.chunk([name, '.', key, t(' = '), expr, t(';')]));
+        path.replaceWith([name, '.', key, ' = ', expr, ';']);
     }
     storeVar ({uses, name, expr}, path, state) {
         const {t} = code;
         if (uses < 0 || uses === 0 && state.minimize) return path.skip();
-        if (uses === 0) return path.replaceWith(ast.chunk([t('/* skipping unused var '), name, t('. */')]));
-        path.replaceWith(ast.chunk([t('var '), name, t(' = '), expr, t(';'), state.minimize ? '' : t(` /* uses: ${uses} */`)]));
+        if (uses === 0) return path.replaceWith(['/* skipping unused var ', name, '. */']);
+        path.replaceWith(['var ', name, ' = ', expr, ';', state.minimize ? '' : ` /* uses: ${uses} */`]);
     }
     cast ({expect, value}, path, state) {
         const {t} = code;
-        path.replaceWith(ast.chunk([expect, t('('), value, t(')')]));
+        path.replaceWith([expect, '(', value, ')']);
     }
     cast2 ({expect, input1, input2}, path, state) {
         const {t} = code;
-        path.replaceWith(ast.chunk([expect, t('('), input1, ', ', input2, t(')')]));
+        path.replaceWith([expect, '(', input1, ', ', input2, ')']);
     }
     property ({lhs, member}, path, state) {
         const {t} = code;
@@ -2070,10 +1908,10 @@ class JSPrinter {
     }
     binaryOperator ({operator, input1, input2}, path, state) {
         const {t} = code;
-        path.replaceWith(ast.chunk([t('('), input1, t(' '), operator, t(' '), input2, t(')')]));
+        path.replaceWith(['(', input1, ' ', operator, ' ', input2, ')']);
     }
     callBlock ({context, func, args}, path, state) {
-        path.replaceWith(ast.chunk([func, '.call(', context, ', ', args, ', ', 'blockUtility', ')']))
+        path.replaceWith([func, '.call(', context, ', ', args, ', ', 'blockUtility', ')']);
     }
     callFunction ({func, args}, path, state) {
         path.replaceWith([func, '(', args, ', ', 'blockUtility', ')']);
@@ -2372,22 +2210,12 @@ const executeOuter = function (sequencer, thread) {
         const blockCached = getCached(
             thread, thread.pointer || thread.stackFrame.endBlockId);
 
-        // lastBlock = executeOps(thread, blockCached._allOps);
         const ops = blockCached._allOps;
-        // if (isProfiling && ops[0].opcode !== 'vm_compiled') window.NORMAL_USE = (window.NORMAL_USE | 0) + 1;
         let i = -1;
         while (thread.status === STATUS_RUNNING) {
             const opCached = ops[++i];
             opCached._parentValues[opCached._parentKey] = (
                 opCached._blockFunction(opCached._argValues, blockUtility));
-            // if (isPromise(opCached._parentValues[opCached._parentKey] = (
-            //     opCached._blockFunctionUnbound.call(
-            //         opCached._blockFunctionContext,
-            //         opCached._argValues, blockUtility
-            // )))) {
-            //     blockCached.count = 0;
-            //     thread.status = Thread.STATUS_PROMISE_WAIT;
-            // }
         }
         lastBlock = ops[i];
 
