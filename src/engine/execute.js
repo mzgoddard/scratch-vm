@@ -591,6 +591,223 @@ const titleCase = memoify(str => `${str[0].toUpperCase()}${str.substring(1)}`)
 const enterTitleCase = memoify(str => `enter${titleCase(str)}`);
 const exitTitleCase = memoify(str => `exit${titleCase(str)}`);
 
+const _NODE_DATA = {
+    null: {
+        extends: null,
+        keys: []
+    },
+    literal: {
+        extends: null,
+        keys: []
+    },
+    boolean: {
+        extends: 'literal',
+        keys: []
+    },
+    number: {
+        extends: 'literal',
+        keys: []
+    },
+    string: {
+        extends: 'literal',
+        keys: []
+    },
+    array: {
+        extends: null,
+        keys: null
+    },
+    root: {
+        extends: null,
+        keys: ['root']
+    },
+    node: {
+        extends: null,
+        keys: []
+    },
+    id: {
+        extends: 'node',
+        keys: ['id']
+    },
+    chunk: {
+        extends: 'node',
+        keys: ['statements']
+    },
+    statement: {
+        extends: 'node',
+        keys: ['expr']
+    },
+    expressionStatement: {
+        extends: 'statement',
+        keys: ['expr']
+    },
+    checkStatus: {
+        extends: 'statement',
+        keys: []
+    },
+    store: {
+        extends: 'statement',
+        keys: ['expr']
+    },
+    storeArg: {
+        extends: 'store',
+        keys: ['name', 'key', 'expr']
+    },
+    storeVar: {
+        extends: 'store',
+        keys: ['name', 'expr']
+    },
+    operator: {
+        extends: 'node',
+        keys: []
+    },
+    cast: {
+        extends: 'operator',
+        keys: ['expect', 'value']
+    },
+    cast2: {
+        extends: 'operator',
+        keys: ['expect', 'input1', 'input2']
+    },
+    property: {
+        extends: 'operator',
+        keys: ['lhs', 'member']
+    },
+    ifElse: {
+        extends: 'operator',
+        keys: ['test', 'ifTrue', 'ifFalse']
+    },
+    getVariable: {
+        extends: 'operator',
+        keys: []
+    },
+    binaryOperator: {
+        extends: 'operator',
+        keys: ['operator', 'input1', 'input2']
+    },
+    call: {
+        extends: 'operator',
+        keys: []
+    },
+    callBlock: {
+        extends: 'call',
+        keys: ['func', 'context', 'args']
+    },
+    callFunction: {
+        extends: 'call',
+        keys: ['func', 'args']
+    },
+    factory: {
+        extends: 'node',
+        keys: ['debugName', 'bindings', 'dereferences', 'chunks']
+    },
+    token: {
+        extends: 'node',
+        keys: ['token']
+    },
+    whitespace: {
+        extends: 'node',
+        keys: []
+    }
+};
+
+const NODE_DATA = Object.entries(_NODE_DATA).reduce((obj, [type, value], code) => {
+    const isArray = type === 'array';
+    obj[type] = {
+        // Identifying information
+        type,
+        code,
+
+        // Type information
+        extends: value.extends,
+        isArray,
+
+        // Member information
+        keys: value.keys,
+        length: isArray ? -1 : value.keys.length
+    };
+    return obj;
+}, {});
+
+const NODE_NAMES = Object.keys(NODE_DATA);
+const NODE_CODE_DATA = Object.values(NODE_DATA);
+
+const NODE_CODES = NODE_NAMES.reduce((object, name, index) => {
+    object[name] = index;
+    return object;
+}, {});
+
+const NODE_CODE_NULL = NODE_CODES.null;
+const NODE_CODE_LITERAL = NODE_CODES.literal;
+const NODE_CODE_BOOLEAN = NODE_CODES.boolean;
+const NODE_CODE_NUMBER = NODE_CODES.number;
+const NODE_CODE_STRING = NODE_CODES.string;
+const NODE_CODE_ARRAY = NODE_CODES.array;
+const NODE_CODE_NODE = NODE_CODES.node;
+const NODE_CODE_ID = NODE_CODES.id;
+const NODE_CODE_CHUNK = NODE_CODES.chunk;
+const NODE_CODE_STATEMENT = NODE_CODES.statement;
+const NODE_CODE_EXPRESSION_STATEMENT = NODE_CODES.expressionStatement;
+const NODE_CODE_CHECK_STATUS = NODE_CODES.checkStatus;
+const NODE_CODE_STORE = NODE_CODES.store;
+const NODE_CODE_STORE_ARG = NODE_CODES.storeArg;
+const NODE_CODE_STORE_VAR = NODE_CODES.storeVar;
+const NODE_CODE_OPERATOR = NODE_CODES.operator;
+const NODE_CODE_CAST = NODE_CODES.cast;
+const NODE_CODE_CAST2 = NODE_CODES.cast2;
+const NODE_CODE_PROPERTY = NODE_CODES.property;
+const NODE_CODE_IF_ELSE = NODE_CODES.ifElse;
+const NODE_CODE_GET_VARIABLE = NODE_CODES.getVariable;
+const NODE_CODE_BINARY_OPERATOR = NODE_CODES.binaryOperator;
+const NODE_CODE_CALL = NODE_CODES.call;
+const NODE_CODE_CALL_BLOCK = NODE_CODES.callBlock;
+const NODE_CODE_CALL_FUNCTION = NODE_CODES.callFunction;
+const NODE_CODE_FACTORY = NODE_CODES.factory;
+const NODE_CODE_TOKEN = NODE_CODES.token;
+const NODE_CODE_WHITESPACE = NODE_CODES.whitespace;
+
+const NODE_KEYS = Object.entries(NODE_DATA).reduce((object, [name, data]) => {
+    object[name] = data.keys;
+    return object;
+}, {});
+
+const NODE_CODE_KEYS = Object.values(NODE_DATA).map(data => data.keys);
+
+const NODE_ANCESTORS = Object.entries(NODE_DATA).reduce((object, [name, data]) => {
+    object[name] = [name];
+    let _extends = data.extends;
+    while (_extends && NODE_DATA[_extends]) {
+        object[name].push(_extends);
+        _extends = NODE_DATA[_extends].extends;
+    }
+    return object;
+}, {});
+// null has no ancestors
+NODE_ANCESTORS.null = [];
+
+const NODE_CODE_ANCESTORS = Object.values(NODE_ANCESTORS);
+
+const NODE_IS_ANCESTOR = Object.entries(NODE_ANCESTORS).reduce((object, [name, keys]) => {
+    object[name] = {};
+    for (let i = 0; i < NODE_NAMES.length; i++) object[name][NODE_NAMES[i]] = keys.indexOf(NODE_NAMES[i]) > -1;
+    return object;
+}, {});
+
+const NODE_CODE_IS_ANCESTOR = Object.values(NODE_IS_ANCESTOR);
+
+const NODE_ENTER_KEYS = Object.entries(NODE_ANCESTORS).reduce((object, [name, keys]) => {
+    object[name] = keys.concat(keys.map(enterTitleCase));
+    return object;
+}, {});
+const NODE_EXIT_KEYS = Object.entries(NODE_ANCESTORS).reduce((object, [name, keys]) => {
+    object[name] = keys.map(exitTitleCase);
+    return object;
+}, {});
+
+const NODE_CODE_ENTER_KEYS = Object.values(NODE_ENTER_KEYS);
+const NODE_CODE_EXIT_KEYS = Object.values(NODE_EXIT_KEYS);
+
+const EMPTY_KEYS = [];
+
 const ast = {
     clone (node) {
         if (Array.isArray(node)) {
@@ -599,7 +816,7 @@ const ast = {
             const newNode = {};
             for (const key in node) {
                 if (Array.isArray(node[key])) newNode[key] = node[key].slice();
-                else newNode[key] = node[key];
+                else if (key !== 'typeData') newNode[key] = node[key];
             }
             return newNode;
         }
@@ -610,12 +827,86 @@ const ast = {
             return node.map(ast.cloneDeep);
         } else if (typeof node === 'object' && node) {
             const newNode = {};
-            for (const key in node) newNode[key] = ast.cloneDeep(node[key]);
+            for (const key in node) if (key !== 'typeData') newNode[key] = ast.cloneDeep(node[key]);
             return newNode;
         }
         return node;
     },
+    nodeify (node) {
+        // node
+        if (node != null && node.typeCode > 0) {
+            const data = NODE_CODE_DATA[node.typeCode];
+            if (data.isArray) {
+                for (let i = 0; i < node.value.length; i++) {
+                    node.value[i] = nodeify(node.value[i]);
+                }
+            } else if (!data.isValue) {
+                const keys = data.keys;
+                for (let i = 0; i < keys.length; i++) {
+                    node[keys[i]] = ast.nodeify(node[keys[i]]);
+                }
+            }
+            return node;
+        }
+        // array
+        else if (Array.isArray(node)) {
+            for (let i = 0; i < node.length; i++) {
+                node[i] = nodeify(node[i]);
+            }
+            return ast.array(node);
+        }
+        // string
+        else if (typeof node === 'string') return ast.string(node);
+        // number
+        else if (typeof node === 'number') return ast.number(node);
+        // boolean
+        else if (typeof node === 'boolean') return ast.boolean(node);
+        // everything else
+        else return ast.null();
+    },
 
+    null () {
+        return {
+            type: 'null',
+            typeCode: NODE_CODES.null,
+            value: null
+        };
+    },
+    boolean (value) {
+        return {
+            type: 'boolean',
+            typeCode: NODE_CODES.boolean,
+            value
+        };
+    },
+    number (value) {
+        return {
+            type: 'number',
+            typeCode: NODE_CODES.number,
+            value
+        };
+    },
+    string (value) {
+        return {
+            type: 'string',
+            typeCode: NODE_CODES.string,
+            value
+        };
+    },
+    array (value) {
+        return {
+            type: 'array',
+            typeCode: NODE_CODES.array,
+            value
+        };
+    },
+    root (root) {
+        return {
+            type: 'root',
+            typeCode: NODE_CODES.root,
+            root
+        };
+    },
     id (id) {
         return {
             type: 'id',
@@ -842,201 +1133,6 @@ const code = {
     }
 };
 
-const NODE_DATA = {
-    null: {
-        extends: null,
-        keys: []
-    },
-    literal: {
-        extends: null,
-        keys: []
-    },
-    boolean: {
-        extends: 'literal',
-        keys: []
-    },
-    number: {
-        extends: 'literal',
-        keys: []
-    },
-    string: {
-        extends: 'literal',
-        keys: []
-    },
-    array: {
-        extends: null,
-        keys: null
-    },
-    node: {
-        extends: null,
-        keys: []
-    },
-    id: {
-        extends: 'node',
-        keys: ['id'],
-    },
-    chunk: {
-        extends: 'node',
-        keys: ['statements'],
-    },
-    statement: {
-        extends: 'node',
-        keys: ['expr'],
-    },
-    expressionStatement: {
-        extends: 'statement',
-        keys: ['expr'],
-    },
-    checkStatus: {
-        extends: 'statement',
-        keys: [],
-    },
-    store: {
-        extends: 'statement',
-        keys: ['expr'],
-    },
-    storeArg: {
-        extends: 'store',
-        keys: ['name', 'key', 'expr'],
-    },
-    storeVar: {
-        extends: 'store',
-        keys: ['name', 'expr'],
-    },
-    operator: {
-        extends: 'node',
-        keys: [],
-    },
-    cast: {
-        extends: 'operator',
-        keys: ['expect', 'value'],
-    },
-    cast2: {
-        extends: 'operator',
-        keys: ['expect', 'input1', 'input2'],
-    },
-    property: {
-        extends: 'operator',
-        keys: ['lhs', 'member'],
-    },
-    ifElse: {
-        extends: 'operator',
-        keys: ['test', 'ifTrue', 'ifFalse']
-    },
-    getVariable: {
-        extends: 'operator',
-        keys: []
-    },
-    binaryOperator: {
-        extends: 'operator',
-        keys: ['operator', 'input1', 'input2'],
-    },
-    call: {
-        extends: 'operator',
-        keys: [],
-    },
-    callBlock: {
-        extends: 'call',
-        keys: ['func', 'context', 'args'],
-    },
-    callFunction: {
-        extends: 'call',
-        keys: ['func', 'args'],
-    },
-    factory: {
-        extends: 'node',
-        keys: ['debugName', 'bindings', 'dereferences', 'chunks'],
-    },
-    token: {
-        extends: 'node',
-        keys: ['token'],
-    },
-    whitespace: {
-        extends: 'node',
-        keys: []
-    }
-};
-
-const NODE_NAMES = Object.keys(NODE_DATA);
-const NODE_CODE_DATA = Object.values(NODE_DATA);
-
-const NODE_CODES = NODE_NAMES.reduce((object, name, index) => {
-    object[name] = index;
-    return object;
-}, {});
-
-const NODE_CODE_NULL = NODE_CODES.null;
-const NODE_CODE_LITERAL = NODE_CODES.literal;
-const NODE_CODE_BOOLEAN = NODE_CODES.boolean;
-const NODE_CODE_NUMBER = NODE_CODES.number;
-const NODE_CODE_STRING = NODE_CODES.string;
-const NODE_CODE_ARRAY = NODE_CODES.array;
-const NODE_CODE_NODE = NODE_CODES.node;
-const NODE_CODE_ID = NODE_CODES.id;
-const NODE_CODE_CHUNK = NODE_CODES.chunk;
-const NODE_CODE_STATEMENT = NODE_CODES.statement;
-const NODE_CODE_EXPRESSION_STATEMENT = NODE_CODES.expressionStatement;
-const NODE_CODE_CHECK_STATUS = NODE_CODES.checkStatus;
-const NODE_CODE_STORE = NODE_CODES.store;
-const NODE_CODE_STORE_ARG = NODE_CODES.storeArg;
-const NODE_CODE_STORE_VAR = NODE_CODES.storeVar;
-const NODE_CODE_OPERATOR = NODE_CODES.operator;
-const NODE_CODE_CAST = NODE_CODES.cast;
-const NODE_CODE_CAST2 = NODE_CODES.cast2;
-const NODE_CODE_PROPERTY = NODE_CODES.property;
-const NODE_CODE_IF_ELSE = NODE_CODES.ifElse;
-const NODE_CODE_GET_VARIABLE = NODE_CODES.getVariable;
-const NODE_CODE_BINARY_OPERATOR = NODE_CODES.binaryOperator;
-const NODE_CODE_CALL = NODE_CODES.call;
-const NODE_CODE_CALL_BLOCK = NODE_CODES.callBlock;
-const NODE_CODE_CALL_FUNCTION = NODE_CODES.callFunction;
-const NODE_CODE_FACTORY = NODE_CODES.factory;
-const NODE_CODE_TOKEN = NODE_CODES.token;
-const NODE_CODE_WHITESPACE = NODE_CODES.whitespace;
-
-const NODE_KEYS = Object.entries(NODE_DATA).reduce((object, [name, data]) => {
-    object[name] = data.keys;
-    return object;
-}, {});
-
-const NODE_CODE_KEYS = Object.values(NODE_DATA).map(data => data.keys);
-
-const NODE_ANCESTORS = Object.entries(NODE_DATA).reduce((object, [name, data]) => {
-    object[name] = [name];
-    let _extends = data.extends;
-    while (_extends && NODE_DATA[_extends]) {
-        object[name].push(_extends);
-        _extends = NODE_DATA[_extends].extends;
-    }
-    return object;
-}, {});
-// null has no ancestors
-NODE_ANCESTORS.null = [];
-
-const NODE_CODE_ANCESTORS = Object.values(NODE_ANCESTORS);
-
-const NODE_IS_ANCESTOR = Object.entries(NODE_ANCESTORS).reduce((object, [name, keys]) => {
-    object[name] = {};
-    for (let i = 0; i < NODE_NAMES.length; i++) object[name][NODE_NAMES[i]] = keys.indexOf(NODE_NAMES[i]) > -1;
-    return object;
-}, {});
-
-const NODE_CODE_IS_ANCESTOR = Object.values(NODE_IS_ANCESTOR);
-
-const NODE_ENTER_KEYS = Object.entries(NODE_ANCESTORS).reduce((object, [name, keys]) => {
-    object[name] = keys.concat(keys.map(enterTitleCase));
-    return object;
-}, {});
-const NODE_EXIT_KEYS = Object.entries(NODE_ANCESTORS).reduce((object, [name, keys]) => {
-    object[name] = keys.map(exitTitleCase);
-    return object;
-}, {});
-
-const NODE_CODE_ENTER_KEYS = Object.values(NODE_ENTER_KEYS);
-const NODE_CODE_EXIT_KEYS = Object.values(NODE_EXIT_KEYS);
-
-const EMPTY_KEYS = [];
-
 const nodeType = function (node) {
     // node
     if (node != null && node.typeCode > 0) return node.type;
@@ -1064,7 +1160,6 @@ const nodeCode = function (node) {
 };
 
 const AVAILABLE = 0;
-const POPPED = 1;
 const ACTIVE = 2;
 const REVIEW = 3;
 
@@ -1080,65 +1175,77 @@ class PathTree {
         this.parent = null;
 
         this.node = null;
-        this.typeCode = NODE_CODE_NULL;
+
+        this.data = null;
         this.keys = EMPTY_KEYS;
+        this.length = -2;
         this.isArray = false;
 
         // state walking through members
-        this.state = AVAILABLE;
-        this._index = -1;
         this.children = [];
-        this.lastChild = -1;
+        this._activeIndex = Infinity;
+        this._index = Infinity;
+        this.lastChild = 0;
     }
     set (parent, node) {
-        this.state = ACTIVE;
         this.parent = parent;
 
         this.node = node;
-        this.typeCode = nodeCode(node);
-        if (this.isArray = (this.typeCode === NODE_CODE_ARRAY)) {
-            this.keys = node;
+        this.data = NODE_CODE_DATA[nodeCode(node)];
+        if (this.isArray = this.data.isArray) {
+            this.keys = EMPTY_KEYS;
+            this.length = node.length;
         } else {
-            this.keys = NODE_CODE_KEYS[this.typeCode];
+            this.keys = this.data.keys;
+            this.length = this.data.length;
         }
 
+        for (let i = this.children.length, l = this.length; i < l; i++) {
+            window.NEW_NODES = (window.NEW_NODES | 0) + 1;
+            this.children[i] = new PathTree(this.depth + 1);
+        }
+
+        // this.typeCode = node.data.typeCode;
+        // this.isArray = node.data.isArray;
+        // this.keys = node.data.keys || node;
+        // this.length = this.keys.length;
+        // this.value = node.data.isLiteral ? node.value : node;
+
         this._index = -1;
-        this.lastChild = 0;
     }
     reset () {
-        this.state = AVAILABLE;
         this.node = null;
-        this._index = 1;
-        this.keys = EMPTY_KEYS;
+        this._activeIndex = Infinity;
+        this._index = Infinity;
+        this.length = -2;
         for (let i = 0; i < this.lastChild; i++) {
-            if (this.children[i] && !this.children[i].isAvailable) this.children[i].reset();
+            if (!isAvailable(this.children[i])) this.children[i].reset();
         }
+        this.lastChild = 0;
     }
     next () {
-        if (this.isReview) {
-            const activeIndex = this.activeChildIndex;
-            if (activeIndex === -1 || activeIndex >= this._index) {
-                this.state = ACTIVE;
+        if (isReview(this)) {
+            let i = this._activeIndex + 1;
+            let l = Math.min(this._index, this.lastChild);
+            for (; i < l && !this.children[i].isActive; i++) {}
+            if (i === l) {
+                this._activeIndex = Infinity;
             } else {
+                this._activeIndex = i;
                 return;
             }
+            return;
         }
-        if (this._index <= this.keys.length) {
+        if (this._index <= this.length) {
             this._index = Math.min(this._index + 1, this.lastChild + 1);
         }
     }
     _attach (index) {
-        if (index >= this.keys.length) throw new Error('Can only attach children that exist');
+        // if (index >= this.length) throw new Error('Can only attach children that exist');
         let child = this.children[index];
-        if (!child) {
-            window.NEW_NODES = (window.NEW_NODES | 0) + 1;
-            child = this.children[index] = new PathTree(this.depth + 1);
-        } else {
-            window.REUSED_NODES = (window.REUSED_NODES | 0) + 1;
-        }
-        if (child.isAvailable) {
+        if (isAvailable(child)) {
             child.set(this, this.node[this.isArray ? index : this.keys[index]]);
-            if (index < this._index - 1) child._index = child.keys.length + 1;
+            if (index < this._index - 1) child._index = child.length + 1;
             this.lastChild = Math.max(this.lastChild, index + 1);
         }
         return child;
@@ -1152,17 +1259,13 @@ class PathTree {
         return child;
     }
     detach (index) {
-        // This index will never execute more than once
-        const child = this.children[index];
-        // if (!child) throw new Error('Cannot detach a unset path');
-        if (child && !child.isAvailable) child.reset();
+        if (index >= 0) this.children[index].reset();
         return this;
     }
     push () {
         return this._attach(this.index);
     }
     pop () {
-        if (this._index === Infinity) return this.parent;
         return this.parent.detach(this.keyIndex);
     }
     peekNode () {
@@ -1170,52 +1273,45 @@ class PathTree {
     }
 
     get isAvailable () {
-        return this.state === AVAILABLE;
+        return this.length < 0;
     }
     get isActive () {
-        return this.state >= ACTIVE;
+        return this.length >= 0;
     }
     get isReview () {
-        return this.state === REVIEW;
-    }
-    get isPopped () {
-        return this.state === POPPED;
+        return this._activeIndex < this.length;
     }
     get atHead () {
         return this._index === -1;
     }
     get inRange () {
-        return this.index < this.keys.length;
+        return this._index < this.length || this._activeIndex < this.length;
     }
     get atTail () {
-        return this.index === this.keys.length;
+        return this._index === this.length && this._activeIndex >= this.length;
+    }
+    get atTailOfLeaf () {
+        return this.length === 0;
     }
     get outOfRange () {
-        return this.index > this.keys.length;
+        return this._index > this.length && this._activeIndex >= this.length;
     }
     get visitStage () {
-        if (this._index === -1) return AT_HEAD;
-        const index = this.index;
-        const length = this.keys.length;
-        if (index < length) return IN_RANGE;
-        else if (index === length) return AT_TAIL;
+        const {_activeIndex, _index, length} = this;
+        if (_index === -1) return AT_HEAD;
+        else if (_index < length || _activeIndex < length) return IN_RANGE;
+        else if (_index === length) return AT_TAIL;
         else return OUT_OF_RANGE;
     }
 
     get index () {
-        if (!this.isReview) return this._index;
-        return Math.min(this._index, this.activeChildIndex);
-    }
-    get activeChildIndex () {
-        const max = Math.min(this._index, this.lastChild);
-        if (this.isPopped) return max;
-        for (let i = 0; i < max; i++) {
-            if (this.children[i] && this.children[i].isActive) return i;
-        }
-        return max;
+        return Math.min(this._activeIndex, this._index);
     }
     get type () {
-        return NODE_NAMES[this.typeCode];
+        return this.data.type;
+    }
+    get typeCode () {
+        return this.data.code;
     }
     get keyIndex () {
         return this.parent.children.indexOf(this);
@@ -1255,21 +1351,22 @@ class PathTree {
         if (!this.isArray) throw new Error('Path must be an array');
     }
 
-    changeTree () {
-        let parent = this;
-        parent.state = REVIEW;
-        while (parent.parent && (parent.keyIndex < parent.parent._index)) {
-            parent = parent.parent;
-            parent.state = REVIEW;
+    changeTree (index) {
+        let path = this;
+        if (index + 1 < path.index) path._activeIndex = index;
+        while (path.parent && (path.keyIndex + 1 < path.parent.index)) {
+            path.parent._activeIndex = path.keyIndex;
+            path = path.parent;
         }
     }
 
     setKey (key, node) {
         this.assertActive();
-        this.changeTree();
 
         this.node[key] = node;
         const index = this.isArray ? key : this.keys.indexOf(key);
+
+        this.changeTree(index);
         this.detach(index);
         return this.attach(index);
     }
@@ -1299,41 +1396,52 @@ class PathTree {
             if (index <= this.parent._index) {
                 this.parent._index--;
             }
+            if (index <= this.parent._activeIndex) {
+                this.parent._activeIndex--;
+            }
             if (index <= this.parent.lastChild) {
                 this.parent.lastChild--;
             }
+            this.parent.length--;
             this.parent.node.splice(index, 1);
             this.parent.children.splice(index, 1);
         } else {
             if (index === this.parent._index - 1) this.parent._index -= 1;
+            if (index === this.parent._activeIndex - 1) this.parent._activeIndex -= 1;
             this.parent.node[this.key] = null;
         }
     }
 
     replaceWith (node) {
         this.assertActive();
-        this.changeTree();
+
         const index = this.keyIndex;
         if (index === -1) throw new Error('Cannot replace path that is not in parent');
         this.parent.node[this.key] = node;
+
+        this.changeTree(index);
         this.parent.detach(index);
         return this.parent.attach(index);
     }
 
     insertChild (index, node) {
         this.assertArray();
-        this.changeTree();
+
         if (index <= this._index) this._index++;
+        if (index <= this._activeIndex) this._activeIndex++;
         if (index <= this.lastChild) this.lastChild++;
+
+        this.length++;
         this.node.splice(index, 0, node);
-        this.children.splice(index, 0, null);
+        this.children.splice(index, 0, new PathTree(this.depth + 1));
+        this.changeTree(index);
         return this.attach(index);
     }
     prependChild (node) {
         return this.insertChild(0, node);
     }
     appendChild (node) {
-        return this.insertChild(this.keys.length, node);
+        return this.insertChild(this.length, node);
     }
 
     insertFirst (node) {
@@ -1350,36 +1458,39 @@ class PathTree {
     }
 }
 
-const index = function (path) {
-    if (!path.isReview) return path._index;
-    return Math.min(path._index, path.activeChildIndex);
+const isAvailable = function (path) {
+    return path.length < 0;
 }
-const activeChildIndex = function (path) {
-    const max = Math.min(path._index, path.lastChild);
-    if (path.isPopped) return max;
-    for (let i = 0; i < max; i++) {
-        if (path.children[i] && path.children[i].isActive) return i;
-    }
-    return max;
+const isActive = function (path) {
+    return path.length >= 0;
+}
+const isReview = function (path) {
+    return path._activeIndex < path.length;
+}
+
+const index = function (path) {
+    return Math.min(path._activeIndex, path._index);
 }
 const atHead = function (path) {
     return path._index === -1;
 }
 const inRange = function (path) {
-    return index(path) < path.keys.length;
+    return path._index < path.length || path._activeIndex < path.length;
 }
 const atTail = function (path) {
-    return index(path) === path.keys.length;
+    return path._index === path.length && path._activeIndex >= path.length;
+}
+const atTailOfLeaf = function (path) {
+    return path.length === 0;
 }
 const outOfRange = function (path) {
-    return index(path) > path.keys.length;
+    return path._index > path.length && path._activeIndex >= path.length;
 }
 const visitStage = function (path) {
-    if (path._index === -1) return AT_HEAD;
-    const index_ = index(path);
-    const length = path.keys.length;
-    if (index_ < length) return IN_RANGE;
-    else if (index_ === length) return AT_TAIL;
+    const {_activeIndex, _index, length} = path;
+    if (_index === -1) return AT_HEAD;
+    else if (_index < length || _activeIndex < length) return IN_RANGE;
+    else if (_index === length) return AT_TAIL;
     else return OUT_OF_RANGE;
 }
 
@@ -1400,10 +1511,12 @@ const getAllPropertyNames = function (proto) {
     }
     return Array.from(keySet);
 };
-const visit = function (node, path, visitFunctions) {
+const visit = function (path, visitFunctions) {
+    const node = path.node;
     for (let j = 0; j < visitFunctions.length && path.isActive && node === path.node; j += 2) {
         visitFunctions[j](node, path, visitFunctions[j + 1]);
     }
+    return node === path.node;
 };
 class Transformer {
     constructor (visitors) {
@@ -1418,11 +1531,7 @@ class Transformer {
     transform (root, states) {
         const {enter, willEnter, exit, willExit, willVisit} = this.setStates(states);
 
-        this.path.node = {root};
-        this.path.keys = ['root'];
-        this.path.lastChild = 0;
-        this.path._index = -1;
-        this.path.state = ACTIVE;
+        this.path.set(null, ast.root(root));
         this.path.next();
         let path = this.path.push();
         path.parent.next();
@@ -1436,23 +1545,38 @@ class Transformer {
                 path = path.push();
                 if (path.depth > 100) throw new Error('Path is too deep');
                 path.parent.next();
+                // while (!willVisit[path.typeCode]) {
+                //     path = path.pop();
+                //     if (!atTail(path)) {
+                //         path = path.push();
+                //         path.parent.next();
+                //     } else if (willExit[path.typeCode] && visit(path, exit[path.typeCode]) {
+                //         path = path.pop();
+                //         break;
+                //     } else {
+                //         break;
+                //     }
+                // }
                 if (!atHead(path)) break;
             case AT_HEAD:
-                node = path.node;
-                if (willEnter[path.typeCode]) visit(node, path, enter[path.typeCode]);
-                if (node === path.node) path.next();
+                // if (!willVisit[path.typeCode]) window.SKIP = (window.SKIP | 0) + 1;
+                // if (willEnter[path.typeCode]) window.ENTER = (window.ENTER | 0) + 1;
+                // else window.ENTERLESS = (window.ENTERLESS | 0) + 1;
+                if (!willEnter[path.typeCode] || visit(path, enter[path.typeCode])) path.next();
                 if (!atTail(path)) break;
             case AT_TAIL:
-                node = path.node;
-                if (willExit[path.typeCode]) visit(node, path, exit[path.typeCode]);
-                if (node !== path.node) break;
+                // if (willExit[path.typeCode]) window.EXIT = (window.EXIT | 0) + 1;
+                // else window.EXITLESS = (window.EXITLESS | 0) + 1;
+                if (willExit[path.typeCode] && !visit(path, exit[path.typeCode])) break;
             case OUT_OF_RANGE:
                 do {
                     path = path.pop();
                 } while (path.depth > -1 && (outOfRange(path) || (atTail(path) && !willExit[path.typeCode])));
-                if (path.depth === -1 && atTail(path)) run = false;
+                if (path.depth === -1 && (outOfRange(path) || atTail(path))) run = false;
             }
         }
+
+        path.reset();
     }
     initVisitors (visitors) {
         this.visitors = visitors || [];
@@ -1826,6 +1950,7 @@ class JSInlineOperators {
                 // const storePath = new Path(path).goTo(storePathArray);
                 storePath.refresh();
                 if (!ast.type.isStoreArg(storePath.node) || storePath.node.name !== node.lhs || storePath.node.key !== node.member) {
+                    console.log('couldn\'t refresh');
                     return;
                 }
 
@@ -1834,6 +1959,15 @@ class JSInlineOperators {
                 if (ast.type.isOperator(storeExpr)) {
                     path.replaceWith(ast.cloneDeep(storeExpr));
                     storePath.remove();
+                    // const parentClone = ast.cloneDeep(storePath.parentNode);
+                    // parentClone.splice(storePath.key, 1);
+                    // storePath.parent.replaceWith(parentClone);
+                    // if (storePath.parentNode[storePath.key + 1]) {
+                    //     const afterStore = storePath.parent.getKey(storePath.key + 1);
+                    //     if (ast.type.isCheckStatus(afterStore)) {
+                    //         afterStore.remove();
+                    //     }
+                    // }
                 } else {
                     const storeId = `${node.lhs}_${node.member}`;
                     path.replaceWith(ast.id(storeId));
