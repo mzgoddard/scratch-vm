@@ -60,6 +60,8 @@ class _StackFrame {
          * @type {boolean}
          */
         this.needsReset = false;
+
+        // this._blockIndex = -1;
     }
 
     /**

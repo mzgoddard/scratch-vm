@@ -78,7 +78,16 @@ const loadProject = function () {
     if (id.length < 1 || !isFinite(id)) {
         id = projectInput.value;
     }
-    Scratch.vm.downloadProjectId(id);
+    fetch('./' + id)
+    .then(function (response) {
+        return response.arrayBuffer();
+    })
+    .then(function (buffer) {
+        return Scratch.vm.loadProject(buffer);
+    })
+    .catch(function () {
+        Scratch.vm.downloadProjectId(id);
+    });
     return id;
 };
 

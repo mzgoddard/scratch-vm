@@ -70,6 +70,10 @@ class Blocks {
              */
             _executeCached: {},
 
+            _executeCachedIndex: [],
+
+            _executeCachedIdIndexMap: {},
+
             /**
              * A cache of block IDs and targets to start threads on as they are
              * actively monitored.
@@ -515,6 +519,7 @@ class Blocks {
         this._cache.procedureParamNames = {};
         this._cache.procedureDefinitions = {};
         this._cache._executeCached = {};
+        this._cache._executeCachedIndex.fill(null);
         this._cache._monitored = null;
         this._cache.scripts = {};
     }
@@ -1201,9 +1206,12 @@ BlocksExecuteCache.getCached = function (blocks, blockId, CacheType) {
     const block = blocks.getBlock(blockId);
     if (typeof block === 'undefined') return null;
 
+    const index = Object.keys(blocks._cache._executeCachedIdIndexMap).length;
+
     if (typeof CacheType === 'undefined') {
         cached = {
             id: blockId,
+            index,
             opcode: blocks.getOpcode(block),
             fields: blocks.getFields(block),
             inputs: blocks.getInputs(block),
@@ -1212,6 +1220,7 @@ BlocksExecuteCache.getCached = function (blocks, blockId, CacheType) {
     } else {
         cached = new CacheType(blocks, {
             id: blockId,
+            index,
             opcode: blocks.getOpcode(block),
             fields: blocks.getFields(block),
             inputs: blocks.getInputs(block),
@@ -1220,6 +1229,14 @@ BlocksExecuteCache.getCached = function (blocks, blockId, CacheType) {
     }
 
     blocks._cache._executeCached[blockId] = cached;
+    blocks._cache._executeCachedIndex[index] = cached;
+    blocks._cache._executeCachedIdIndexMap[blockId] = index;
+    return cached;
+};
+
+BlocksExecuteCache.getCachedIndex = function (blocks, blockIndex, blockId) {
+    const cached = blocks._cache._executeCachedIndex[blockIndex];
+    if (typeof cached === 'undefined' || cached.id !== blockId) return null;
     return cached;
 };
 
