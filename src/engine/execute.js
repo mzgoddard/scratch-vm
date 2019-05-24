@@ -120,6 +120,23 @@ const safeId = function (id) {
     // return `_${String(id).replace(/[^_\w]/g, c => c.charCodeAt(0))}`;
 };
 
+const safe54Chars = '_ABCDEFGHIJKLMNOPQRSTUVWXYZ$abcdefghijklmnopqrstuvwxyz'.split('');
+const safe64Chars = '_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ$abcdefghijklmnopqrstuvwxyz'.split('');
+const safe64 = function (id) {
+    let s = '';
+    id = id | 0;
+
+    while (id > 0x1f) {
+        s = safe64Chars[id & 0x3f] + s;
+        id = id >> 6;
+    }
+    s = safe54Chars[id & 0x1f] + s;
+    return s;
+};
+
+// 13 1
+// 1 * 32 + 13
+
 /**
  * A execute.js internal representation of a block to reduce the time spent in
  * execute as the same blocks are called the most.
@@ -971,7 +988,7 @@ const ast = {
             expr
         };
     },
-    ifStatement (test, expr, ifFalse) {
+    ifStatement (test, expr, ifFalse = []) {
         return {
             type: 'ifStatement',
             typeCode: NODE_CODES.ifStatement,
@@ -1796,7 +1813,12 @@ class JSCountRefs {
     storeVar (node, path, state) {
         if (!state.vars[node.name.value]) {
             node.uses = 0;
+            node.scope = path.parent.key;
+            if (typeof node.scope !== 'string') {
+                node.scope = path.parent.parent.key;
+            }
             state.vars[node.name.value] = node;
+            state.varPaths[node.name.value] = path;
         } else {
             node.uses = -1;
         }
@@ -1816,11 +1838,28 @@ const findArg = new JSFindArg();
 const createHelper = function (state, path, name, body) {
     state.paths[name] = path.root.getKey('bindings').appendChild(ast.storeVar(name, body));
 };
-const vm_do_stack = function (blockCached) {
-    const opCached = blockCached._allOps[0];
-    if (opCached.opcode === 'vm_compiled') {
-        opCached._parentValues[opCached._parentKey] = (
-            opCached._blockFunction(opCached._argValues, blockUtility));
+const vm_do_stack = function (args, blockUtility) {
+    // const opCached = blockCached._allOps[0];
+    // if (opCached.opcode === 'vm_compiled') {
+    //     opCached._parentValues[opCached._parentKey] = (
+    //         opCached._blockFunction(opCached._argValues, blockUtility));
+    // }
+
+    const blockCached = args.BLOCK_CACHED;
+    const mayContinueCached = args.MAY_CONTINUE_CACHED;
+    const thread = blockUtility.thread;
+    if (thread.continuous && thread.pointer === blockCached.id) {
+        const opCached = blockCached._allOps[0];
+        if (opCached.opcode === 'vm_compiled') {
+            opCached._parentValues[opCached._parentKey] = (
+                opCached._blockFunction(opCached._argValues, blockUtility));
+        }
+        if (thread.pointer !== mayContinueCached._argValues.NEXT_STACK) {
+            thread.status = Thread.STATUS_INTERRUPT;
+        }
+    } else {
+        mayContinueCached._parentValues[mayContinueCached._parentKey] = (
+            mayContinueCached._blockFunction(mayContinueCached._argValues, blockUtility));
     }
 };
 class JSInlineOperators {
@@ -1839,7 +1878,10 @@ class JSInlineOperators {
 
             const afterAnother = chunkParent.value.some((chunk, index) => (
                 index < chunkIndex &&
-                chunk.value.some(statement => ast.type.isCall(statement.expr) && statement.expr.func.value === 'vm_may_continue')
+                (chunk.value.some(statement => (
+                    ast.type.matchShape({expr: {func: 'vm_may_continue'}}, statement) ||
+                    ast.type.matchShape({expr: {expect: {lhs: 'thread', member: 'reuseStackForNextBlock'}}}, statement)
+                )))
             ));
             if (!afterAnother) return;
             const beforeAnother = chunkParent.value.some((chunk, index) => (
@@ -1867,6 +1909,20 @@ class JSInlineOperators {
                 ) return;
             }
             if (i < 0) {
+                for (let i = chunkIndex - 1; i >= 0; i--) {
+                    const chunk = chunkParent.value[i];
+                    for (let j = 0; j < chunk.value.length; j++) {
+                        const statement = chunk.value[j];
+                        if (
+                            ast.type.matchShape({expr: {expect: {lhs: 'thread', member: 'reuseStackForNextBlock'}}}, statement)
+                        ) {
+                            path.root.getKey('chunks').getKey(i).getKey(j).remove();
+                            i = -1;
+                            break;
+                        }
+                    }
+                }
+
                 path.replaceWith(ast.cast(ast.p('thread', 'reuseStackForNextBlock'), ast.p(node.args, 'NEXT_STACK')));
                 return;
             }
@@ -1968,8 +2024,30 @@ class JSInlineOperators {
         if (info && info.op.opcode === 'data_variable') {
             const {id, name} = info.op._argValues.VARIABLE;
             const dataId = `data_${safeId(name)}`;
+            const chunkParent = path.root.getKey('chunks');
+            for (let i = path.parent.parent.key - 1; i >= 0; i--) {
+                const chunk = chunkParent.value[i];
+                for (let j = chunk.value.length - 1; j > -1; j--) {
+                    const statement = chunk.value[j];
+                    if (ast.type.matchShape({expr: ast.type.isCall}, statement) || ast.type.matchShape({name: dataId}, statement)) {
+                        i = -1;
+                        break;
+                    } else if (ast.type.matchShape({type: 'storeVar', expr: {lhs: dataId, member: 'value'}}, statement)) {
+                        path.replaceWith(statement.name);
+                        return;
+                    // } else if (ast.type.matchShape({type: 'storeArg', expr: {lhs: dataId, member: 'value'}}, statement)) {
+                    //     const preVar = chunkParent.getKey(i).getKey(j);
+                    //     preVar.getKey('expr').replaceWith(preVar.parent.value[j - 1].name);
+                    //     path.replaceWith(preVar.parent.value[j - 1].name);
+                    //     return;
+                    }
+                }
+            }
+            const dataIdVar = `${dataId}_${node.args.value}`;
             path.parent.insertBefore(ast.storeVar(dataId, ast.p('target', `lookupOrCreateVariable('${id}', '${name}')`)));
-            path = path.replaceWith(ast.property(dataId, 'value'));
+            path.parent.insertBefore(ast.storeVar(dataIdVar, ast.property(dataId, 'value')));
+            // path.replaceWith(ast.property(dataId, 'value'));
+            path.replaceWith(dataIdVar);
             return;
         }
         if (info && info.op.opcode === 'data_setvariableto') {
@@ -2003,17 +2081,10 @@ class JSInlineOperators {
                 dataId,
                 p('target', `lookupOrCreateList('${id}', '${name}')`)
             ));
-            // var indexId = toListIndex(args.INDEX, dataId.value.length)
-            parentPath.insertBefore(storeVar(
-                indexId,
-                cast2('toListIndex', p(node.args, 'INDEX'), p(p(dataId, 'value'), 'length'))
-            ));
-            // indexId === LIST_INVALID ? '' dataId.value[indexId - 1]
-            path = path.replaceWith(ifElse(
-                op2('===', indexId, 'LIST_INVALID'),
-                `''`,
-                // dataId.value[indexId - 1]
-                p(p(dataId, 'value'), op2('-', indexId, 1))
+            // listGetIndex(dataId, indexId)
+            path = path.replaceWith(ast.cast2('listGetIndex',
+                dataId,
+                p(node.args, 'INDEX')
             ));
             return;
         }
@@ -2042,6 +2113,10 @@ class JSInlineOperators {
 
                 const mayContinue = nextChunk.getKey(mayContinueIndex);
 
+                const mayContinueInfo = state.opMap[mayContinue.value.expr.args.value];
+
+                if (!mayContinueInfo) return;
+
                 const proccode = info.op._argValues.mutation.proccode;
                 const thread = blockUtility.thread;
                 const definition = thread.blockContainer.getProcedureDefinition(proccode);
@@ -2049,18 +2124,30 @@ class JSInlineOperators {
                 if (!definition) return;
 
                 var id = `p${safeId(definition)}`;
-                state.bindings[id] = getCached(thread, -1, definition);
+                state.bindings[id] = {
+                    BLOCK_CACHED: getCached(thread, -1, definition),
+                    MAY_CONTINUE_CACHED: mayContinueInfo.op
+                };
                 path.root.getKey('bindings').appendChild(ast.storeVar(id, ast.p('bindings', id)));
 
                 state.bindings.vm_do_stack = vm_do_stack;
                 path.root.getKey('bindings').appendChild(ast.storeVar('vm_do_stack', ast.p('bindings', 'vm_do_stack')));
 
-                mayContinue.replaceWith(ast.ifStatement(
-                    ast.op2('||',
-                        ast.p('thread', 'continuous'),
-                        ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(definition))),
-                    ast.expressionStatement(ast.callArgs('vm_do_stack', [id])),
-                    ast.expressionStatement(mayContinue.node.expr)));
+                mayContinue.replaceWith(ast.expressionStatement(ast.callBlock('null', 'vm_do_stack', id)));
+
+                // mayContinue.replaceWith(ast.ifStatement(
+                //     ast.op2('||',
+                //         ast.p('thread', 'continuous'),
+                //         ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(definition))),
+                //     [
+                //         ast.expressionStatement(ast.callArgs('vm_do_stack', [id])),
+                //         ast.ifStatement(
+                //             ast.op2('!==',
+                //                 ast.p('thread', 'pointer'),
+                //                 ast.string.quote(mayContinueInfo.op._argValues.NEXT_STACK)),
+                //             ast.storeArg('thread', 'status', Thread.STATUS_INTERRUPT))
+                //     ],
+                //     ast.expressionStatement(mayContinue.node.expr)));
             }
         }
         if (info && /^control_/.test(info.op.opcode)) {
@@ -2088,6 +2175,10 @@ class JSInlineOperators {
 
                 const mayContinue = nextChunk.getKey(mayContinueIndex);
 
+                const mayContinueInfo = state.opMap[mayContinue.value.expr.args.value];
+
+                if (!mayContinueInfo) return;
+
                 const thread = blockUtility.thread;
                 const substack = thread.blockContainer.getBranch(info.op.id, 1);
                 const substack2 = thread.blockContainer.getBranch(info.op.id, 2);
@@ -2096,48 +2187,58 @@ class JSInlineOperators {
 
                 const id = `s${safeId(substack)}`;
                 const id2 = `s${safeId(String(substack2))}`;
-                state.bindings[id] = getCached(thread, -1, substack);
+                state.bindings[id] = {
+                    BLOCK_CACHED: getCached(thread, -1, substack),
+                    MAY_CONTINUE_CACHED: mayContinueInfo.op
+                };
                 path.root.getKey('bindings').appendChild(ast.storeVar(id, ast.p('bindings', id)));
                 if (substack2) {
-                    state.bindings[id2] = getCached(thread, -1, substack2);
+                    state.bindings[id2] = {
+                        BLOCK_CACHED: getCached(thread, -1, substack2),
+                        MAY_CONTINUE_CACHED: mayContinueInfo.op
+                    };
                     path.root.getKey('bindings').appendChild(ast.storeVar(id2, ast.p('bindings', id2)));
                 }
 
                 state.bindings.vm_do_stack = vm_do_stack;
                 path.root.getKey('bindings').appendChild(ast.storeVar('vm_do_stack', ast.p('bindings', 'vm_do_stack')));
 
-                const mayContinueInfo = state.opMap[mayContinue.value.expr.args.value];
-
-                if (!mayContinueInfo) return;
-
                 mayContinue.replaceWith(ast.ifStatement(
-                    ast.op2('&&',
-                        ast.p('thread', 'continuous'),
-                        ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(substack))),
-                    [
-                        ast.expressionStatement(ast.callArgs('vm_do_stack', [id])),
-                        ast.checkStatus(),
-                        ast.ifStatement(
-                            ast.op2('!==',
-                                ast.p('thread', 'pointer'),
-                                ast.string.quote(mayContinueInfo.op._argValues.NEXT_STACK)),
-                            ast.storeArg('thread', 'status', Thread.STATUS_INTERRUPT))
-                    ],
-                    substack2 ? ast.ifStatement(
-                        ast.op2('&&',
-                            ast.p('thread', 'continuous'),
-                            ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(substack2))),
-                        [
-                            ast.expressionStatement(ast.callArgs('vm_do_stack', [id2])),
-                            ast.checkStatus(),
-                            ast.ifStatement(
-                                ast.op2('!==',
-                                    ast.p('thread', 'pointer'),
-                                    ast.string.quote(mayContinueInfo.op._argValues.NEXT_STACK)),
-                                ast.storeArg('thread', 'status', Thread.STATUS_INTERRUPT))
-                        ],
-                        ast.expressionStatement(mayContinue.node.expr)) :
-                    ast.expressionStatement(mayContinue.node.expr)));
+                    ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(substack)),
+                        ast.expressionStatement(ast.callBlock('null', 'vm_do_stack', id)),
+                        substack2 ? ast.expressionStatement(ast.callBlock('null', 'vm_do_stack', id2)) : ast.cloneDeep(mayContinue.node)));
+
+                // mayContinue.replaceWith(ast.ifStatement(
+                //     ast.op2('&&',
+                //         ast.p('thread', 'continuous'),
+                //         ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(substack))),
+                //     [
+                //         ast.expressionStatement(ast.callArgs('vm_do_stack', [id])),
+                //         ast.checkStatus(),
+                //         ast.ifStatement(
+                //             ast.op2('!==',
+                //                 ast.p('thread', 'pointer'),
+                //                 ast.string.quote(mayContinueInfo.op._argValues.NEXT_STACK)),
+                //             ast.storeArg('thread', 'status', Thread.STATUS_INTERRUPT))
+                //     ],
+                //     substack2 ?
+                //         ast.ifStatement(
+                //             ast.op2('&&',
+                //                 ast.p('thread', 'continuous'),
+                //                 ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(substack2))),
+                //             [
+                //                 ast.expressionStatement(ast.callArgs('vm_do_stack', [id2])),
+                //                 ast.checkStatus(),
+                //                 ast.ifStatement(
+                //                     ast.op2('!==',
+                //                         ast.p('thread', 'pointer'),
+                //                         ast.string.quote(mayContinueInfo.op._argValues.NEXT_STACK)),
+                //                     ast.storeArg('thread', 'status', Thread.STATUS_INTERRUPT))
+                //             ],
+                //             ast.expressionStatement(mayContinue.node.expr)
+                //         ) :
+                //         ast.expressionStatement(mayContinue.node.expr)
+                // ));
             }
         }
     }
@@ -2232,6 +2333,14 @@ class JSInlineOperators {
                     'function (n, m) {return (n % m) + ((n * m < 0) * m);}'
                 ]);
             }
+            if (node.expect.value === 'listGetIndex') {
+                createHelper(state, path, 'listGetIndex', [
+                    'function (l, _i) {',
+                    'var i = ', 'toListIndex', '(_i, l.value.length);',
+                    'return i === ', 'LIST_INVALID', ` ? '' : l.value[i - 1];`,
+                    '}'
+                ]);
+            }
         }
     }
     property (node, path, state) {
@@ -2257,7 +2366,7 @@ class JSInlineOperators {
 
                 const storeExpr = storePath.node.expr;
 
-                if (ast.type.isOperator(storeExpr)) {
+                if (ast.type.isOperator(storeExpr) || ast.type.isLiteral(storeExpr)) {
                     path.replaceWith(ast.cloneDeep(storeExpr));
                     storePath.remove();
                     // const parentClone = ast.cloneDeep(storePath.parentNode);
@@ -2283,9 +2392,7 @@ class JSMangle {
         if (!state.minimize) return;
         if (path.parent.isArray && path.key > 0 && path.parentNode.value[path.key - 1].value === '.') return;
         if (state.vars[node]) {
-            if (!state.mangled[node]) {
-                state.mangled[node] = `m${state.nextMangle++}`;
-            }
+            if (!state.mangled[node]) return;
             path.replaceWith(state.mangled[node]);
         }
     }
@@ -2298,6 +2405,12 @@ class JSPrinter {
         state.source += node;
     }
     string (node, path, state) {
+        if (!path.parent.isArray || path.key === 0 || path.parentNode.value[path.key - 1].value !== '.') {
+            const varInfo = state.vars[node];
+            if (varInfo && varInfo.uses === 1 && varInfo.scope === 'chunks') {
+                return path.replaceWith(ast.cloneDeep(varInfo.expr));
+            }
+        }
         state.source += node;
     }
     checkStatus (node, path, state) {
@@ -2309,18 +2422,23 @@ class JSPrinter {
     ifStatement ({test, expr, ifFalse}, path, state) {
         path.replaceWith(['if (', test, ') ',
             ast.type.isArray(expr) ? ['{ ', expr, ' }'] : expr,
-            ifFalse ? (' else ',
-                ast.type.isArray(ifFalse) ? ['{ ', ifFalse, ' }'] : ifFalse) :
-                []]);
+            ast.type.isArray(ifFalse) ?
+                ifFalse.value.length > 0 ?
+                    [' else ', '{ ', ifFalse, ' }'] :
+                    [] :
+                [' else ', ifFalse]
+    ]);
     }
     storeArg ({name, key, expr}, path, state) {
         const {t} = code;
         path.replaceWith([name, '.', key, ' = ', expr, ';']);
     }
-    storeVar ({uses, name, expr}, path, state) {
+    storeVar ({uses, scope, name, expr}, path, state) {
         const {t} = code;
         if (uses < 0 || uses === 0 && state.minimize) return path.skip();
+        if (uses === 1 && state.minimize && scope === 'chunks') return path.skip();
         if (uses === 0) return path.replaceWith(['/* skipping unused var ', name, '. */']);
+        if (uses === 1 && scope === 'chunks') return path.replaceWith(['/* inlining var ', name, '. */']);
         path.replaceWith(['var ', name, ' = ', expr, ';', state.minimize ? '' : ` /* uses: ${uses} */`]);
     }
     cast ({expect, value}, path, state) {
@@ -2468,7 +2586,9 @@ const compile = function (blockCached) {
     perf.baseline = -last;
     const baselineState = {
         source: '',
-        minimize: false
+        minimize: false,
+        vars: {},
+        varPaths: {}
     };
     compilePrint.transform(baselineAST, [baselineState, baselineState]);
     const baseline = baselineState.source;
@@ -2483,24 +2603,27 @@ const compile = function (blockCached) {
     const countRefs = {vars: {
         bindings: {uses: 0},
         blockUtility: {uses: 0}
-    }, strings: []};
+    }, varPaths: {}, strings: []};
     compileRefs.transform(factoryAST, [countRefs]);
     perf.count += (last = performance.now());
 
     let mangled = Object.entries(countRefs.vars);
     mangled = mangled.sort(([,{uses}], [,{uses: uses2}]) => uses2 - uses);
     mangled = mangled.reduce((map, [name], index) => {
-        if (!map[name]) map[name] = `m${index}`;
+        map[name] = safe64(index);
         return map;
-    }, {
-        bindings: 'b',
-        blockUtility: 'u'
+    }, {});
+
+    Object.entries(mangled).forEach(([name, newName]) => {
+        countRefs.vars[newName] = countRefs.vars[name];
+        countRefs.varPaths[newName] = countRefs.varPaths[name];
     });
 
     const factoryClone = ast.cloneDeep(factoryAST);
     const renderState = {
         source: '',
         vars: countRefs.vars,
+        varPaths: countRefs.varPaths,
         nextMangle: mangled.length,
         mangled,
         minimize: false
@@ -2521,6 +2644,11 @@ const compile = function (blockCached) {
 
     (window.AST_COMPILE = (window.AST_COMPILE || [])).push([inlineState, countRefs, renderState, factoryClone, factoryAST]);
 
+    (window.PERF = (window.PERF || {}))[factoryAST.debugName.value] = perf;
+    (window.BASELINE = (window.BASELINE || {}))[factoryAST.debugName.value] = baseline;
+    (window.OPTIMIZED = (window.OPTIMIZED || {}))[factoryAST.debugName.value] = optimized;
+    (window.COMPILED = (window.COMPILED || {}))[factoryAST.debugName.value] = renderState.source;
+
     const factory = new Function(renderState.minimize ? mangled['bindings'] : 'bindings', renderState.source);
 
     const compileCached = new BlockCached(null, {
@@ -2531,10 +2659,6 @@ const compile = function (blockCached) {
         mutation: null
     });
     compileCached._blockFunction = compileCached._blockFunctionUnbound = factory(bindings);
-    (window.PERF = (window.PERF || {}))[compileCached._blockFunctionUnbound.name] = perf;
-    (window.BASELINE = (window.BASELINE || {}))[compileCached._blockFunctionUnbound.name] = baseline;
-    (window.OPTIMIZED = (window.OPTIMIZED || {}))[compileCached._blockFunctionUnbound.name] = optimized;
-    (window.COMPILED = (window.COMPILED || {}))[compileCached._blockFunctionUnbound.name] = factory.toString();
 
     blockCached._allOps = [compileCached];
 };
