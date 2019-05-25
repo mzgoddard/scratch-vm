@@ -554,7 +554,10 @@ class CommandBlockCached extends InputBlockCached {
             ...(nextCached ? nextCached._allOps : [])
         ];
 
-        // this._commandSet = {i: 0, cached: this};
+        this._commandSet = {i: 0, firstCommand: this};
+        for (let i = 0; i < this._allOps.length; i++) {
+            this._allOps[i]._commandSet = {i: this._allOps.indexOf(this._allOps[i]._ops[0]), firstCommand: this};
+        }
     }
 }
 
@@ -1838,28 +1841,41 @@ const findArg = new JSFindArg();
 const createHelper = function (state, path, name, body) {
     state.paths[name] = path.root.getKey('bindings').appendChild(ast.storeVar(name, body));
 };
-const vm_do_stack = function (args, blockUtility) {
+const vm_do_stack = function (args, utils) {
     // const opCached = blockCached._allOps[0];
     // if (opCached.opcode === 'vm_compiled') {
     //     opCached._parentValues[opCached._parentKey] = (
-    //         opCached._blockFunction(opCached._argValues, blockUtility));
+    //         opCached._blockFunction(opCached._argValues, utils));
     // }
 
     const blockCached = args.BLOCK_CACHED;
     const mayContinueCached = args.MAY_CONTINUE_CACHED;
-    const thread = blockUtility.thread;
+    const thread = utils.thread;
     if (thread.continuous && thread.pointer === blockCached.id) {
         const opCached = blockCached._allOps[0];
-        if (opCached.opcode === 'vm_compiled') {
+        if (opCached._argValues.COMPILED) {
             opCached._parentValues[opCached._parentKey] = (
-                opCached._blockFunction(opCached._argValues, blockUtility));
+                opCached._blockFunction(opCached._argValues, utils));
         }
-        if (thread.pointer !== mayContinueCached._argValues.NEXT_STACK) {
+        if (thread.pointer === mayContinueCached._argValues.NEXT_STACK) {
+            if (mayContinueCached._argValues.NEXT_STACK === null) {
+                const endOp = thread.stackFrame.endBlockId;
+                let endFunction = utils.sequencer.runtime.getOpcodeFunction(endOp);
+                if (endFunction) {
+                    endFunction(args, utils);
+                }
+                if (thread.status === STATUS_RUNNING) {
+                    thread.status = Thread.STATUS_INTERRUPT;
+                }
+            } else {
+                thread.status = STATUS_RUNNING;
+            }
+        } else if (thread.status === STATUS_RUNNING) {
             thread.status = Thread.STATUS_INTERRUPT;
         }
     } else {
         mayContinueCached._parentValues[mayContinueCached._parentKey] = (
-            mayContinueCached._blockFunction(mayContinueCached._argValues, blockUtility));
+            mayContinueCached._blockFunction(mayContinueCached._argValues, utils));
     }
 };
 class JSInlineOperators {
@@ -1914,6 +1930,12 @@ class JSInlineOperators {
                     for (let j = 0; j < chunk.value.length; j++) {
                         const statement = chunk.value[j];
                         if (
+                            ast.type.isIfStatement(statement) ||
+                            ast.type.matchShape({expr: ast.type.isCall}, statement)
+                        ) {
+                            i = -1;
+                            break;
+                        } else if (
                             ast.type.matchShape({expr: {expect: {lhs: 'thread', member: 'reuseStackForNextBlock'}}}, statement)
                         ) {
                             path.root.getKey('chunks').getKey(i).getKey(j).remove();
@@ -2025,29 +2047,60 @@ class JSInlineOperators {
             const {id, name} = info.op._argValues.VARIABLE;
             const dataId = `data_${safeId(name)}`;
             const chunkParent = path.root.getKey('chunks');
-            for (let i = path.parent.parent.key - 1; i >= 0; i--) {
-                const chunk = chunkParent.value[i];
-                for (let j = chunk.value.length - 1; j > -1; j--) {
-                    const statement = chunk.value[j];
-                    if (ast.type.matchShape({expr: ast.type.isCall}, statement) || ast.type.matchShape({name: dataId}, statement)) {
-                        i = -1;
-                        break;
-                    } else if (ast.type.matchShape({type: 'storeVar', expr: {lhs: dataId, member: 'value'}}, statement)) {
-                        path.replaceWith(statement.name);
-                        return;
-                    // } else if (ast.type.matchShape({type: 'storeArg', expr: {lhs: dataId, member: 'value'}}, statement)) {
-                    //     const preVar = chunkParent.getKey(i).getKey(j);
-                    //     preVar.getKey('expr').replaceWith(preVar.parent.value[j - 1].name);
-                    //     path.replaceWith(preVar.parent.value[j - 1].name);
-                    //     return;
+            // for (let i = path.parent.parent.key - 1; i >= 0; i--) {
+            //     const chunk = chunkParent.value[i];
+            //     for (let j = chunk.value.length - 1; j > -1; j--) {
+            //         const statement = chunk.value[j];
+            //         if (ast.type.matchShape({expr: ast.type.isCall}, statement) ||
+            //             ast.type.matchShape({name: dataId}, statement)) {
+            //             i = -1;
+            //             break;
+            //         } else if (ast.type.matchShape({type: 'storeVar', expr: {lhs: new RegExp(`^${dataId}`), member: 'value'}}, statement)) {
+            //             path.replaceWith(statement.name);
+            //             return;
+            //         // } else if (ast.type.matchShape({type: 'storeArg', expr: {lhs: dataId, member: 'value'}}, statement)) {
+            //         //     const preVar = chunkParent.getKey(i).getKey(j);
+            //         //     preVar.getKey('expr').replaceWith(preVar.parent.value[j - 1].name);
+            //         //     path.replaceWith(preVar.parent.value[j - 1].name);
+            //         //     return;
+            //         }
+            //     }
+            // }
+            const dataIdArgs = `${dataId}_${node.args.value}`;
+            const dataIdVar = `var_${safeId(name)}_${node.args.value}`;
+            if (state.paths[dataId]) {
+                const chunkParent = path.root.getKey('chunks');
+                const chunk = path.parent.parent;
+                let m = chunk.key - 1;
+                for (; m >= 0; m--) {
+                    // debugger;
+                    const priorChunk = chunkParent.value[m];
+                    for (let j = priorChunk.value.length - 1; j >= 0; j--) {
+                        const statement = priorChunk.value[j];
+                        if (ast.type.isCheckStatus(statement)) {
+                            m = 0;
+                            break;
+                        } else if (ast.type.matchShape({expr: {operator: '=', input1: dataId}}, statement)) {
+                            m = -1;
+                            break;
+                        }
                     }
                 }
+                if (m === -1) {
+                    path.parent.insertBefore(ast.expressionStatement(ast.op2('=',
+                        dataId,
+                        ast.op2('||', dataId,
+                            ast.p('target', `lookupOrCreateVariable('${id}', '${name}')`)))));
+                }
+            } else {
+                state.paths[dataId] = {};
+                path.parent.insertBefore(ast.storeVar(
+                    dataId,
+                    ast.p('target', `lookupOrCreateVariable('${id}', '${name}')`)));
             }
-            const dataIdVar = `${dataId}_${node.args.value}`;
-            path.parent.insertBefore(ast.storeVar(dataId, ast.p('target', `lookupOrCreateVariable('${id}', '${name}')`)));
-            path.parent.insertBefore(ast.storeVar(dataIdVar, ast.property(dataId, 'value')));
+            // path.parent.insertBefore(ast.storeVar(dataIdVar, ast.property(dataIdArgs, 'value')));
             // path.replaceWith(ast.property(dataId, 'value'));
-            path.replaceWith(dataIdVar);
+            path.replaceWith(ast.property(dataId, 'value'));
             return;
         }
         if (info && info.op.opcode === 'data_setvariableto') {
@@ -2066,21 +2119,58 @@ class JSInlineOperators {
             //             `'requestUpdateVariable'`,
             //             [`'${name}'`, ast.p(node.args, 'VALUE')]
             //         ])));
-            parentPath.insertBefore(ast.storeVar(dataId, ast.p('target', `lookupOrCreateVariable('${id}', '${name}')`)));
-            parentPath.replaceWith(ast.storeArg(dataId, 'value', ast.p(node.args, 'VALUE')));
+            const dataIdArgs = `${dataId}_${node.args.value}`;
+            if (state.paths[dataId]) {
+                const chunkParent = path.root.getKey('chunks');
+                const chunk = path.parent.parent;
+                let n = chunk.key - 1;
+                for (; n >= 0; n--) {
+                    const priorChunk = chunkParent.value[n];
+                    for (let j = priorChunk.value.length - 1; j >= 0; j--) {
+                        const statement = priorChunk.value[j];
+                        if (ast.type.isCheckStatus(statement)) {
+                            n = 0;
+                            break;
+                        } else if (ast.type.matchShape({expr: {operator: '=', input1: dataId}}, statement)) {
+                            n = -1;
+                            break;
+                        }
+                    }
+                }
+                if (n === -1) {
+                    path.parent.insertBefore(ast.expressionStatement(ast.op2('=',
+                        dataId,
+                        ast.op2('||', dataId,
+                            ast.p('target', `lookupOrCreateVariable('${id}', '${name}')`)))));
+                }
+            } else {
+                state.paths[dataId] = {};
+                path.parent.insertBefore(ast.storeVar(
+                    dataId,
+                    ast.p('target', `lookupOrCreateVariable('${id}', '${name}')`)));
+            }
+            path.parent.replaceWith(ast.storeArg(dataId, 'value', ast.p(node.args, 'VALUE')));
             return;
         }
         if (info && info.op.opcode === 'data_itemoflist') {
             const {id, name} = info.op._argValues.LIST;
             const dataId = `data_list_${safeId(name)}`;
+            const dataIdArgs = `${dataId}_${node.args.value}`;
             const indexId = `data_index_${node.args.value}_${safeId(name)}`;
             const {op2, ifElse, p, storeVar, cast2} = ast;
             let parentPath = path.parent;
-            // var dataId = target.lookupOrCreateList('id', 'name')
-            parentPath.insertBefore(storeVar(
-                dataId,
-                p('target', `lookupOrCreateList('${id}', '${name}')`)
-            ));
+            if (state.paths[dataId]) {
+                path.parent.insertBefore(ast.expressionStatement(ast.op2('=',
+                    dataId,
+                    ast.op2('||', dataId,
+                        p('target', `lookupOrCreateList('${id}', '${name}')`)))));
+            } else {
+                // var dataId = target.lookupOrCreateList('id', 'name')
+                state.paths[dataId] = {};
+                path.parent.insertBefore(ast.storeVar(
+                    dataId,
+                    p('target', `lookupOrCreateList('${id}', '${name}')`)));
+            }
             // listGetIndex(dataId, indexId)
             path = path.replaceWith(ast.cast2('listGetIndex',
                 dataId,
@@ -2485,9 +2575,23 @@ class JSPrinter {
     factory ({bindings, dereferences, debugName, chunks}, path, state) {
         path.replaceWith([
             bindings,
-            'return function ', debugName, ' (_, ', 'blockUtility', ') {',
+            'return function ', debugName, ' (args, ', 'blockUtility', ') {',
             dereferences,
-            chunks,
+            'switch (args.INDEX) {',
+            chunks.value.map((chunk, i) => (
+                [
+                    (
+                        i === 0 ||
+                        chunks.value[i - 1].value.some(ast.type.isCheckStatus) ||
+                        chunks.value[i - 1].value.some(statement => (
+                            ast.type.matchShape({expr: {
+                                expect: {lhs: 'thread', member: 'reuseStackForNextBlock'}
+                            }}, statement)))
+                    ) ? `case ${i}:` : '',
+                    chunk
+                ]
+            )),
+            '}',
             '};'
         ]);
     }
@@ -2503,12 +2607,14 @@ let compileRefs;
 let compilePrint;
 
 const compile = function (blockCached) {
-    const ops = blockCached._allOps;
+    const ops = blockCached._commandSet.firstCommand._allOps;
+
+    if (ops[0]._argValues.COMPILED) return;
 
     let start = Date.now();
 
     const bindings = {};
-    const _factoryAST = ast.factory(`${blockCached.opcode}_${ops.length}`);
+    const _factoryAST = ast.factory(`${blockCached._commandSet.firstCommand.opcode}_${ops.length}`);
 
     _factoryAST.dereferences.push(
         ast.storeVar('thread', ast.property('blockUtility', 'thread'))
@@ -2651,16 +2757,33 @@ const compile = function (blockCached) {
 
     const factory = new Function(renderState.minimize ? mangled['bindings'] : 'bindings', renderState.source);
 
-    const compileCached = new BlockCached(null, {
-        id: blockCached.id,
-        opcode: 'vm_compiled',
-        fields: {},
-        inputs: {},
-        mutation: null
-    });
-    compileCached._blockFunction = compileCached._blockFunctionUnbound = factory(bindings);
+    const _blockFunction = factory(bindings);
 
-    blockCached._allOps = [compileCached];
+    const _allOps = blockCached._commandSet.firstCommand._allOps;
+    const _newOps = blockCached._commandSet.firstCommand._allOps = [];
+    for (let i = 0; i < _allOps.length; i++) {
+        const compileCached = _newOps[i] = new BlockCached(null, {
+            id: _allOps[i].id,
+            opcode: _allOps[i].opcode,
+            fields: {},
+            inputs: {},
+            mutation: null
+        });
+        compileCached._blockFunction = compileCached._blockFunctionUnbound = _blockFunction;
+        compileCached._argValues.COMPILED = true;
+        compileCached._argValues.INDEX = _allOps[i]._commandSet.i;
+    }
+
+    // const compileCached = new BlockCached(null, {
+    //     id: blockCached.id,
+    //     opcode: blockCached.opcode,
+    //     fields: {},
+    //     inputs: {},
+    //     mutation: null
+    // });
+    // compileCached._blockFunction = compileCached._blockFunctionUnbound = factory(bindings);
+    //
+    // blockCached._allOps = [compileCached];
 };
 
 const getCached = function (thread, currentBlockIndex, currentBlockId) {
@@ -2677,7 +2800,8 @@ const getCached = function (thread, currentBlockIndex, currentBlockId) {
         // No block found: stop the thread; script no longer exists.
         NULL_BLOCK
     );
-    if (thread.continuous && blockCached.count++ === 100) compile(blockCached);
+    if (blockCached._commandSet.firstCommand.count >= 3 * blockCached._commandSet.firstCommand._allOps.length) compile(blockCached);
+    // if (thread.continuous && blockCached.count++ === 100) compile(blockCached);
     return blockCached;
 };
 
@@ -2789,21 +2913,29 @@ const executeOuter = function (sequencer, thread) {
         const blockCached = getCached(
             thread, thread.stackFrame.blockIndex, thread.pointer || thread.stackFrame.endBlockId);
 
-        const ops = blockCached._allOps;
-        let i = -1;
+        const ops = blockCached._commandSet.firstCommand._allOps;
+        let i = blockCached._commandSet.i - 1;
+        // const ops = blockCached._allOps;
+        // let i = -1;
         while (thread.status === STATUS_RUNNING) {
             const opCached = ops[++i];
             opCached._parentValues[opCached._parentKey] = (
                 opCached._blockFunction(opCached._argValues, blockUtility));
         }
+        // lastBlock = blockCached._lastBlock || ops[i];
         lastBlock = ops[i];
+
+        if (i === ops.length - 1) {
+            blockCached._commandSet.firstCommand.count++;
+        }
 
         if (isProfiling) updateProfiler(blockCached, lastBlock);
 
         if (thread.status === Thread.STATUS_INTERRUPT && thread.continuous) {
             thread.status = STATUS_RUNNING;
         } else if (thread.status === Thread.STATUS_PROMISE_WAIT) {
-            blockCached.count = 0;
+            console.log('block', `${block._commandSet.firstCommand.opcode}_${ops.length}`);
+            blockCached._commandSet.firstCommand.count = 0;
         }
     }
 

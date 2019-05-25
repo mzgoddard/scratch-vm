@@ -62,11 +62,19 @@ class Scratch3VMBlocks {
         return Cast.toString(args.VALUE);
     }
 
-    mayContinue (args, {thread}) {
+    mayContinue (args, utils) {
+        const {thread} = utils;
         if (thread.continuous && thread.pointer === args.EXPECT_STACK) {
             thread.reuseStackForNextBlock(args.NEXT_STACK);
             if (args.NEXT_STACK === null) {
-                thread.status = Thread.STATUS_INTERRUPT;
+                const endOp = thread.stackFrame.endBlockId;
+                let endFunction = utils.sequencer.runtime.getOpcodeFunction(endOp);
+                if (endFunction) {
+                    endFunction(args, utils);
+                }
+                if (thread.status === Thread.STATUS_RUNNING) {
+                    thread.status = Thread.STATUS_INTERRUPT;
+                }
             }
         } else {
             thread.status = Thread.STATUS_INTERRUPT;
@@ -146,17 +154,19 @@ class Scratch3VMBlocks {
         thread.reporting = null;
         thread.reported = null;
 
-        const allOps = blockCached._allOps;
-        blockCached._ops = ops.slice(i);
-        blockCached._allOps = allOps.slice(i);
+        // const allOps = blockCached._allOps;
+        // blockCached._ops = ops.slice(i);
+        // blockCached._allOps = allOps.slice(i);
+        blockCached._commandSet.i += i;
 
         const continuous = thread.continuous;
         thread.continuous = false;
         execute(sequencer, thread);
         thread.continuous = continuous;
 
-        blockCached._ops = ops;
-        blockCached._allOps = allOps;
+        // blockCached._ops = ops;
+        // blockCached._allOps = allOps;
+        blockCached._commandSet.i -= i;
 
         if (
             thread.status === Thread.STATUS_RUNNING &&
