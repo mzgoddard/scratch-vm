@@ -228,6 +228,8 @@ class BlockCached {
          */
         this._definedBlockFunction = false;
 
+        this._usesPromise = false;
+
         /**
          * Is this block a block with no function but a static value to return.
          * @type {boolean}
@@ -322,9 +324,11 @@ class MayCount {
 const callPromise = function () {
     const cache = {};
     return function (opcode, _blockFunction, _this) {
+        _this._usesPromise = cache[opcode] !== _blockFunction;
         return cache[opcode] || (
             function (args, blockUtility) {
                 if (cache[opcode]) {
+                    _this._usesPromise = cache[opcode] !== _blockFunction;
                     _this._blockFunction = cache[opcode];
                     return _this._blockFunction(args, blockUtility);
                 }
@@ -336,6 +340,7 @@ const callPromise = function () {
                         return _blockFunction(args, blockUtility);
                     };
                 } else {
+                    _this._usesPromise = false;
                     cache[opcode] = _this._blockFunction = _blockFunction;
                 }
                 return value;
@@ -2628,6 +2633,7 @@ const compile = function (blockCached) {
     bind(bindings, _factoryAST.bindings, 'toNumber', Cast.toNumber);
     bind(bindings, _factoryAST.bindings, 'toListIndex', Cast.toListIndex);
     bind(bindings, _factoryAST.bindings, 'LIST_INVALID', Cast.LIST_INVALID);
+    bind(bindings, _factoryAST.bindings, 'handlePromise', handlePromise);
     bind(bindings, _factoryAST.bindings, COMMAND_PARENT_ID, {mutation: null, STATEMENT: null});
 
     const opInfos = [], opMap = [];
@@ -2640,7 +2646,7 @@ const compile = function (blockCached) {
         const context = op._blockFunctionContext;
 
         const id = `a${i}`;
-        const parentId = op._parentOffset ? `a${i + op._parentOffset}` : COMMAND_PARENT_ID;
+        let parentId = op._parentOffset ? `a${i + op._parentOffset}` : COMMAND_PARENT_ID;
         // const id = `${op.opcode}_${op._safeId}`;
         // const parentId = op._parentSafeId ? `${op._parentOpcode}_${op._parentSafeId}` : COMMAND_PARENT_ID;
         const contextId = context ? findId(bindings, context, context.constructor.name, 'ctx_') : 'null';
@@ -2657,13 +2663,22 @@ const compile = function (blockCached) {
         opMap[id] = opInfos[i] = {op, id, parentId, contextId, functionId, args: {}};
         if (op._parentOffset) opMap[parentId].args[op._parentKey] = id;
 
+        if (op._usesPromise) {
+            bind(bindings, _factoryAST.bindings, `b${i}`, op);
+            parentId = `p${i}`;
+            bind(bindings, _factoryAST.bindings, parentId, parentValues);
+        }
+
         _factoryAST.chunks.unshift([
             ast.storeArg(
                 parentId, op._parentKey,
                 ast.callBlock(contextId, functionId, id)
             ),
+            op._usesPromise ?
+                ast.expressionStatement(ast.callArgs('handlePromise', ['thread', `b${i}`])) :
+                null,
             ast.checkStatus()
-        ]);
+        ].filter(Boolean));
     }
 
     const factoryAST = ast.nodeify(_factoryAST);
@@ -2800,6 +2815,7 @@ const getCached = function (thread, currentBlockIndex, currentBlockId) {
         // No block found: stop the thread; script no longer exists.
         NULL_BLOCK
     );
+    // if (blockCached._commandSet.firstCommand.count > 0) compile(blockCached);
     if (blockCached._commandSet.firstCommand.count >= 3 * blockCached._commandSet.firstCommand._allOps.length) compile(blockCached);
     // if (thread.continuous && blockCached.count++ === 100) compile(blockCached);
     return blockCached;
@@ -2934,8 +2950,8 @@ const executeOuter = function (sequencer, thread) {
         if (thread.status === Thread.STATUS_INTERRUPT && thread.continuous) {
             thread.status = STATUS_RUNNING;
         } else if (thread.status === Thread.STATUS_PROMISE_WAIT) {
-            console.log('block', `${block._commandSet.firstCommand.opcode}_${ops.length}`);
-            blockCached._commandSet.firstCommand.count = 0;
+            console.log('promise in', `${blockCached._commandSet.firstCommand.opcode}_${ops.length}`);
+            // blockCached._commandSet.firstCommand.count = 0;
         }
     }
 
