@@ -524,6 +524,10 @@ class InputBlockCached extends BlockCached {
         this._next = null;
         this._allOps = this._ops;
     }
+
+    handlePromise () {
+        handlePromise(blockUtility.thread, this);
+    }
 }
 
 class CommandBlockCached extends InputBlockCached {
@@ -546,14 +550,74 @@ class CommandBlockCached extends InputBlockCached {
             inputs: {},
             mutation: null
         });
-
         mayContinueCached._argValues = {
             EXPECT_STACK: this.id,
             NEXT_STACK: nextId,
             NEXT_INDEX: nextCached ? nextCached.index : -1
         };
+        let followUpCached = mayContinueCached;
 
-        this._ops.push(mayContinueCached);
+        const substack1 = blockContainer.getBranch(cached.id, 1);
+        if (substack1) {
+            const substack2 = blockContainer.getBranch(cached.id, 2);
+
+            if (substack2) {
+                const substack2Cached = new InputBlockCached(null, {
+                    id: cached.id,
+                    opcode: 'vm_do_stack',
+                    fields: {},
+                    inputs: {},
+                    mutation: null
+                });
+                substack2Cached._argValues = {
+                    GET_BLOCK: () => getCached(blockUtility.thread, -1, substack2),
+                    BLOCK_CACHED: null,
+                    ELSE_CACHED: followUpCached,
+                    NEXT_STACK: nextId
+                };
+                followUpCached = substack2Cached;
+            }
+
+            if (substack1) {
+                const substack1Cached = new InputBlockCached(null, {
+                    id: cached.id,
+                    opcode: 'vm_do_stack',
+                    fields: {},
+                    inputs: {},
+                    mutation: null
+                });
+                substack1Cached._argValues = {
+                    GET_BLOCK: () => getCached(blockUtility.thread, -1, substack1),
+                    BLOCK_CACHED: null,
+                    ELSE_CACHED: followUpCached,
+                    NEXT_STACK: nextId
+                };
+                followUpCached = substack1Cached;
+            }
+        }
+
+        if (cached.opcode === 'procedures_call') {
+            const proccode = this._argValues.mutation.proccode;
+            const thread = blockUtility.thread;
+            const definition = thread.blockContainer.getProcedureDefinition(proccode);
+
+            const procedureCached = new InputBlockCached(null, {
+                id: cached.id,
+                opcode: 'vm_do_stack',
+                fields: {},
+                inputs: {},
+                mutation: null
+            });
+            procedureCached._argValues = {
+                GET_BLOCK: () => getCached(blockUtility.thread, -1, definition),
+                BLOCK_CACHED: null,
+                ELSE_CACHED: followUpCached,
+                NEXT_STACK: nextId
+            };
+            followUpCached = procedureCached;
+        }
+
+        this._ops.push(followUpCached);
         this._allOps = [
             ...this._ops,
             ...(nextCached ? nextCached._allOps : [])
@@ -563,6 +627,10 @@ class CommandBlockCached extends InputBlockCached {
         for (let i = 0; i < this._allOps.length; i++) {
             this._allOps[i]._commandSet = {i: this._allOps.indexOf(this._allOps[i]._ops[0]), firstCommand: this};
         }
+    }
+
+    compile () {
+        compile(this);
     }
 }
 
@@ -2183,159 +2251,159 @@ class JSInlineOperators {
             ));
             return;
         }
-        if (info && info.op.opcode === 'procedures_call') {
-            // procedure is found, push
-            //   warping and too long, yield
-            //   procedure recurses and not warping, yield
-            // status check
-            // procedure is found, not yielded, execute
-            // status check
-            // may continue
-            //   procedure finished normally, stack is already at the next position
-            const chunk = path.parent.parent;
-            // if stack is at new procedure, execute
-            // if stack unpopped and stepped, skip may continue
-
-            // const nextChunk = chunk.parent.getKey(chunk.key + 1);
-            if (path.root.getKey('chunks').value[chunk.key + 1]) {
-                const nextChunk = path.root.getKey('chunks').getKey(chunk.key + 1);
-
-                const mayContinueIndex = nextChunk.value.findIndex(ast.type.matchShape.bind(null, {expr: {func: 'vm_may_continue'}}));
-
-                if (mayContinueIndex === -1) {
-                    return;
-                }
-
-                const mayContinue = nextChunk.getKey(mayContinueIndex);
-
-                const mayContinueInfo = state.opMap[mayContinue.value.expr.args.value];
-
-                if (!mayContinueInfo) return;
-
-                const proccode = info.op._argValues.mutation.proccode;
-                const thread = blockUtility.thread;
-                const definition = thread.blockContainer.getProcedureDefinition(proccode);
-
-                if (!definition) return;
-
-                var id = `p${safeId(definition)}`;
-                state.bindings[id] = {
-                    BLOCK_CACHED: getCached(thread, -1, definition),
-                    MAY_CONTINUE_CACHED: mayContinueInfo.op
-                };
-                path.root.getKey('bindings').appendChild(ast.storeVar(id, ast.p('bindings', id)));
-
-                state.bindings.vm_do_stack = vm_do_stack;
-                path.root.getKey('bindings').appendChild(ast.storeVar('vm_do_stack', ast.p('bindings', 'vm_do_stack')));
-
-                mayContinue.replaceWith(ast.expressionStatement(ast.callBlock('null', 'vm_do_stack', id)));
-
-                // mayContinue.replaceWith(ast.ifStatement(
-                //     ast.op2('||',
-                //         ast.p('thread', 'continuous'),
-                //         ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(definition))),
-                //     [
-                //         ast.expressionStatement(ast.callArgs('vm_do_stack', [id])),
-                //         ast.ifStatement(
-                //             ast.op2('!==',
-                //                 ast.p('thread', 'pointer'),
-                //                 ast.string.quote(mayContinueInfo.op._argValues.NEXT_STACK)),
-                //             ast.storeArg('thread', 'status', Thread.STATUS_INTERRUPT))
-                //     ],
-                //     ast.expressionStatement(mayContinue.node.expr)));
-            }
-        }
-        if (info && /^control_/.test(info.op.opcode)) {
-            // procedure is found, push
-            //   warping and too long, yield
-            //   procedure recurses and not warping, yield
-            // status check
-            // procedure is found, not yielded, execute
-            // status check
-            // may continue
-            //   procedure finished normally, stack is already at the next position
-            const chunk = path.parent.parent;
-            // if stack is at new procedure, execute
-            // if stack unpopped and stepped, skip may continue
-
-            // const nextChunk = chunk.parent.getKey(chunk.key + 1);
-            if (path.root.getKey('chunks').value[chunk.key + 1]) {
-                const nextChunk = path.root.getKey('chunks').getKey(chunk.key + 1);
-
-                const mayContinueIndex = nextChunk.value.findIndex(ast.type.matchShape.bind(null, {expr: {func: 'vm_may_continue'}}));
-
-                if (mayContinueIndex === -1) {
-                    return;
-                }
-
-                const mayContinue = nextChunk.getKey(mayContinueIndex);
-
-                const mayContinueInfo = state.opMap[mayContinue.value.expr.args.value];
-
-                if (!mayContinueInfo) return;
-
-                const thread = blockUtility.thread;
-                const substack = thread.blockContainer.getBranch(info.op.id, 1);
-                const substack2 = thread.blockContainer.getBranch(info.op.id, 2);
-
-                if (!substack) return;
-
-                const id = `s${safeId(substack)}`;
-                const id2 = `s${safeId(String(substack2))}`;
-                state.bindings[id] = {
-                    BLOCK_CACHED: getCached(thread, -1, substack),
-                    MAY_CONTINUE_CACHED: mayContinueInfo.op
-                };
-                path.root.getKey('bindings').appendChild(ast.storeVar(id, ast.p('bindings', id)));
-                if (substack2) {
-                    state.bindings[id2] = {
-                        BLOCK_CACHED: getCached(thread, -1, substack2),
-                        MAY_CONTINUE_CACHED: mayContinueInfo.op
-                    };
-                    path.root.getKey('bindings').appendChild(ast.storeVar(id2, ast.p('bindings', id2)));
-                }
-
-                state.bindings.vm_do_stack = vm_do_stack;
-                path.root.getKey('bindings').appendChild(ast.storeVar('vm_do_stack', ast.p('bindings', 'vm_do_stack')));
-
-                mayContinue.replaceWith(ast.ifStatement(
-                    ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(substack)),
-                        ast.expressionStatement(ast.callBlock('null', 'vm_do_stack', id)),
-                        substack2 ? ast.expressionStatement(ast.callBlock('null', 'vm_do_stack', id2)) : ast.cloneDeep(mayContinue.node)));
-
-                // mayContinue.replaceWith(ast.ifStatement(
-                //     ast.op2('&&',
-                //         ast.p('thread', 'continuous'),
-                //         ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(substack))),
-                //     [
-                //         ast.expressionStatement(ast.callArgs('vm_do_stack', [id])),
-                //         ast.checkStatus(),
-                //         ast.ifStatement(
-                //             ast.op2('!==',
-                //                 ast.p('thread', 'pointer'),
-                //                 ast.string.quote(mayContinueInfo.op._argValues.NEXT_STACK)),
-                //             ast.storeArg('thread', 'status', Thread.STATUS_INTERRUPT))
-                //     ],
-                //     substack2 ?
-                //         ast.ifStatement(
-                //             ast.op2('&&',
-                //                 ast.p('thread', 'continuous'),
-                //                 ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(substack2))),
-                //             [
-                //                 ast.expressionStatement(ast.callArgs('vm_do_stack', [id2])),
-                //                 ast.checkStatus(),
-                //                 ast.ifStatement(
-                //                     ast.op2('!==',
-                //                         ast.p('thread', 'pointer'),
-                //                         ast.string.quote(mayContinueInfo.op._argValues.NEXT_STACK)),
-                //                     ast.storeArg('thread', 'status', Thread.STATUS_INTERRUPT))
-                //             ],
-                //             ast.expressionStatement(mayContinue.node.expr)
-                //         ) :
-                //         ast.expressionStatement(mayContinue.node.expr)
-                // ));
-            }
-        }
+        // if (info && info.op.opcode === 'procedures_call') {
+        //     // procedure is found, push
+        //     //   warping and too long, yield
+        //     //   procedure recurses and not warping, yield
+        //     // status check
+        //     // procedure is found, not yielded, execute
+        //     // status check
+        //     // may continue
+        //     //   procedure finished normally, stack is already at the next position
+        //     const chunk = path.parent.parent;
+        //     // if stack is at new procedure, execute
+        //     // if stack unpopped and stepped, skip may continue
+        //
+        //     // const nextChunk = chunk.parent.getKey(chunk.key + 1);
+        //     if (path.root.getKey('chunks').value[chunk.key + 1]) {
+        //         const nextChunk = path.root.getKey('chunks').getKey(chunk.key + 1);
+        //
+        //         const mayContinueIndex = nextChunk.value.findIndex(ast.type.matchShape.bind(null, {expr: {func: 'vm_may_continue'}}));
+        //
+        //         if (mayContinueIndex === -1) {
+        //             return;
+        //         }
+        //
+        //         const mayContinue = nextChunk.getKey(mayContinueIndex);
+        //
+        //         const mayContinueInfo = state.opMap[mayContinue.value.expr.args.value];
+        //
+        //         if (!mayContinueInfo) return;
+        //
+        //         const proccode = info.op._argValues.mutation.proccode;
+        //         const thread = blockUtility.thread;
+        //         const definition = thread.blockContainer.getProcedureDefinition(proccode);
+        //
+        //         if (!definition) return;
+        //
+        //         var id = `p${safeId(definition)}`;
+        //         state.bindings[id] = {
+        //             BLOCK_CACHED: getCached(thread, -1, definition),
+        //             MAY_CONTINUE_CACHED: mayContinueInfo.op
+        //         };
+        //         path.root.getKey('bindings').appendChild(ast.storeVar(id, ast.p('bindings', id)));
+        //
+        //         state.bindings.vm_do_stack = vm_do_stack;
+        //         path.root.getKey('bindings').appendChild(ast.storeVar('vm_do_stack', ast.p('bindings', 'vm_do_stack')));
+        //
+        //         mayContinue.replaceWith(ast.expressionStatement(ast.callBlock('null', 'vm_do_stack', id)));
+        //
+        //         // mayContinue.replaceWith(ast.ifStatement(
+        //         //     ast.op2('||',
+        //         //         ast.p('thread', 'continuous'),
+        //         //         ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(definition))),
+        //         //     [
+        //         //         ast.expressionStatement(ast.callArgs('vm_do_stack', [id])),
+        //         //         ast.ifStatement(
+        //         //             ast.op2('!==',
+        //         //                 ast.p('thread', 'pointer'),
+        //         //                 ast.string.quote(mayContinueInfo.op._argValues.NEXT_STACK)),
+        //         //             ast.storeArg('thread', 'status', Thread.STATUS_INTERRUPT))
+        //         //     ],
+        //         //     ast.expressionStatement(mayContinue.node.expr)));
+        //     }
+        // }
+        // if (info && /^control_/.test(info.op.opcode)) {
+        //     // procedure is found, push
+        //     //   warping and too long, yield
+        //     //   procedure recurses and not warping, yield
+        //     // status check
+        //     // procedure is found, not yielded, execute
+        //     // status check
+        //     // may continue
+        //     //   procedure finished normally, stack is already at the next position
+        //     const chunk = path.parent.parent;
+        //     // if stack is at new procedure, execute
+        //     // if stack unpopped and stepped, skip may continue
+        //
+        //     // const nextChunk = chunk.parent.getKey(chunk.key + 1);
+        //     if (path.root.getKey('chunks').value[chunk.key + 1]) {
+        //         const nextChunk = path.root.getKey('chunks').getKey(chunk.key + 1);
+        //
+        //         const mayContinueIndex = nextChunk.value.findIndex(ast.type.matchShape.bind(null, {expr: {func: 'vm_may_continue'}}));
+        //
+        //         if (mayContinueIndex === -1) {
+        //             return;
+        //         }
+        //
+        //         const mayContinue = nextChunk.getKey(mayContinueIndex);
+        //
+        //         const mayContinueInfo = state.opMap[mayContinue.value.expr.args.value];
+        //
+        //         if (!mayContinueInfo) return;
+        //
+        //         const thread = blockUtility.thread;
+        //         const substack = thread.blockContainer.getBranch(info.op.id, 1);
+        //         const substack2 = thread.blockContainer.getBranch(info.op.id, 2);
+        //
+        //         if (!substack) return;
+        //
+        //         const id = `s${safeId(substack)}`;
+        //         const id2 = `s${safeId(String(substack2))}`;
+        //         state.bindings[id] = {
+        //             BLOCK_CACHED: getCached(thread, -1, substack),
+        //             MAY_CONTINUE_CACHED: mayContinueInfo.op
+        //         };
+        //         path.root.getKey('bindings').appendChild(ast.storeVar(id, ast.p('bindings', id)));
+        //         if (substack2) {
+        //             state.bindings[id2] = {
+        //                 BLOCK_CACHED: getCached(thread, -1, substack2),
+        //                 MAY_CONTINUE_CACHED: mayContinueInfo.op
+        //             };
+        //             path.root.getKey('bindings').appendChild(ast.storeVar(id2, ast.p('bindings', id2)));
+        //         }
+        //
+        //         state.bindings.vm_do_stack = vm_do_stack;
+        //         path.root.getKey('bindings').appendChild(ast.storeVar('vm_do_stack', ast.p('bindings', 'vm_do_stack')));
+        //
+        //         mayContinue.replaceWith(ast.ifStatement(
+        //             ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(substack)),
+        //                 ast.expressionStatement(ast.callBlock('null', 'vm_do_stack', id)),
+        //                 substack2 ? ast.expressionStatement(ast.callBlock('null', 'vm_do_stack', id2)) : ast.cloneDeep(mayContinue.node)));
+        //
+        //         // mayContinue.replaceWith(ast.ifStatement(
+        //         //     ast.op2('&&',
+        //         //         ast.p('thread', 'continuous'),
+        //         //         ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(substack))),
+        //         //     [
+        //         //         ast.expressionStatement(ast.callArgs('vm_do_stack', [id])),
+        //         //         ast.checkStatus(),
+        //         //         ast.ifStatement(
+        //         //             ast.op2('!==',
+        //         //                 ast.p('thread', 'pointer'),
+        //         //                 ast.string.quote(mayContinueInfo.op._argValues.NEXT_STACK)),
+        //         //             ast.storeArg('thread', 'status', Thread.STATUS_INTERRUPT))
+        //         //     ],
+        //         //     substack2 ?
+        //         //         ast.ifStatement(
+        //         //             ast.op2('&&',
+        //         //                 ast.p('thread', 'continuous'),
+        //         //                 ast.op2('===', ast.p('thread', 'pointer'), ast.string.quote(substack2))),
+        //         //             [
+        //         //                 ast.expressionStatement(ast.callArgs('vm_do_stack', [id2])),
+        //         //                 ast.checkStatus(),
+        //         //                 ast.ifStatement(
+        //         //                     ast.op2('!==',
+        //         //                         ast.p('thread', 'pointer'),
+        //         //                         ast.string.quote(mayContinueInfo.op._argValues.NEXT_STACK)),
+        //         //                     ast.storeArg('thread', 'status', Thread.STATUS_INTERRUPT))
+        //         //             ],
+        //         //             ast.expressionStatement(mayContinue.node.expr)
+        //         //         ) :
+        //         //         ast.expressionStatement(mayContinue.node.expr)
+        //         // ));
+        //     }
+        // }
     }
     callBlock (node, path, state) {
         const info = state.opMap[node.args.value];
@@ -2816,7 +2884,7 @@ const getCached = function (thread, currentBlockIndex, currentBlockId) {
         NULL_BLOCK
     );
     // if (blockCached._commandSet.firstCommand.count > 0) compile(blockCached);
-    if (blockCached._commandSet.firstCommand.count >= 3 * blockCached._commandSet.firstCommand._allOps.length) compile(blockCached);
+    if (blockCached._commandSet.firstCommand.count >= 3 * blockCached._commandSet.firstCommand._allOps.length && !blockCached._commandSet.firstCommand._allOps[0]._argValues.COMPILED) compile(blockCached);
     // if (thread.continuous && blockCached.count++ === 100) compile(blockCached);
     return blockCached;
 };
@@ -2931,14 +2999,11 @@ const executeOuter = function (sequencer, thread) {
 
         const ops = blockCached._commandSet.firstCommand._allOps;
         let i = blockCached._commandSet.i - 1;
-        // const ops = blockCached._allOps;
-        // let i = -1;
         while (thread.status === STATUS_RUNNING) {
             const opCached = ops[++i];
             opCached._parentValues[opCached._parentKey] = (
                 opCached._blockFunction(opCached._argValues, blockUtility));
         }
-        // lastBlock = blockCached._lastBlock || ops[i];
         lastBlock = ops[i];
 
         if (i === ops.length - 1) {

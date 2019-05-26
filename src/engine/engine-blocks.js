@@ -26,6 +26,7 @@ class Scratch3VMBlocks {
             vm_end_of_branch: this.endOfBranch,
             vm_cast_string: this.castString,
             vm_may_continue: this.mayContinue,
+            vm_do_stack: this.doStack,
             vm_reenter_promise: this.reenterFromPromise,
             vm_report_hat: this.reportHat,
             vm_report_stack_click: this.reportStackClick,
@@ -78,6 +79,48 @@ class Scratch3VMBlocks {
             }
         } else {
             thread.status = Thread.STATUS_INTERRUPT;
+        }
+    }
+
+    doStack (args, utils) {
+        if (args.BLOCK_CACHED === null) {
+            args.BLOCK_CACHED = args.GET_BLOCK();
+        }
+
+        const blockCached = args.BLOCK_CACHED;
+        const thread = utils.thread;
+        if (thread.continuous && thread.pointer === blockCached.id) {
+            if (blockCached.count >= 3 * blockCached._allOps.length && !blockCached._allOps[0]._argValues.COMPILED) blockCached.compile();
+
+            const ops = blockCached._allOps;
+            let i = -1;
+
+            while (thread.status === Thread.STATUS_RUNNING) {
+                const opCached = ops[++i];
+                opCached._parentValues[opCached._parentKey] = (
+                    opCached._blockFunction(opCached._argValues, utils));
+            }
+            if (i === ops.length - 1) {
+                blockCached.count++;
+            }
+
+            if (thread.status === Thread.STATUS_INTERRUPT && thread.pointer === args.NEXT_STACK) {
+                if (args.NEXT_STACK === null) {
+                    const endOp = thread.stackFrame.endBlockId;
+                    let endFunction = utils.sequencer.runtime.getOpcodeFunction(endOp);
+                    if (endFunction) {
+                        endFunction(args, utils);
+                    }
+                } else {
+                    thread.status = Thread.STATUS_RUNNING;
+                }
+            } else if (thread.status === Thread.STATUS_PROMISE_WAIT && thread.reported === null) {
+                ops[i].handlePromise();
+            }
+        } else {
+            const elseCached = args.ELSE_CACHED;
+            elseCached._parentValues[elseCached._parentKey] = (
+                elseCached._blockFunction(elseCached._argValues, utils));
         }
     }
 
