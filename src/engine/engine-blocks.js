@@ -69,9 +69,15 @@ class Scratch3VMBlocks {
             thread.reuseStackForNextBlock(args.NEXT_STACK);
             if (args.NEXT_STACK === null) {
                 const endOp = thread.stackFrame.endBlockId;
-                let endFunction = utils.sequencer.runtime.getOpcodeFunction(endOp);
-                if (endFunction) {
-                    endFunction(args, utils);
+                if (args.END_OPERATION === endOp) {
+                    args.END_FUNCTION(args, utils);
+                } else {
+                    let endFunction = utils.sequencer.runtime.getOpcodeFunction(endOp);
+                    if (endFunction) {
+                        args.END_OPERATION = endOp;
+                        args.END_FUNCTION = endFunction;
+                        endFunction(args, utils);
+                    }
                 }
                 if (thread.status === Thread.STATUS_RUNNING) {
                     thread.status = Thread.STATUS_INTERRUPT;
@@ -83,11 +89,7 @@ class Scratch3VMBlocks {
     }
 
     doStack (args, utils) {
-        if (args.BLOCK_CACHED === null) {
-            args.BLOCK_CACHED = args.GET_BLOCK();
-        }
-
-        const blockCached = args.BLOCK_CACHED;
+        const blockCached = args.BLOCK_CACHED || args.GET_BLOCK();
         const thread = utils.thread;
         if (thread.continuous && thread.pointer === blockCached.id) {
             if (blockCached.count >= 3 * blockCached._allOps.length && !blockCached._allOps[0]._argValues.COMPILED) blockCached.compile();
@@ -107,9 +109,15 @@ class Scratch3VMBlocks {
             if (thread.status === Thread.STATUS_INTERRUPT && thread.pointer === args.NEXT_STACK) {
                 if (args.NEXT_STACK === null) {
                     const endOp = thread.stackFrame.endBlockId;
-                    let endFunction = utils.sequencer.runtime.getOpcodeFunction(endOp);
-                    if (endFunction) {
-                        endFunction(args, utils);
+                    if (args.END_OPERATION === endOp) {
+                        args.END_FUNCTION(args, utils);
+                    } else {
+                        let endFunction = utils.sequencer.runtime.getOpcodeFunction(endOp);
+                        if (endFunction) {
+                            args.END_OPERATION = endOp;
+                            args.END_FUNCTION = endFunction;
+                            endFunction(args, utils);
+                        }
                     }
                 } else {
                     thread.status = Thread.STATUS_RUNNING;

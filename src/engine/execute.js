@@ -120,8 +120,8 @@ const safeId = function (id) {
     // return `_${String(id).replace(/[^_\w]/g, c => c.charCodeAt(0))}`;
 };
 
-const safe54Chars = '_ABCDEFGHIJKLMNOPQRSTUVWXYZ$abcdefghijklmnopqrstuvwxyz'.split('');
-const safe64Chars = '_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ$abcdefghijklmnopqrstuvwxyz'.split('');
+const safe32Chars = '_abcdefghijklmnopqrstuvwxyzABCDE'.split('');
+const safe64Chars = '_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ$'.split('');
 const safe64 = function (id) {
     let s = '';
     id = id | 0;
@@ -130,7 +130,7 @@ const safe64 = function (id) {
         s = safe64Chars[id & 0x3f] + s;
         id = id >> 6;
     }
-    s = safe54Chars[id & 0x1f] + s;
+    s = safe32Chars[id & 0x1f] + s;
     return s;
 };
 
@@ -551,6 +551,8 @@ class CommandBlockCached extends InputBlockCached {
             mutation: null
         });
         mayContinueCached._argValues = {
+            END_FUNCTION: null,
+            END_OPERATION: '',
             EXPECT_STACK: this.id,
             NEXT_STACK: nextId,
             NEXT_INDEX: nextCached ? nextCached.index : -1
@@ -570,7 +572,11 @@ class CommandBlockCached extends InputBlockCached {
                     mutation: null
                 });
                 substack2Cached._argValues = {
-                    GET_BLOCK: () => getCached(blockUtility.thread, -1, substack2),
+                    END_FUNCTION: null,
+                    END_OPERATION: '',
+                    GET_BLOCK: () => {
+                        return substack2Cached._argValues.BLOCK_CACHED = getCached(blockUtility.thread, -1, substack2);
+                    },
                     BLOCK_CACHED: null,
                     ELSE_CACHED: followUpCached,
                     NEXT_STACK: nextId
@@ -587,7 +593,11 @@ class CommandBlockCached extends InputBlockCached {
                     mutation: null
                 });
                 substack1Cached._argValues = {
-                    GET_BLOCK: () => getCached(blockUtility.thread, -1, substack1),
+                    END_FUNCTION: null,
+                    END_OPERATION: '',
+                    GET_BLOCK: () => {
+                        return substack1Cached._argValues.BLOCK_CACHED = getCached(blockUtility.thread, -1, substack1);
+                    },
                     BLOCK_CACHED: null,
                     ELSE_CACHED: followUpCached,
                     NEXT_STACK: nextId
@@ -609,7 +619,11 @@ class CommandBlockCached extends InputBlockCached {
                 mutation: null
             });
             procedureCached._argValues = {
-                GET_BLOCK: () => getCached(blockUtility.thread, -1, definition),
+                END_FUNCTION: null,
+                END_OPERATION: '',
+                GET_BLOCK: () => {
+                    return procedureCached._argValues.BLOCK_CACHED = getCached(blockUtility.thread, -1, definition);
+                },
                 BLOCK_CACHED: null,
                 ELSE_CACHED: followUpCached,
                 NEXT_STACK: nextId
@@ -2452,17 +2466,17 @@ class JSInlineOperators {
             }
             if (node.expect.value === 'scratchTan') {
                 createHelper(state, path, 'scratchTan', [
-                    'function (value) {return (',
-                        '(Math.abs(value + 180) % 180 === 90)',
-                        'Math.sign((value + 360) % 360 - 180) * Infinity',
-                        ast.cast('round10', 'Math.sin((Math.PI * value) / 180)'),
+                    'function ($v) {return (',
+                        '(Math.abs($v + 180) % 180 === 90)',
+                        'Math.sign(($v + 360) % 360 - 180) * Infinity',
+                        ast.cast('round10', 'Math.sin((Math.PI * $v) / 180)'),
                     ');}'
                 ]);
             }
             if (node.expect.value === 'scratchMod1') {
-                // (NUM1 % 1) + (NUM1 < 0)
+                // (NUM1 % 1) + (NUM1 % 1 < 0)
                 createHelper(state, path, 'scratchMod1', [
-                    'function (n) {return (n % 1) + (n < 0);}'
+                    'function (n, m) {return (n % 1) + (n % 1 < 0);}'
                 ]);
             }
         }
@@ -2491,16 +2505,16 @@ class JSInlineOperators {
                 ]);
             }
             if (node.expect.value === 'scratchMod') {
-                // (NUM1 % NUM2) + ((NUM1 * NUM2 < 0) * NUM2)
+                // (NUM1 % NUM2) + ((NUM1 % NUM2) * NUM2 < 0) * NUM2
                 createHelper(state, path, 'scratchMod', [
-                    'function (n, m) {return (n % m) + ((n * m < 0) * m);}'
+                    'function (n, m) {return (n % m) + ((n % m) * m < 0) * m;}'
                 ]);
             }
             if (node.expect.value === 'listGetIndex') {
                 createHelper(state, path, 'listGetIndex', [
-                    'function (l, _i) {',
-                    'var i = ', 'toListIndex', '(_i, l.value.length);',
-                    'return i === ', 'LIST_INVALID', ` ? '' : l.value[i - 1];`,
+                    'function ($l, $_i) {',
+                    'var $i = ', 'toListIndex', '($_i, $l.value.length);',
+                    'return $i === ', 'LIST_INVALID', ` ? '' : $l.value[$i - 1];`,
                     '}'
                 ]);
             }
@@ -2655,7 +2669,11 @@ class JSPrinter {
                 [
                     (
                         i === 0 ||
-                        chunks.value[i - 1].value.some(ast.type.isCheckStatus) ||
+                        // chunks.value[i - 1].value.some(ast.type.isCheckStatus) ||
+                        chunks.value[i - 1].value.some(statement => (
+                            ast.type.matchShape({expr: {
+                                func: /^vm_(may_continue|do_stack)$|^handlePromise$/
+                            }}, statement))) ||
                         chunks.value[i - 1].value.some(statement => (
                             ast.type.matchShape({expr: {
                                 expect: {lhs: 'thread', member: 'reuseStackForNextBlock'}
