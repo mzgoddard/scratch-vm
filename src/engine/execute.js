@@ -788,6 +788,10 @@ const _NODE_DATA = {
         extends: 'fixedOperator',
         keys: ['expect', 'input1', 'input2']
     },
+    castArgs: {
+        extends: 'fixedOperator', 
+        keys: ['expect', 'args']
+    },
     property: {
         extends: 'fixedOperator',
         keys: ['lhs', 'member']
@@ -1136,6 +1140,15 @@ const ast = {
             expect,
             input1,
             input2
+        };
+    },
+    castArgs (expect, args) {
+        return {
+            type: 'castArgs',
+            typeCode: NODE_CODES.castArgs,
+            typeData: NODE_DATA.castArgs,
+            expect,
+            args
         };
     },
     castNumber (value) {
@@ -2001,6 +2014,7 @@ class InlineBlocks {
         this.call = this.call.bind(this);
         this.exitCast = this.exitCast.bind(this);
         this.exitCast2 = this.exitCast2.bind(this);
+        this.exitCastArgs = this.exitCastArgs.bind(this);
     }
 
     get helpers () {
@@ -2016,7 +2030,7 @@ class InlineBlocks {
     call (node, path, state) {
         const info = state.opMap[node.args.value];
         if (this.opcodes[info.op.opcode]) {
-            this.opcodes[info.op.opcode](node, path, state);
+            this.opcodes[info.op.opcode](node, path, state, info);
         }
     }
     exitCast (node, path, state) {
@@ -2040,6 +2054,163 @@ class InlineBlocks {
             createHelper(state, path, node.expect.value,
                 ast.cloneDeep(this.helpers[node.expect.value]));
         }
+    }
+    exitCastArgs (node, path, state) {
+        const pathNode = path.node;
+
+        if (this.reducers[node.expect.value]) this.reducers[node.expect.value](node, path, state);
+        if (pathNode !== path.node) return;
+
+        if (!state.paths[node.expect.value] && this.helpers[node.expect.value]) {
+            createHelper(state, path, node.expect.value,
+                ast.cloneDeep(this.helpers[node.expect.value]));
+        }
+    }
+}
+class InlineDataBlocks extends InlineBlocks {
+    get helpers () {
+        return {
+            listGetIndex: [
+                'function ($l, $_i) {',
+                'var $i = ', 'toListIndex', '($_i, $l.value.length);',
+                'return $i === ', 'LIST_INVALID', ` ? '' : $l.value[$i - 1];`,
+                '}'
+            ],
+            listSetIndex: [
+                'function ($l, $_i, $item) {',
+                'var $i = ', 'toListIndex', '($_i, $l.value.length);',
+                'if ($i === ', 'LIST_INVALID', ') return;',
+                '$l.value[$i - 1] = $item;',
+                '$l._monitorUpToDate = false;',
+                '}'
+            ]
+        };
+    }
+    get opcodes () {
+        return {
+            data_variable: this.data_variable,
+            data_setvariableto: this.data_setvariableto,
+            data_changevariableby: this.data_changevariableby,
+            data_itemoflist: this.data_itemoflist,
+            data_replaceitemoflist: this.data_replaceitemoflist
+        };
+    }
+
+    insertLookup (node, path, state, info) {
+        const {id, name} = info.op._argValues.VARIABLE;
+        const dataId = `data_${safeId(name)}`;
+
+        let lookup = ast.p('target', `lookupOrCreateVariable('${id}', '${name}')`);
+
+        const thread = blockUtility.thread;
+        const original = thread.target.sprite.clones[0];
+        // If we have a local copy, return it.
+        if (original.variables.hasOwnProperty(id)) {
+            lookup = ast.p(ast.p('target', 'variables'), ast.string.quote(id));
+        }
+        // If the stage has a global copy, return it.
+        else if (original.runtime && !original.isStage) {
+            const stage = original.runtime.getTargetForStage();
+            if (stage && stage.variables.hasOwnProperty(id)) {
+                path.root.getKey('dereferences').appendChild(
+                    ast.storeVar('stage',
+                        ast.p(ast.p('target', 'runtime'), 'getTargetForStage()')));
+                lookup = ast.p(ast.p('stage', 'variables'), ast.string.quote(id));
+            }
+        }
+
+        path.parent.insertBefore(ast.storeVar(dataId, ast.cloneDeep(lookup)));
+        path.parent.insertBefore(ast.expressionStatement(ast.op2('=',
+            dataId,
+            ast.op2('||', dataId, ast.cloneDeep(lookup)))));
+
+        return dataId;
+    }
+
+    updateCloud (node, path, state, info) {
+        const {id, name} = info.op._argValues.VARIABLE;
+        const valudId = `${node.args.value}_value`;
+        const target = blockUtility.thread.target;
+        const variable = target.lookupOrCreateVariable(id, name);
+        if (variable.isCloud) {
+            path.parent.insertAfter(
+                ast.callArgs(ast.p('blockUtility', 'ioQuery'), [
+                    `'cloud'`,
+                    `'requestUpdateVariable'`,
+                    [`'${name}'`, valudId]
+                ]));
+        }
+    }
+
+    insertListLookup (node, path, state, info) {
+        const {id, name} = info.op._argValues.LIST;
+        const dataId = `data_list_${safeId(name)}`;
+
+        let lookup = ast.p('target', `lookupOrCreateList('${id}', '${name}')`);
+
+        const thread = blockUtility.thread;
+        const original = thread.target.sprite.clones[0];
+        // If we have a local copy, return it.
+        if (original.variables.hasOwnProperty(id)) {
+            lookup = ast.p(ast.p('target', 'variables'), ast.string.quote(id));
+        }
+        // If the stage has a global copy, return it.
+        else if (original.runtime && !original.isStage) {
+            const stage = original.runtime.getTargetForStage();
+            if (stage && stage.variables.hasOwnProperty(id)) {
+                path.root.getKey('dereferences').appendChild(
+                    ast.storeVar('stage',
+                        ast.p(ast.p('target', 'runtime'), 'getTargetForStage()')));
+                lookup = ast.p(ast.p('stage', 'variables'), ast.string.quote(id));
+            }
+        }
+
+        path.parent.insertBefore(ast.storeVar(dataId, ast.cloneDeep(lookup)));
+        path.parent.insertBefore(ast.expressionStatement(ast.op2('=',
+            dataId, ast.op2('||', dataId, ast.cloneDeep(lookup)))));
+
+        return dataId;
+    }
+
+    data_variable (node, path, state, info) {
+        path.replaceWith(ast.p(this.insertLookup(node, path, state, info), 'value'));
+    }
+
+    data_setvariableto (node, path, state, info) {
+        const dataId = this.insertLookup(node, path, state, info);
+
+        const valudId = `${node.args.value}_value`;
+        path.parent.insertBefore(ast.storeVar(valudId, ast.p(node.args, 'VALUE')));
+
+        this.updateCloud(node, path, state, info);
+
+        path.parent.replaceWith(ast.storeArg(dataId, 'value', valudId));
+    }
+
+    data_changevariableby (node, path, state, info) {
+        const dataId = this.insertLookup(node, path, state, info);
+
+        const valudId = `${node.args.value}_value`;
+        path.parent.insertBefore(ast.storeVar(valudId,
+            ast.op2('+',
+                ast.castNumber(ast.p(dataId, 'value')),
+                ast.castNumber(ast.p(node.args, 'VALUE')))));
+
+        this.updateCloud(node, path, state, info);
+
+        path.parent.replaceWith(ast.storeArg(dataId, 'value', valudId));
+    }
+
+    data_itemoflist (node, path, state, info) {
+        const dataId = this.insertListLookup(node, path, state, info);
+        path.replaceWith(ast.cast2('listGetIndex',
+            dataId, ast.p(node.args, 'INDEX')));
+    }
+
+    data_replaceitemoflist (node, path, state, info) {
+        const dataId = this.insertListLookup(node, path, state, info);
+        path.replaceWith(ast.castArgs('listSetIndex',
+            [dataId, ast.p(node.args, 'INDEX'), ast.p(node.args, 'ITEM')]));
     }
 }
 class InlineMathBlocks extends InlineBlocks {
@@ -2264,159 +2435,6 @@ class JSInlineOperators {
             return path.replaceWith(ast.cast('!', ast.cast('toBoolean', ast.p(node.args, 'OPERAND'))));
             return;
         }
-        if (info && info.op.opcode === 'data_variable') {
-            const {id, name} = info.op._argValues.VARIABLE;
-            const dataId = `data_${safeId(name)}`;
-            const chunkParent = path.root.getKey('chunks');
-
-            let lookup = ast.p('target', `lookupOrCreateVariable('${id}', '${name}')`);
-
-            const thread = blockUtility.thread;
-            const original = thread.target.sprite.clones[0];
-            // If we have a local copy, return it.
-            if (original.variables.hasOwnProperty(id)) {
-                lookup = ast.p(ast.p('target', 'variables'), ast.string.quote(id));
-            }
-            // If the stage has a global copy, return it.
-            else if (original.runtime && !original.isStage) {
-                const stage = original.runtime.getTargetForStage();
-                if (stage && stage.variables.hasOwnProperty(id)) {
-                    path.root.getKey('dereferences').appendChild(
-                        ast.storeVar('stage',
-                            ast.p(ast.p('target', 'runtime'), 'getTargetForStage()')));
-                    lookup = ast.p(ast.p('stage', 'variables'), ast.string.quote(id));
-                }
-            }
-
-            const dataIdArgs = `${dataId}_${node.args.value}`;
-            const dataIdVar = `var_${safeId(name)}_${node.args.value}`;
-            if (state.paths[dataId]) {
-                const chunkParent = path.root.getKey('chunks');
-                const chunk = path.parent.parent;
-                let m = chunk.key - 1;
-                for (; m >= 0; m--) {
-                    // debugger;
-                    const priorChunk = chunkParent.value[m];
-                    for (let j = priorChunk.value.length - 1; j >= 0; j--) {
-                        const statement = priorChunk.value[j];
-                        if (ast.type.matchShape({expr: {
-                                func: /^vm_(may_continue|do_stack)$|^handlePromise$/
-                            }}, statement) ||
-                            ast.type.matchShape({expr: {
-                                expect: {lhs: 'thread', member: 'reuseStackForNextBlock'}
-                            }}, statement)) {
-                            m = 0;
-                            break;
-                        } else if (
-                            ast.type.matchShape({expr: {operator: '=', input1: dataId}}, statement)
-                        ) {
-                            m = -1;
-                            break;
-                        } else if (
-                            ast.type.matchShape({type: 'storeVar', name: dataId}, statement)
-                        ) {
-                            m = -1;
-                            break;
-                        }
-                    }
-                }
-                // if (m === -1) {
-                path.parent.insertBefore(ast.expressionStatement(ast.op2('=',
-                    dataId,
-                    ast.op2('||', dataId, lookup))));
-                // }
-            } else {
-                state.paths[dataId] = {};
-                path.parent.insertBefore(ast.storeVar(dataId, lookup));
-            }
-
-            path.replaceWith(ast.property(dataId, 'value'));
-            return;
-        }
-        if (info && info.op.opcode === 'data_setvariableto') {
-            const {id, name} = info.op._argValues.VARIABLE;
-            const dataId = `data_${safeId(name)}`;
-            let parentPath = path.parent;
-
-            const dataIdArgs = `${dataId}_${node.args.value}`;
-            if (state.paths[dataId]) {
-                const chunkParent = path.root.getKey('chunks');
-                const chunk = path.parent.parent;
-                let n = chunk.key - 1;
-                for (; n >= 0; n--) {
-                    const priorChunk = chunkParent.value[n];
-                    for (let j = priorChunk.value.length - 1; j >= 0; j--) {
-                        const statement = priorChunk.value[j];
-                        if (ast.type.isCheckStatus(statement)) {
-                            n = 0;
-                            break;
-                        } else if (ast.type.matchShape({expr: {operator: '=', input1: dataId}}, statement)) {
-                            n = -1;
-                            break;
-                        }
-                    }
-                }
-                if (n === -1) {
-                    path.parent.insertBefore(ast.expressionStatement(ast.op2('=',
-                        dataId,
-                        ast.op2('||', dataId,
-                            ast.p('target', `lookupOrCreateVariable('${id}', '${name}')`)))));
-                }
-            } else {
-                state.paths[dataId] = {};
-                path.parent.insertBefore(ast.storeVar(
-                    dataId,
-                    ast.p('target', `lookupOrCreateVariable('${id}', '${name}')`)));
-            }
-
-            // Support cloud
-            // if (variable.isCloud) {
-            //     util.ioQuery('cloud', 'requestUpdateVariable', [variable.name, args.VALUE]);
-            // }
-            const target = blockUtility.thread.target;
-            const variable = target.lookupOrCreateVariable(id, name);
-            if (variable.isCloud) {
-                const cloudTemp = `${node.args}_value`;
-                path.parent.insertBefore(ast.storeVar(cloudTemp, ast.p(node.args, 'VALUE')));
-                path.parent.insertAfter(
-                    ast.callArgs(ast.p('blockUtility', 'ioQuery'), [
-                        `'cloud'`,
-                        `'requestUpdateVariable'`,
-                        [`'${name}'`, cloudTemp]
-                    ]));
-                path.parent.replaceWith(ast.storeArg(dataId, 'value', cloudTemp));
-            } else {
-                path.parent.replaceWith(ast.storeArg(dataId, 'value', ast.p(node.args, 'VALUE')));
-            }
-
-            return;
-        }
-        if (info && info.op.opcode === 'data_itemoflist') {
-            const {id, name} = info.op._argValues.LIST;
-            const dataId = `data_list_${safeId(name)}`;
-            const dataIdArgs = `${dataId}_${node.args.value}`;
-            const indexId = `data_index_${node.args.value}_${safeId(name)}`;
-            const {op2, ifElse, p, storeVar, cast2} = ast;
-            let parentPath = path.parent;
-            if (state.paths[dataId]) {
-                path.parent.insertBefore(ast.expressionStatement(ast.op2('=',
-                    dataId,
-                    ast.op2('||', dataId,
-                        p('target', `lookupOrCreateList('${id}', '${name}')`)))));
-            } else {
-                // var dataId = target.lookupOrCreateList('id', 'name')
-                state.paths[dataId] = {};
-                path.parent.insertBefore(ast.storeVar(
-                    dataId,
-                    p('target', `lookupOrCreateList('${id}', '${name}')`)));
-            }
-            // listGetIndex(dataId, indexId)
-            path = path.replaceWith(ast.cast2('listGetIndex',
-                dataId,
-                p(node.args, 'INDEX')
-            ));
-            return;
-        }
     }
     callBlock (node, path, state) {
         const info = state.opMap[node.args.value];
@@ -2465,14 +2483,6 @@ class JSInlineOperators {
             if (node.expect.value === 'getParam') {
                 createHelper(state, path, 'getParam', [
                     'function (t, k) {return t.stackFrame.params[k];}'
-                ]);
-            }
-            if (node.expect.value === 'listGetIndex') {
-                createHelper(state, path, 'listGetIndex', [
-                    'function ($l, $_i) {',
-                    'var $i = ', 'toListIndex', '($_i, $l.value.length);',
-                    'return $i === ', 'LIST_INVALID', ` ? '' : $l.value[$i - 1];`,
-                    '}'
                 ]);
             }
         }
@@ -2568,12 +2578,16 @@ class JSPrinter {
         path.replaceWith(['var ', name, ' = ', expr, ';', state.minimize ? '' : ` /* uses: ${uses} */`]);
     }
     cast ({expect, value}, path, state) {
-        const {t} = code;
         path.replaceWith([expect, '(', value, ')']);
     }
     cast2 ({expect, input1, input2}, path, state) {
-        const {t} = code;
         path.replaceWith([expect, '(', input1, ', ', input2, ')']);
+    }
+    castArgs ({expect, args}, path, state) {
+        path.replaceWith([expect, '(',
+            args.value.length === 0 ? args : args.value[0],
+            args.value.slice(1).map(arg => [', ', arg]),
+        ')']);
     }
     property ({lhs, member}, path, state) {
         const {t} = code;
@@ -2720,7 +2734,7 @@ const compile = function (blockCached) {
 
     // const transformer = new Transformer();
     if (!compileInline)
-    compileInline = new Transformer([new JSFindArg(), new JSInlineOperators(), new InlineMathBlocks()]);
+    compileInline = new Transformer([new JSFindArg(), new JSInlineOperators(), new InlineDataBlocks(), new InlineMathBlocks()]);
     if (!compileRefs)
     compileRefs = new Transformer([new JSCountRefs()]);
     if (!compilePrint)
@@ -2752,7 +2766,7 @@ const compile = function (blockCached) {
 
     perf.inline = -last;
     const inlineState = {bindings, opInfos, opMap, paths: {}};
-    compileInline.transform(factoryAST, [inlineState, inlineState, inlineState]);
+    compileInline.transform(factoryAST, [inlineState, inlineState, inlineState, inlineState]);
     perf.inline += (last = performance.now());
 
     perf.count = -last;
