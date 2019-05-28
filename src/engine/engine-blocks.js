@@ -97,7 +97,7 @@ class Scratch3VMBlocks {
             const ops = blockCached._allOps;
 
             if (!ops[0]._argValues.COMPILED &&
-                blockCached.count >= 3 * ops.length) blockCached.compile();
+                blockCached.count >= ops.length) blockCached.compile();
 
             let i = -1;
 

@@ -1825,28 +1825,11 @@ class Transformer {
                 path = path.push();
                 if (path.depth > 100) throw new Error('Path is too deep');
                 path.parent.next();
-                // while (!willVisit[path.typeCode]) {
-                //     path = path.pop();
-                //     if (!atTail(path)) {
-                //         path = path.push();
-                //         path.parent.next();
-                //     } else if (willExit[path.typeCode] && visit(path, exit[path.typeCode]) {
-                //         path = path.pop();
-                //         break;
-                //     } else {
-                //         break;
-                //     }
-                // }
                 if (!atHead(path)) break;
             case AT_HEAD:
-                // if (!willVisit[path.typeCode]) window.SKIP = (window.SKIP | 0) + 1;
-                // if (willEnter[path.typeCode]) window.ENTER = (window.ENTER | 0) + 1;
-                // else window.ENTERLESS = (window.ENTERLESS | 0) + 1;
                 if (!willEnter[path.typeCode] || visit(path, enter[path.typeCode])) path.next();
                 if (!atTail(path)) break;
             case AT_TAIL:
-                // if (willExit[path.typeCode]) window.EXIT = (window.EXIT | 0) + 1;
-                // else window.EXITLESS = (window.EXITLESS | 0) + 1;
                 if (willExit[path.typeCode] && !visit(path, exit[path.typeCode])) break;
             case OUT_OF_RANGE:
                 do {
@@ -2773,7 +2756,10 @@ class JSPrinter {
     }
     factory ({bindings, dereferences, debugName, chunks}, path, state) {
         path.replaceWith([
-            bindings,
+            bindings.value.slice().sort((a, b) => (
+                (state.mangled[a.name.value] < state.mangled[b.name.value]) * -1 +
+                (state.mangled[a.name.value] > state.mangled[b.name.value])
+            )),
             'return function ', debugName, ' (args, ', 'blockUtility', ') {',
             dereferences,
             'switch (args.INDEX) {',
@@ -2809,15 +2795,30 @@ let compileInline;
 let compileRefs;
 let compilePrint;
 
+class Compiler {}
+
+class CompilerPass {}
+
+class OpcodePass {}
+
+class GeneratorPass {}
+
+let tokens = 0;
+let lastCompiled = 0;
+
 const compile = function (blockCached) {
-    const ops = blockCached._commandSet.firstCommand._allOps;
+    const firstCommand = blockCached._commandSet.firstCommand;
+    const ops = firstCommand._allOps;
 
     if (ops[0]._argValues.COMPILED) return;
 
-    let start = Date.now();
+    let start = (typeof performance === 'undefined' ? Date : performance).now();
+    tokens = Math.min(tokens + (start - lastCompiled), 10);
+
+    if (tokens < 0) return;
 
     const bindings = {};
-    const _factoryAST = ast.factory(`${blockCached._commandSet.firstCommand.opcode}_${ops.length}`);
+    const _factoryAST = ast.factory(`${firstCommand.opcode}_${ops.length}`);
 
     _factoryAST.dereferences.push(
         ast.storeVar('thread', ast.property('blockUtility', 'thread'))
@@ -2846,8 +2847,6 @@ const compile = function (blockCached) {
 
         const id = `$a${i}`;
         let parentId = op._parentOffset ? `$a${i + op._parentOffset}` : COMMAND_PARENT_ID;
-        // const id = `${op.opcode}_${op._safeId}`;
-        // const parentId = op._parentSafeId ? `${op._parentOpcode}_${op._parentSafeId}` : COMMAND_PARENT_ID;
         const contextId = context ? findId(bindings, context, context.constructor.name, 'ctx_') : 'null';
         const functionId = op.opcode;
 
@@ -2906,7 +2905,7 @@ const compile = function (blockCached) {
         minimized: 0
     };
 
-    const baselineAST = ast.cloneDeep(factoryAST);
+    // const baselineAST = ast.cloneDeep(factoryAST);
 
     let last = perf.start;
     perf.baseline = -last;
@@ -2945,7 +2944,7 @@ const compile = function (blockCached) {
         countRefs.varPaths[newName] = countRefs.varPaths[name];
     });
 
-    const factoryClone = ast.cloneDeep(factoryAST);
+    // const factoryClone = ast.cloneDeep(factoryAST);
     const renderState = {
         source: '',
         vars: countRefs.vars,
@@ -2955,7 +2954,7 @@ const compile = function (blockCached) {
         minimize: false
     };
 
-    const optimizedAST = ast.cloneDeep(factoryAST);
+    // const optimizedAST = ast.cloneDeep(factoryAST);
     perf.optimized = -performance.now();
     // compilePrint.transform(optimizedAST, [renderState, renderState]);
     const optimized = renderState.source;
@@ -2968,7 +2967,7 @@ const compile = function (blockCached) {
     const minimized = renderState.source;
     perf.minimized += (perf.end = last = performance.now());
 
-    (window.AST_COMPILE = (window.AST_COMPILE || [])).push([inlineState, countRefs, renderState, factoryClone, factoryAST]);
+    (window.AST_COMPILE = (window.AST_COMPILE || [])).push([inlineState, countRefs, renderState, factoryAST]);
 
     (window.PERF = (window.PERF || {}))[factoryAST.debugName.value] = perf;
     (window.BASELINE = (window.BASELINE || {}))[factoryAST.debugName.value] = baseline;
@@ -2979,8 +2978,8 @@ const compile = function (blockCached) {
 
     const _blockFunction = factory(bindings);
 
-    const _allOps = blockCached._commandSet.firstCommand._oldOps = blockCached._commandSet.firstCommand._allOps;
-    const _newOps = blockCached._commandSet.firstCommand._allOps = [];
+    const _allOps = firstCommand._oldOps = blockCached._commandSet.firstCommand._allOps;
+    const _newOps = firstCommand._allOps = [];
     for (let i = 0; i < _allOps.length; i++) {
         const compileCached = _newOps[i] = new BlockCached(null, {
             id: _allOps[i].id,
@@ -2994,22 +2993,12 @@ const compile = function (blockCached) {
         compileCached._argValues.INDEX = _allOps[i]._commandSet.i;
     }
 
-    // const compileCached = new BlockCached(null, {
-    //     id: blockCached.id,
-    //     opcode: blockCached.opcode,
-    //     fields: {},
-    //     inputs: {},
-    //     mutation: null
-    // });
-    // compileCached._blockFunction = compileCached._blockFunctionUnbound = factory(bindings);
-    //
-    // blockCached._allOps = [compileCached];
+    lastCompiled = (typeof performance === 'undefined' ? Date : performance).now();
+    tokens -= lastCompiled - start;
 };
 
 const getCached = function (thread, currentBlockIndex, currentBlockId) {
     const blockCached = (
-        // BlocksExecuteCache.getCachedIndex(thread.blockContainer, currentBlockIndex, currentBlockId) ||
-        // BlocksExecuteCache.getCachedIndex(blockUtility.sequencer.blocks, currentBlockIndex, currentBlockId) ||
         BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, CommandBlockCached) ||
         BlocksExecuteCache.getCached(
             blockUtility.sequencer.blocks, currentBlockId, CommandBlockCached
@@ -3020,9 +3009,12 @@ const getCached = function (thread, currentBlockIndex, currentBlockId) {
         // No block found: stop the thread; script no longer exists.
         NULL_BLOCK
     );
-    // if (blockCached._commandSet.firstCommand.count > 0) compile(blockCached);
-    if (blockCached._commandSet.firstCommand.count >= 3 * blockCached._commandSet.firstCommand._allOps.length && !blockCached._commandSet.firstCommand._allOps[0]._argValues.COMPILED) compile(blockCached);
-    // if (thread.continuous && blockCached.count++ === 100) compile(blockCached);
+
+    if (!blockCached._commandSet.firstCommand._allOps[0]._argValues.COMPILED &&
+        blockCached._commandSet.firstCommand.count >= blockCached._commandSet.firstCommand._allOps.length) {
+        compile(blockCached);
+    }
+
     return blockCached;
 };
 
