@@ -46,7 +46,8 @@ class Scratch3VMBlocks {
 
     endOfProcedure (args, {thread}) {
         thread.popStack();
-        thread.goToNextBlock();
+        if (args.NEXT_PARENT !== null) thread.reuseStackForNextBlock(args.NEXT_PARENT);
+        else thread.goToNextBlock();
     }
 
     endOfLoopBranch (args, {thread}) {
@@ -55,8 +56,9 @@ class Scratch3VMBlocks {
     }
 
     endOfBranch (args, {thread}) {
-        thread.popStack();
-        thread.goToNextBlock();
+        thread.popStack(); 
+        if (args.NEXT_PARENT !== null) thread.reuseStackForNextBlock(args.NEXT_PARENT);
+        else thread.goToNextBlock();
     }
 
     castString (args) {
@@ -92,10 +94,16 @@ class Scratch3VMBlocks {
         const blockCached = args.BLOCK_CACHED || args.GET_BLOCK();
         const thread = utils.thread;
         if (thread.continuous && thread.pointer === blockCached.id) {
-            if (blockCached.count >= 3 * blockCached._allOps.length && !blockCached._allOps[0]._argValues.COMPILED) blockCached.compile();
-
             const ops = blockCached._allOps;
+
+            if (!ops[0]._argValues.COMPILED &&
+                blockCached.count >= 3 * ops.length) blockCached.compile();
+
             let i = -1;
+
+            const lastArgs = ops[ops.length - 1]._argValues;
+            const nextParent = lastArgs.NEXT_PARENT;
+            lastArgs.NEXT_PARENT = args.NEXT_STACK;
 
             while (thread.status === Thread.STATUS_RUNNING) {
                 const opCached = ops[++i];
@@ -106,7 +114,10 @@ class Scratch3VMBlocks {
                 blockCached.count++;
             }
 
-            if (thread.status === Thread.STATUS_INTERRUPT && thread.pointer === args.NEXT_STACK) {
+            lastArgs.NEXT_PARENT = nextParent;
+
+            if (thread.status === Thread.STATUS_INTERRUPT &&
+                thread.pointer === args.NEXT_STACK) {
                 if (args.NEXT_STACK === null) {
                     const endOp = thread.stackFrame.endBlockId;
                     if (args.END_OPERATION === endOp) {
