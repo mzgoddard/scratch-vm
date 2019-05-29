@@ -797,7 +797,7 @@ const _NODE_DATA = {
         keys: ['expect', 'input1', 'input2']
     },
     castArgs: {
-        extends: 'fixedOperator', 
+        extends: 'fixedOperator',
         keys: ['expect', 'args']
     },
     property: {
@@ -2030,46 +2030,46 @@ class InlineDataBlocks extends InlineBlocks {
         return {
             listGetIndex: [
                 'function ($l, $_i) {',
-                'var $i = ', 'toListIndex', '($_i, $l.value.length);',
-                'return $i === ', 'LIST_INVALID', ` ? '' : $l.value[$i - 1];`,
+                    'var $i = ', 'toListIndex', '($_i, $l.value.length);',
+                    'return $i === ', 'LIST_INVALID', ` ? '' : $l.value[$i - 1];`,
                 '}'
             ],
             listSetIndex: [
                 'function ($l, $_i, $item) {',
-                'var $i = ', 'toListIndex', '($_i, $l.value.length);',
-                'if ($i === ', 'LIST_INVALID', ') return;',
-                '$l.value[$i - 1] = $item;',
-                '$l._monitorUpToDate = false;',
+                    'var $i = ', 'toListIndex', '($_i, $l.value.length);',
+                    'if ($i === ', 'LIST_INVALID', ') return;',
+                    '$l.value[$i - 1] = $item;',
+                    '$l._monitorUpToDate = false;',
                 '}'
             ],
             listAdd: [
                 'function ($l, $item) {',
-                'if ($l.value.length < ', 200000, ') {',
-                '$l.value.push($item);',
-                '$l._monitorUpToDate = false;',
-                '}',
+                    'if ($l.value.length < ', 200000, ') {',
+                        '$l.value.push($item);',
+                        '$l._monitorUpToDate = false;',
+                    '}',
                 '}'
             ],
             listDelete: [
                 'function ($l, $_i) {',
-                'var $i = ', 'toListIndex', '($_i, $l.value.length);',
-                'if ($i === ', 'LIST_INVALID', ') return;',
-                'if ($i === ', 'LIST_ALL', ') {',
-                '$l.value = [];',
-                '} else {',
-                '$l.value.splice($i - 1, 1);',
-                '}',
-                '$l._monitorUpToDate = false;',
+                    'var $i = ', 'toListIndex', '($_i, $l.value.length);',
+                    'if ($i === ', 'LIST_INVALID', ') return;',
+                    'if ($i === ', 'LIST_ALL', ') {',
+                        '$l.value = [];',
+                    '} else {',
+                        '$l.value.splice($i - 1, 1);',
+                    '}',
+                    '$l._monitorUpToDate = false;',
                 '}'
             ],
             listIndexOf: [
                 'function ($l, $item) {',
-                'for (let $i = 0; $i < $l.value.length; $i++) {',
-                'if (Cast.compare($l.value[$i], $item) === 0) {',
-                'return $i + 1;',
-                '}',
-                '}',
-                'return 0;',
+                    'for (let $i = 0; $i < $l.value.length; $i++) {',
+                        'if (Cast.compare($l.value[$i], $item) === 0) {',
+                            'return $i + 1;',
+                        '}',
+                    '}',
+                    'return 0;',
                 '}'
             ]
         };
@@ -2695,7 +2695,7 @@ class JSPrinter {
                     [' else ', '{ ', ifFalse, ' }'] :
                     [] :
                 [' else ', ifFalse]
-    ]);
+        ]);
     }
     storeArg ({name, key, expr}, path, state) {
         const {t} = code;
