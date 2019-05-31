@@ -738,8 +738,8 @@ const deserializeInputs = function (inputs, parentId, blocks) {
         const inputDescArr = inputs[inputName];
         // If this block has already been deserialized (it's not an array) skip it
         if (!Array.isArray(inputDescArr)) {
-            obj[inputName].block = obj[inputName].block.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`);
-            obj[inputName].shadow = obj[inputName].shadow.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`);
+            obj[inputName].block = $id(obj[inputName].block);
+            obj[inputName].shadow = $id(obj[inputName].shadow);
             continue;
         }
         let block = null;
@@ -795,6 +795,10 @@ const deserializeFields = function (fields) {
     return obj;
 };
 
+const $id = function (id) {
+    return id.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`);
+};
+
 /**
  * Covnert serialized INPUT and FIELD primitives back to hydrated block templates.
  * Should be able to deserialize a format that has already been deserialized.  The only
@@ -818,11 +822,11 @@ const deserializeBlocks = function (blocks) {
             deserializeInputDesc(block, null, false, blocks);
             continue;
         }
-        block.id = blockId.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`); // add id back to block since it wasn't serialized
-        block.inputs = deserializeInputs(block.inputs, blockId.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`), blocks);
+        block.id = $id(blockId); // add id back to block since it wasn't serialized
+        block.inputs = deserializeInputs(block.inputs, $id(blockId), blocks);
         block.fields = deserializeFields(block.fields);
-        block.next = block.next.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`);
-        block.parent = block.parent.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`);
+        block.next = $id(block.next);
+        block.parent = $id(block.parent);
     }
     return blocks;
 };
