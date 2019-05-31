@@ -43,11 +43,9 @@ class Scratch3ProcedureBlocks {
         // at earlier stack frames for the values of a given parameter (#1729)
         util.initParams();
         for (let i = 0; i < paramIds.length; i++) {
-            if (args.hasOwnProperty(paramIds[i])) {
-                util.pushParam(paramNames[i], args[paramIds[i]]);
-            } else {
-                util.pushParam(paramNames[i], paramDefaults[i]);
-            }
+            let paramValue = args[paramIds[i]];
+            if (typeof paramValue === 'undefined') paramValue = paramDefaults[i];
+            util.pushParam(paramNames[i], paramValue);
         }
 
     }
