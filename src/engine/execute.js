@@ -154,6 +154,8 @@ const safe64 = function (id) {
  */
 class BlockCached {
     constructor (blockContainer, cached) {
+        this.blockContainer = blockContainer;
+
         /**
          * Block id in its parent set of blocks.
          * @type {string}
@@ -549,7 +551,7 @@ class CommandBlockCached extends InputBlockCached {
             null;
         const nextCached = blockContainer ? BlocksExecuteCache.getCached(
             blockContainer, nextId, CommandBlockCached
-        ) : nullr;
+        ) : null;
 
         this._next = nextCached;
 
