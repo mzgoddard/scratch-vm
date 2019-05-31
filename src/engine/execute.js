@@ -367,7 +367,14 @@ class BlockCached {
                 // Shadow values are static and do not change, go ahead and
                 // store their value on args.
                 if (inputCached._isShadowBlock) {
-                    this._argValues[inputName] = inputCached._shadowValue;
+                    let shadowValue = inputCached._shadowValue;
+                    if (typeof shadowValue === 'string' &&
+                        cast.toNumber(shadowValue).toString() === shadowValue.trim()) {
+                        shadowValue = cast.toNumber(shadowValue);
+                    } else if (typeof shadowValue === 'number') {
+                        shadowValue = cast.toNumber(shadowValue);
+                    }
+                    this._argValues[inputName] = shadowValue;
                 }
             }
         }
