@@ -2754,7 +2754,7 @@ class JSPrinter {
     }
     property ({lhs, member}, path, state) {
         const {t} = code;
-        if (ast.type.isString(member) && /^'[a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*'$/.test(member.value)) {
+        if (ast.type.isString(member) && /^'[a-zA-Z_\$][\w\$]*(?:\.[a-zA-Z_\$][\w\$]*)*'$/.test(member.value)) {
             path.replaceWith([lhs, '.', member.value.substring(1, member.value.length - 1)]);
         } else if (
             ast.type.isString(member) && /^'.*'$/.test(member.value) ||
