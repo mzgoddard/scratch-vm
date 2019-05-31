@@ -191,6 +191,10 @@ const parseScripts = function (scripts, blocks, addBroadcastMsg, getVariableId, 
     }
 };
 
+const $id = function (id) {
+    return id.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`);
+};
+
 /**
  * Create a callback for assigning fixed IDs to imported variables
  * Generator stores the global variable mapping in a closure
@@ -199,7 +203,7 @@ const parseScripts = function (scripts, blocks, addBroadcastMsg, getVariableId, 
  */
 const generateVariableIdGetter = (function () {
     let globalVariableNameMap = {};
-    const namer = (targetId, name, type) => `${targetId}-${StringUtil.replaceUnsafeChars(name)}-${type}`;
+    const namer = (targetId, name, type) => `${targetId}_${$id(StringUtil.replaceUnsafeChars(name))}_${type}`;
     return function (targetId, topLevel) {
         // Reset the global variable map if topLevel
         if (topLevel) globalVariableNameMap = {};

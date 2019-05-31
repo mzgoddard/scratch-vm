@@ -21,7 +21,7 @@ const uid = function () {
     const soupLength = soup_.length;
     const id = [];
     for (let i = 0; i < length; i++) {
-        id[i] = soup_.charAt(Math.random() * soupLength);
+        id[i + 1] = soup_.charAt(Math.random() * soupLength);
     }
     return id.join('');
 };
