@@ -573,6 +573,12 @@ class Blocks {
      * Reset all runtime caches.
      */
     resetCache () {
+        for (const id in this._cache._executeCached) {
+            this._cache._executeCached[id].ref.block = null;
+            this._cache._executeCached[id].ref._next = null;
+            this._cache._executeCached[id].ref._branches = [];
+        }
+
         this._cache.inputs = {};
         this._cache.procedureParamNames = {};
         this._cache.procedureDefinitions = {};
@@ -1271,6 +1277,7 @@ BlocksExecuteCache.getCached = function (blocks, blockId, CacheType) {
     if (typeof CacheType === 'undefined') {
         cached = {
             id: blockId,
+            ref: {block: null, _next: null, _branches: []},
             index,
             opcode: blocks.getOpcode(block),
             fields: blocks.getFields(block),
@@ -1280,6 +1287,7 @@ BlocksExecuteCache.getCached = function (blocks, blockId, CacheType) {
     } else {
         cached = new CacheType(blocks, {
             id: blockId,
+            ref: {block: null, _next: null, _branches: []},
             index,
             opcode: blocks.getOpcode(block),
             fields: blocks.getFields(block),
@@ -1291,6 +1299,10 @@ BlocksExecuteCache.getCached = function (blocks, blockId, CacheType) {
     blocks._cache._executeCached[blockId] = cached;
     blocks._cache._executeCachedIndex[index] = cached;
     blocks._cache._executeCachedIdIndexMap[blockId] = index;
+
+    cached.ref.block = cached;
+    if (cached.setup) cached.setup();
+
     return cached;
 };
 

@@ -330,11 +330,17 @@ class Sequencer {
         if (!branchNum) {
             branchNum = 1;
         }
-        const currentBlockId = thread.peekStack();
-        const branchId = thread.target.blocks.getBranch(
-            currentBlockId,
-            branchNum
-        );
+
+        let branchId;
+        if (thread.stackFrame._blockExecuteRef.block !== null) {
+            branchId = thread.stackFrame._blockExecuteRef._branches[branchNum - 1].id;
+        } else {
+            const currentBlockId = thread.peekStack();
+            const branchId = thread.target.blocks.getBranch(
+                currentBlockId,
+                branchNum
+            );
+        }
 
         // Push branch ID to the thread's stack.
         thread.pushStack(

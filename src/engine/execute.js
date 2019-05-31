@@ -160,6 +160,8 @@ class BlockCached {
          */
         this.id = cached.id;
 
+        this.ref = cached.ref;
+
         this._safeId = safeId(cached.id);
 
         this.index = cached.index;
@@ -533,9 +535,13 @@ class InputBlockCached extends BlockCached {
 class CommandBlockCached extends InputBlockCached {
     constructor (blockContainer, cached) {
         super(blockContainer, cached);
+    }
 
-        if (/^vm_end/.test(cached.id)) {
-            this._argValues.NEXT_PARENT = null;
+    setup () {
+        const {blockContainer} = this;
+
+        if (/^vm_end/.test(this.id)) {
+            this._argValues.NEXT_PARENT = {NEXT: null};
         }
 
         const nextId = blockContainer ?
@@ -543,12 +549,14 @@ class CommandBlockCached extends InputBlockCached {
             null;
         const nextCached = blockContainer ? BlocksExecuteCache.getCached(
             blockContainer, nextId, CommandBlockCached
-        ) : null;
+        ) : nullr;
 
         this._next = nextCached;
 
+        const NEXT_PARENT = {NEXT: null};
+
         const mayContinueCached = new InputBlockCached(null, {
-            id: cached.id,
+            id: this.id,
             opcode: 'vm_may_continue',
             fields: {},
             inputs: {},
@@ -559,18 +567,19 @@ class CommandBlockCached extends InputBlockCached {
             END_OPERATION: '',
             EXPECT_STACK: this.id,
             NEXT_STACK: nextId,
-            NEXT_PARENT: null,
+            NEXT_BLOCK: nextCached,
+            NEXT_PARENT,
             NEXT_INDEX: nextCached ? nextCached.index : -1
         };
         let followUpCached = mayContinueCached;
 
-        const substack1 = blockContainer.getBranch(cached.id, 1);
-        if (substack1) {
-            const substack2 = blockContainer.getBranch(cached.id, 2);
+        const substack1 = blockContainer.getBranch(this.id, 1);
+        const substack2 = blockContainer.getBranch(this.id, 2);
 
+        if (substack1) {
             if (substack2) {
                 const substack2Cached = new InputBlockCached(null, {
-                    id: cached.id,
+                    id: this.id,
                     opcode: 'vm_do_stack',
                     fields: {},
                     inputs: {},
@@ -579,20 +588,21 @@ class CommandBlockCached extends InputBlockCached {
                 substack2Cached._argValues = {
                     END_FUNCTION: null,
                     END_OPERATION: '',
-                    GET_BLOCK: () => {
-                        return substack2Cached._argValues.BLOCK_CACHED = getCached(blockUtility.thread, -1, substack2);
-                    },
-                    BLOCK_CACHED: null,
+                    // GET_BLOCK: () => {
+                    //     return substack2Cached._argValues.BLOCK_CACHED = getCached(blockUtility.thread, -1, substack2)._commandSet.firstCommand;
+                    // },
+                    // BLOCK_CACHED: null,
+                    BLOCK_CACHED: _getCached(blockUtility.thread, substack2),
                     ELSE_CACHED: followUpCached,
                     NEXT_STACK: nextId,
-                    NEXT_PARENT: null
+                    NEXT_PARENT
                 };
                 followUpCached = substack2Cached;
             }
 
             if (substack1) {
                 const substack1Cached = new InputBlockCached(null, {
-                    id: cached.id,
+                    id: this.id,
                     opcode: 'vm_do_stack',
                     fields: {},
                     inputs: {},
@@ -601,25 +611,26 @@ class CommandBlockCached extends InputBlockCached {
                 substack1Cached._argValues = {
                     END_FUNCTION: null,
                     END_OPERATION: '',
-                    GET_BLOCK: () => {
-                        return substack1Cached._argValues.BLOCK_CACHED = getCached(blockUtility.thread, -1, substack1);
-                    },
-                    BLOCK_CACHED: null,
+                    // GET_BLOCK: () => {
+                    //     return substack1Cached._argValues.BLOCK_CACHED = getCached(blockUtility.thread, -1, substack1)._commandSet.firstCommand;
+                    // },
+                    // BLOCK_CACHED: null,
+                    BLOCK_CACHED: _getCached(blockUtility.thread, substack1),
                     ELSE_CACHED: followUpCached,
                     NEXT_STACK: nextId,
-                    NEXT_PARENT: null
+                    NEXT_PARENT
                 };
                 followUpCached = substack1Cached;
             }
         }
 
-        if (cached.opcode === 'procedures_call') {
+        if (this.opcode === 'procedures_call') {
             const proccode = this._argValues.mutation.proccode;
             const thread = blockUtility.thread;
             const definition = thread.blockContainer.getProcedureDefinition(proccode);
 
             const procedureCached = new InputBlockCached(null, {
-                id: cached.id,
+                id: this.id,
                 opcode: 'vm_do_stack',
                 fields: {},
                 inputs: {},
@@ -628,15 +639,21 @@ class CommandBlockCached extends InputBlockCached {
             procedureCached._argValues = {
                 END_FUNCTION: null,
                 END_OPERATION: '',
-                GET_BLOCK: () => {
-                    return procedureCached._argValues.BLOCK_CACHED = getCached(blockUtility.thread, -1, definition);
-                },
-                BLOCK_CACHED: null,
+                // GET_BLOCK: () => {
+                //     return procedureCached._argValues.BLOCK_CACHED = getCached(blockUtility.thread, -1, definition)._commandSet.firstCommand;
+                // },
+                // BLOCK_CACHED: null,
+                BLOCK_CACHED: _getCached(blockUtility.thread, definition),
                 ELSE_CACHED: followUpCached,
                 NEXT_STACK: nextId,
-                NEXT_PARENT: null
+                NEXT_PARENT
             };
             followUpCached = procedureCached;
+        }
+
+        this.NEXT_PARENT = NEXT_PARENT;
+        if (nextCached !== null) {
+            this.NEXT_PARENT = nextCached._ops[nextCached._ops.length - 1]._argValues.NEXT_PARENT;
         }
 
         this._ops.push(followUpCached);
@@ -649,6 +666,9 @@ class CommandBlockCached extends InputBlockCached {
         for (let i = 0; i < this._allOps.length; i++) {
             this._allOps[i]._commandSet = {i: this._allOps.indexOf(this._allOps[i]._ops[0]), firstCommand: this};
         }
+
+        this.ref._next = nextCached || NULL_BLOCK;
+        this.ref._branches = [substack1, substack2].map(id => id ? _getCached(blockUtility.thread, id) : NULL_BLOCK);
     }
 
     compile () {
@@ -670,7 +690,7 @@ class NullBlockCached extends BlockCached {
 }
 
 const NULL_BLOCK = new NullBlockCached(null, {
-    id: 'vm_null',
+    id: null,
     opcode: 'vm_null',
     fields: {},
     inputs: {},
@@ -2548,6 +2568,7 @@ class JSInlineOperators {
                         ast.cast('!', ast.p('thread', 'continuous')),
                         ast.expressionStatement(['return ', 'thread', '.status = ', Thread.STATUS_INTERRUPT])));
                 }
+                path.parent.insertAfter(ast.storeArg('thread', 'stackFrame._blockExecuteRef', ast.p(ast.p(node.args, 'NEXT_BLOCK'), 'ref')));
                 path.replaceWith(ast.cast(ast.p('thread', 'reuseStackForNextBlock'), ast.p(node.args, 'NEXT_STACK')));
             } else if (!beforeAnother) {
                 if (info.op._argValues.END_OPERATION === 'vm_end_of_branch') {
@@ -2570,6 +2591,7 @@ class JSInlineOperators {
                     return;
                 }
             } else if (afterAnother && beforeAnother) {
+                path.parent.insertAfter(ast.storeArg('thread', 'stackFrame._blockExecuteRef', ast.p(ast.p(node.args, 'NEXT_BLOCK'), 'ref')));
                 path.replaceWith(ast.cast(ast.p('thread', 'reuseStackForNextBlock'), ast.p(node.args, 'NEXT_STACK')));
             }
         }
@@ -2810,7 +2832,7 @@ const compile = function (blockCached) {
     const firstCommand = blockCached._commandSet.firstCommand;
     const ops = firstCommand._allOps;
 
-    if (ops[0]._argValues.COMPILED) return;
+    if (ops[0].COMPILED) return;
 
     let start = (typeof performance === 'undefined' ? Date : performance).now();
     tokens = Math.min(tokens + (start - lastCompiled), 10);
@@ -2978,7 +3000,7 @@ const compile = function (blockCached) {
 
     const _blockFunction = factory(bindings);
 
-    const _allOps = firstCommand._oldOps = blockCached._commandSet.firstCommand._allOps;
+    const _allOps = firstCommand._oldOps = firstCommand._allOps;
     const _newOps = firstCommand._allOps = [];
     for (let i = 0; i < _allOps.length; i++) {
         const compileCached = _newOps[i] = new BlockCached(null, {
@@ -2989,16 +3011,20 @@ const compile = function (blockCached) {
             mutation: null
         });
         compileCached._blockFunction = compileCached._blockFunctionUnbound = _blockFunction;
-        compileCached._argValues.COMPILED = true;
         compileCached._argValues.INDEX = _allOps[i]._commandSet.i;
+
+        compileCached.COMPILED = true;
+        _allOps[i].COMPILED = true;
     }
+
+    firstCommand.COMPILED = true;
 
     lastCompiled = (typeof performance === 'undefined' ? Date : performance).now();
     tokens -= lastCompiled - start;
 };
 
-const getCached = function (thread, currentBlockIndex, currentBlockId) {
-    const blockCached = (
+const _getCached = function (thread, currentBlockId) {
+    return (
         BlocksExecuteCache.getCached(thread.blockContainer, currentBlockId, CommandBlockCached) ||
         BlocksExecuteCache.getCached(
             blockUtility.sequencer.blocks, currentBlockId, CommandBlockCached
@@ -3009,8 +3035,16 @@ const getCached = function (thread, currentBlockIndex, currentBlockId) {
         // No block found: stop the thread; script no longer exists.
         NULL_BLOCK
     );
+};
 
-    if (!blockCached._commandSet.firstCommand._allOps[0]._argValues.COMPILED &&
+const getCached = function (thread, currentBlockIndex, currentBlockId) {
+    const blockCached = (
+        thread.stackFrame._blockExecuteRef.block ||
+        _getCached(thread, currentBlockId)
+    );
+
+    if (blockCached &&
+        !blockCached.COMPILED &&
         blockCached._commandSet.firstCommand.count >= blockCached._commandSet.firstCommand._allOps.length) {
         compile(blockCached);
     }
@@ -3125,6 +3159,8 @@ const executeOuter = function (sequencer, thread) {
         // Current block to execute is the one on the top of the stack.
         const blockCached = getCached(
             thread, thread.stackFrame.blockIndex, thread.pointer || thread.stackFrame.endBlockId);
+
+        thread.stackFrame._blockExecuteRef = blockCached.ref;
 
         const ops = thread.continuous ?
             blockCached._commandSet.firstCommand._allOps :

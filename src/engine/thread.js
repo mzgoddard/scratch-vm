@@ -14,6 +14,8 @@ const _stackFrameFreeList = [];
  */
 const defaultParams = Object.create(null);
 
+const nullRef = {block: null, _next: null, branches: []};
+
 /**
  * A frame used for each level of the stack. A general purpose place to store a
  * bunch of execution contexts and parameters.
@@ -61,6 +63,8 @@ class _StackFrame {
          */
         this.needsReset = false;
 
+        this._blockExecuteRef = nullRef;
+
         // this._blockIndex = -1;
     }
 
@@ -96,6 +100,7 @@ class _StackFrame {
      */
     static release (stackFrame) {
         if (stackFrame !== null) {
+            stackFrame._blockExecuteRef = nullRef;
             _stackFrameFreeList.push(
                 stackFrame.needsReset ? stackFrame.reset() : stackFrame
             );
@@ -304,6 +309,7 @@ class Thread {
      */
     reuseStackForNextBlock (blockId) {
         this.pointer = blockId;
+        this.stackFrame._blockExecuteRef = nullRef;
         if (this.stackFrame.needsReset) this.stackFrame.reset();
     }
 
@@ -434,6 +440,16 @@ class Thread {
      * where execution proceeds from one block to the next.
      */
     goToNextBlock () {
+        if (this.stackFrame._blockExecuteRef.block !== null) {
+            const next = this.stackFrame._blockExecuteRef.block._next;
+            if (next === null) {
+                this.reuseStackForNextBlock(null);
+            } else {
+                this.reuseStackForNextBlock(next.id);
+                this.stackFrame._blockExecuteRef = next.ref;
+            }
+            return;
+        }
         const nextBlockId = this.target.blocks.getNextBlock(this.pointer);
         this.reuseStackForNextBlock(nextBlockId);
     }

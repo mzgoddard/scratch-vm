@@ -46,8 +46,9 @@ class Scratch3VMBlocks {
 
     endOfProcedure (args, {thread}) {
         thread.popStack();
-        if (args.NEXT_PARENT !== null) thread.reuseStackForNextBlock(args.NEXT_PARENT);
-        else thread.goToNextBlock();
+        // if (args.NEXT_PARENT.NEXT !== null) thread.reuseStackForNextBlock(args.NEXT_PARENT.NEXT);
+        // else
+        thread.goToNextBlock();
     }
 
     endOfLoopBranch (args, {thread}) {
@@ -56,9 +57,10 @@ class Scratch3VMBlocks {
     }
 
     endOfBranch (args, {thread}) {
-        thread.popStack(); 
-        if (args.NEXT_PARENT !== null) thread.reuseStackForNextBlock(args.NEXT_PARENT);
-        else thread.goToNextBlock();
+        thread.popStack();
+        // if (args.NEXT_PARENT.NEXT !== null) thread.reuseStackForNextBlock(args.NEXT_PARENT.NEXT);
+        // else
+        thread.goToNextBlock();
     }
 
     castString (args) {
@@ -84,6 +86,8 @@ class Scratch3VMBlocks {
                 if (thread.status === Thread.STATUS_RUNNING) {
                     thread.status = Thread.STATUS_INTERRUPT;
                 }
+            } else {
+                thread.stackFrame._blockExecuteRef = args.NEXT_BLOCK.ref;
             }
         } else {
             thread.status = Thread.STATUS_INTERRUPT;
@@ -91,30 +95,57 @@ class Scratch3VMBlocks {
     }
 
     doStack (args, utils) {
-        const blockCached = args.BLOCK_CACHED || args.GET_BLOCK();
+        const blockCached = args.BLOCK_CACHED;
         const thread = utils.thread;
-        if (thread.continuous && thread.pointer === blockCached.id) {
+        if (thread.continuous && thread.pointer === blockCached.id && blockCached.COMPILED) {
+            // const nextParent = blockCached.NEXT_PARENT.NEXT;
+            // blockCached.NEXT_PARENT.NEXT = args.NEXT_STACK;
+
+            thread.stackFrame._blockExecuteRef = blockCached.ref;
+
+            const opCached = blockCached._allOps[0];
+            opCached._blockFunction(opCached._argValues, utils);
+
+            // blockCached.NEXT_PARENT.NEXT = nextParent;
+
+            if (thread.status <= Thread.STATUS_RUNNING &&
+                thread.pointer === args.NEXT_STACK) {
+                if (args.NEXT_STACK !== null) {
+                    thread.status = Thread.STATUS_RUNNING;
+                } else if (args.END_OPERATION === thread.stackFrame.endBlockId) {
+                    args.END_FUNCTION(args, utils);
+                } else {
+                    const endOp = thread.stackFrame.endBlockId;
+                    let endFunction = utils.sequencer.runtime.getOpcodeFunction(endOp);
+                    if (endFunction) {
+                        args.END_OPERATION = endOp;
+                        args.END_FUNCTION = endFunction;
+                        endFunction(args, utils);
+                    }
+                }
+            }
+        } else if (thread.continuous && thread.pointer === blockCached.id) {
+            if (blockCached.count >= blockCached._allOps.length) blockCached.compile();
+
+            thread.stackFrame._blockExecuteRef = blockCached.ref;
+
             const ops = blockCached._allOps;
-
-            if (!ops[0]._argValues.COMPILED &&
-                blockCached.count >= ops.length) blockCached.compile();
-
             let i = -1;
 
-            const lastArgs = ops[ops.length - 1]._argValues;
-            const nextParent = lastArgs.NEXT_PARENT;
-            lastArgs.NEXT_PARENT = args.NEXT_STACK;
+            // const lastArgs = ops[ops.length - 1]._argValues;
+            // const nextParent = lastArgs.NEXT_PARENT;
+            // lastArgs.NEXT_PARENT = args.NEXT_STACK;
 
             while (thread.status === Thread.STATUS_RUNNING) {
                 const opCached = ops[++i];
-                opCached._parentValues[opCached._parentKey] = (
-                    opCached._blockFunction(opCached._argValues, utils));
+                opCached._parentValues[opCached._parentKey] =
+                    opCached._blockFunction(opCached._argValues, utils);
             }
             if (i === ops.length - 1) {
                 blockCached.count++;
             }
 
-            lastArgs.NEXT_PARENT = nextParent;
+            // lastArgs.NEXT_PARENT = nextParent;
 
             if (thread.status === Thread.STATUS_INTERRUPT &&
                 thread.pointer === args.NEXT_STACK) {
@@ -138,8 +169,7 @@ class Scratch3VMBlocks {
             }
         } else {
             const elseCached = args.ELSE_CACHED;
-            elseCached._parentValues[elseCached._parentKey] = (
-                elseCached._blockFunction(elseCached._argValues, utils));
+            elseCached._blockFunction(elseCached._argValues, utils);
         }
     }
 
