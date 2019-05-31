@@ -199,17 +199,17 @@ const parseScripts = function (scripts, blocks, addBroadcastMsg, getVariableId, 
  */
 const generateVariableIdGetter = (function () {
     let globalVariableNameMap = {};
-    const namer = (targetId, name, type) => `${targetId}-${StringUtil.replaceUnsafeChars(name)}-${type}`;
+    const namer = (targetId, name, type) => `${targetId}_${StringUtil.replaceUnsafeChars(name)}_${type}`;
     return function (targetId, topLevel) {
         // Reset the global variable map if topLevel
         if (topLevel) globalVariableNameMap = {};
         return function (name, type) {
             if (topLevel) { // Store the name/id pair in the globalVariableNameMap
-                globalVariableNameMap[`${name}-${type}`] = namer(targetId, name, type);
-                return globalVariableNameMap[`${name}-${type}`];
+                globalVariableNameMap[`${name}_${type}`] = namer(targetId, name, type);
+                return globalVariableNameMap[`${name}_${type}`];
             }
             // Not top-level, so first check the global name map
-            if (globalVariableNameMap[`${name}-${type}`]) return globalVariableNameMap[`${name}-${type}`];
+            if (globalVariableNameMap[`${name}_${type}`]) return globalVariableNameMap[`${name}_${type}`];
             return namer(targetId, name, type);
         };
     };

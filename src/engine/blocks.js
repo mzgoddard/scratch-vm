@@ -63,6 +63,10 @@ class Blocks {
              */
             procedureDefinitions: {},
 
+            procedureInfo: {},
+
+            branches: {},
+
             /**
              * A cache for execute to use and store on. Only available to
              * execute.
@@ -143,18 +147,30 @@ class Blocks {
      * @return {?string} ID of block in the branch.
      */
     getBranch (id, branchNum) {
+        if (!branchNum) branchNum = 1;
+        let branches = this._cache.branches[id];
+        if (typeof branches !== 'undefined') return branches[branchNum - 1];
+
         const block = this._blocks[id];
         if (typeof block === 'undefined') return null;
-        if (!branchNum) branchNum = 1;
 
-        let inputName = Blocks.BRANCH_INPUT_PREFIX;
-        if (branchNum > 1) {
-            inputName += branchNum;
+        branches = [];
+        for (const branch in block.inputs) {
+            if (branch.startsWith(Blocks.BRANCH_INPUT_PREFIX)) {
+                const suffix = branch.substring(Blocks.BRANCH_INPUT_PREFIX.length);
+                let index = Number(suffix);
+                if (index === 0) index = 1;
+                const input = block.inputs[branch];
+                branches[index - 1] = input.block;
+            }
+        }
+        for (let i = 0; i < branches.length; i++) {
+            // Empty C-block?
+            branches[i] = branches[i] || null;
         }
 
-        // Empty C-block?
-        const input = block.inputs[inputName];
-        return (typeof input === 'undefined') ? null : input.block;
+        this._cache.branches[id] = branches;
+        return branches[branchNum - 1];
     }
 
     /**
@@ -248,6 +264,48 @@ class Blocks {
 
         this._cache.procedureDefinitions[name] = null;
         return null;
+    }
+
+    getProcedureInfo (name) {
+        let info = this._cache.procedureInfo[name];
+        if (typeof info !== 'undefined') return info;
+
+        const definition = this.getProcedureDefinition(name);
+        if (!definition) {
+            this._cache.procedureInfo[name] = null;
+            return null;
+        }
+
+        const definitionBlock = this.getBlock(definition);
+        const innerBlock = this.getBlock(definitionBlock.inputs.custom_block.block);
+
+        let doWarp = false;
+        if (innerBlock && innerBlock.mutation) {
+            const warp = innerBlock.mutation.warp;
+            if (typeof warp === 'boolean') {
+                doWarp = warp;
+            } else if (typeof warp === 'string') {
+                doWarp = JSON.parse(warp);
+            }
+        }
+
+        const isCaller = {};
+        for (const key of Object.keys(this._blocks)) {
+            const block = this._blocks[key];
+            isCaller[key] = block.opcode === 'procedures_call' &&
+                block.mutation.proccode === name;
+        }
+
+        info = {
+            proccode: name,
+            definition,
+            definitionBlock,
+            innerBlock,
+            doWarp,
+            isCaller
+        };
+        this._cache.procedureInfo[name] = info;
+        return info;
     }
 
     /**
@@ -518,6 +576,8 @@ class Blocks {
         this._cache.inputs = {};
         this._cache.procedureParamNames = {};
         this._cache.procedureDefinitions = {};
+        this._cache.procedureInfo = {};
+        this._cache.branches = {};
         this._cache._executeCached = {};
         this._cache._executeCachedIndex.fill(null);
         this._cache._monitored = null;

@@ -737,7 +737,11 @@ const deserializeInputs = function (inputs, parentId, blocks) {
         if (!hasOwnProperty.call(inputs, inputName)) continue;
         const inputDescArr = inputs[inputName];
         // If this block has already been deserialized (it's not an array) skip it
-        if (!Array.isArray(inputDescArr)) continue;
+        if (!Array.isArray(inputDescArr)) {
+            obj[inputName].block = obj[inputName].block.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`);
+            obj[inputName].shadow = obj[inputName].shadow.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`);
+            continue;
+        }
         let block = null;
         let shadow = null;
         const blockShadowInfo = inputDescArr[0];
@@ -814,9 +818,11 @@ const deserializeBlocks = function (blocks) {
             deserializeInputDesc(block, null, false, blocks);
             continue;
         }
-        block.id = blockId; // add id back to block since it wasn't serialized
-        block.inputs = deserializeInputs(block.inputs, blockId, blocks);
+        block.id = blockId.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`); // add id back to block since it wasn't serialized
+        block.inputs = deserializeInputs(block.inputs, blockId.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`), blocks);
         block.fields = deserializeFields(block.fields);
+        block.next = block.next.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`);
+        block.parent = block.parent.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`);
     }
     return blocks;
 };

@@ -444,16 +444,18 @@ class Thread {
      * @param {!string} procedureCode Procedure code of procedure being called.
      * @return {boolean} True if the call appears recursive.
      */
-    isRecursiveCall (procedureCode) {
+    
+    isRecursiveCall (procedureInfo) {
         const stackHeight = this.stack.length;
         // Limit the number of stack levels that are examined for procedures.
         const stackBottom = Math.max(stackHeight - 5, 0);
         for (let i = stackHeight - 1; i >= stackBottom; i--) {
-            const block = this.target.blocks.getBlock(this.stack[i]);
-            if (block.opcode === 'procedures_call' &&
-                block.mutation.proccode === procedureCode) {
-                return true;
-            }
+            if (procedureInfo.isCaller[this.stack[i]]) return true;
+            // const block = this.target.blocks.getBlock(this.stack[i]);
+            // if (block.opcode === 'procedures_call' &&
+            //     block.mutation.proccode === procedureCode) {
+            //     return true;
+            // }
         }
         return false;
     }

@@ -349,38 +349,24 @@ class Sequencer {
      * @param {!string} procedureCode Procedure code of procedure to step to.
      */
     stepToProcedure (thread, procedureCode) {
-        const definition = thread.target.blocks.getProcedureDefinition(procedureCode);
-        if (!definition) {
-            return;
-        }
+        const procedureInfo = thread.target.blocks.getProcedureInfo(procedureCode);
+        if (procedureInfo === null) return;
+
         // Check if the call is recursive.
         // If so, set the thread to yield after pushing.
-        const isRecursive = thread.isRecursiveCall(procedureCode);
+        const isRecursive = thread.isRecursiveCall(procedureInfo);
         // To step to a procedure, we put its definition on the stack.
         // Execution for the thread will proceed through the definition hat
         // and on to the main definition of the procedure.
         // When that set of blocks finishes executing, it will be popped
         // from the stack by the sequencer, returning control to the caller.
-        thread.pushStack(definition, 'vm_end_of_procedure');
+        thread.pushStack(procedureInfo.definition, 'vm_end_of_procedure');
         // In known warp-mode threads, only yield when time is up.
-        if (thread.peekStackFrame().warpMode &&
-            thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME) {
-            thread.status = Thread.STATUS_YIELD;
-        } else {
+        if (!thread.peekStackFrame().warpMode ||
+            thread.warpTimer.timeElapsed() <= Sequencer.WARP_TIME) {
             // Look for warp-mode flag on definition, and set the thread
             // to warp-mode if needed.
-            const definitionBlock = thread.target.blocks.getBlock(definition);
-            const innerBlock = thread.target.blocks.getBlock(
-                definitionBlock.inputs.custom_block.block);
-            let doWarp = false;
-            if (innerBlock && innerBlock.mutation) {
-                const warp = innerBlock.mutation.warp;
-                if (typeof warp === 'boolean') {
-                    doWarp = warp;
-                } else if (typeof warp === 'string') {
-                    doWarp = JSON.parse(warp);
-                }
-            }
+            const {doWarp} = procedureInfo;
             if (doWarp) {
                 thread.peekStackFrame().warpMode = true;
 
@@ -392,9 +378,12 @@ class Sequencer {
                     thread.warpTimer.start();
                 }
             } else if (isRecursive) {
-                // In normal-mode threads, yield any time we have a recursive call.
+                // In normal-mode threads, yield any time we have a recursive
+                // call.
                 thread.status = Thread.STATUS_YIELD;
             }
+        } else {
+            thread.status = Thread.STATUS_YIELD;
         }
     }
 
