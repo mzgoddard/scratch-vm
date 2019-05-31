@@ -109,6 +109,7 @@ const handlePromise = (thread, blockCached) => {
 };
 
 const safeId = function (id) {
+    id = String(id);
     let hash = 0x00000000;
     for (let i = 0; i < id.length; i++) {
         hash = Math.abs(((hash << 5) - hash + id.charCodeAt(i)) & 0xffffffff);
@@ -117,7 +118,6 @@ const safeId = function (id) {
         // ) & 0xffffffff);
     }
     return `_${Math.abs(hash)}`;
-    // return `_${String(id).replace(/[^_\w]/g, c => c.charCodeAt(0))}`;
 };
 
 const safe32Chars = '_abcdefghijklmnopqrstuvwxyzABCDE'.split('');
