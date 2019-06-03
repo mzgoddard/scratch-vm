@@ -754,10 +754,11 @@ const deserializeInputs = function (inputs, parentId, blocks) {
             block = deserializeInputDesc(inputDescArr[1], parentId, false, blocks);
             shadow = deserializeInputDesc(inputDescArr[2], parentId, true, blocks);
         }
+        // console.log
         obj[inputName] = {
             name: inputName,
-            block: block,
-            shadow: shadow
+            block: $id(block),
+            shadow: $id(shadow)
         };
     }
     return obj;
@@ -796,6 +797,7 @@ const deserializeFields = function (fields) {
 };
 
 const $id = function (id) {
+    if (typeof id !== 'string') return id;
     return id.replace(/[^a-zA-Z0-9_]/g, c => `$${c.charCodeAt(0)}`);
 };
 
