@@ -129,6 +129,10 @@ class Thread {
          */
         this.topBlock = firstBlock;
 
+        this.topOpcode = null;
+
+        // this.id = null;
+
         /**
          * Signal to execute that it may execute blocks continuously until the
          * thread status is in a non-running state.

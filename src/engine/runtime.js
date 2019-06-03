@@ -147,6 +147,9 @@ let rendererDrawProfilerId = -1;
  * Manages targets, scripts, and the sequencer.
  * @constructor
  */
+
+const targetThreads = [{}];
+const emptyThreadList = {};
 class Runtime extends EventEmitter {
     constructor () {
         super();
@@ -1445,6 +1448,8 @@ class Runtime extends EventEmitter {
         thread.blockContainer = thread.updateMonitor ?
             this.monitorBlocks :
             target.blocks;
+        // thread.id = `${target.id}_${id}`;
+        thread.topOpcode = thread.blockContainer.getOpcode(thread.blockContainer.getBlock(id));
 
         if (thread.stackClick) {
             thread.pushStack(id, 'vm_report_stack_click');
@@ -1482,6 +1487,8 @@ class Runtime extends EventEmitter {
         newThread.stackClick = thread.stackClick;
         newThread.updateMonitor = thread.updateMonitor;
         newThread.blockContainer = thread.blockContainer;
+        // newThread.id = thread.id;
+        newThread.topOpcode = thread.topOpcode;
         newThread.pushStack(thread.topBlock);
         const i = this.threads.indexOf(thread);
         if (i > -1) {
@@ -1594,12 +1601,36 @@ class Runtime extends EventEmitter {
         let targets = this.executableTargets;
         if (optTarget) {
             targets = [optTarget];
+
+            const targetRunning = targetThreads[0];
+            for (let i = 0, l = this.threads.length; i < l; i++) {
+                const thread = this.threads[i];
+                if (thread.target === optTarget && thread.topOpcode === opcode && !thread.stackClick) {
+                    targetRunning[thread.topBlock] = thread;
+                }
+            }
+        } else {
+            for (let i = 0, l = this.threads.length; i < l; i++) {
+                const thread = this.threads[i];
+                if (thread.topOpcode === opcode && !thread.stackClick) {
+                    let targetRunning = targetThreads[thread.target.id];
+                    if (typeof targetRunning === 'undefined') {
+                        targetRunning = targetThreads[thread.target.id] = {};
+                    }
+                    targetRunning[thread.topBlock] = thread;
+                }
+            }
         }
+
         for (let t = targets.length - 1; t >= 0; t--) {
             const target = targets[t];
             const scripts = BlocksRuntimeCache.getScripts(target.blocks, opcode);
+            if (scripts.length === 0) continue;
+            const threads = targetThreads[t] || emptyThreadList;
             for (let j = 0; j < scripts.length; j++) {
-                f(scripts[j], target);
+                const script = scripts[j];
+                f(script, target, threads[script.blockId]);
+                threads[script.blockId] = null;
             }
         }
     }
@@ -1628,7 +1659,7 @@ class Runtime extends EventEmitter {
         }
 
         // Consider all scripts, looking for hats with opcode `requestedHatOpcode`.
-        this.allScriptsByOpcodeDo(requestedHatOpcode, (script, target) => {
+        this.allScriptsByOpcodeDo(requestedHatOpcode, (script, target, currentThread) => {
             const {
                 blockId: topBlockId,
                 fieldsOfInputs: hatFields
@@ -1646,30 +1677,16 @@ class Runtime extends EventEmitter {
                 }
             }
 
-            if (hatMeta.restartExistingThreads) {
-                // If `restartExistingThreads` is true, we should stop
-                // any existing threads starting with the top block.
-                for (let i = 0; i < this.threads.length; i++) {
-                    if (this.threads[i].target === target &&
-                        this.threads[i].topBlock === topBlockId &&
-                        // stack click threads and hat threads can coexist
-                        !this.threads[i].stackClick) {
-                        newThreads.push(this._restartThread(this.threads[i]));
-                        return;
-                    }
-                }
-            } else {
-                // If `restartExistingThreads` is false, we should
-                // give up if any threads with the top block are running.
-                for (let j = 0; j < this.threads.length; j++) {
-                    if (this.threads[j].target === target &&
-                        this.threads[j].topBlock === topBlockId &&
-                        // stack click threads and hat threads can coexist
-                        !this.threads[j].stackClick &&
-                        this.threads[j].status !== Thread.STATUS_DONE) {
-                        // Some thread is already running.
-                        return;
-                    }
+            if (currentThread) {
+                if (hatMeta.restartExistingThreads) {
+                    // If `restartExistingThreads` is true, we should stop
+                    // any existing threads starting with the top block.
+                    newThreads.push(this._restartThread(currentThread));
+                    return;
+                } else if (currentThread.status !== Thread.STATUS_DONE) {
+                    // If `restartExistingThreads` is false, we should give
+                    // up if any threads with the top block are running.
+                    return;
                 }
             }
             // Start the thread with this top block.
@@ -1681,7 +1698,8 @@ class Runtime extends EventEmitter {
         //
         // TODO: Move the execute call to sequencer. Maybe in a method call
         // stepHat or stepOne.
-        newThreads.forEach(thread => {
+        for (let i = 0; i < newThreads.length; i++) {
+            const thread = newThreads[i];
             execute(this.sequencer, thread);
             if (thread.status !== Thread.STATUS_DONE) {
                 thread.goToNextBlock();
@@ -1689,7 +1707,7 @@ class Runtime extends EventEmitter {
                     this.sequencer.retireThread(thread);
                 }
             }
-        });
+        }
         return newThreads;
     }
 
