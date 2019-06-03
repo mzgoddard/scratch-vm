@@ -1446,9 +1446,9 @@ class Runtime extends EventEmitter {
             this.monitorBlocks :
             target.blocks;
 
-        if (opts.stackClick) {
+        if (thread.stackClick) {
             thread.pushStack(id, 'vm_report_stack_click');
-        } else if (opts.updateMonitor) {
+        } else if (thread.updateMonitor) {
             thread.pushStack(id, 'vm_report_monitor');
         } else {
             thread.pushStack(id, 'vm_end_of_thread');
