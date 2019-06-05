@@ -6,6 +6,36 @@ const Clone = require('../util/clone');
 const Target = require('../engine/target');
 const StageLayering = require('../engine/stage-layering');
 
+const __setXYPosition = [0, 0];
+
+class Beacon {
+    constructor (name) {
+        this.name = name;
+        this.emitter = null;
+        this.listeners = [];
+    }
+
+    addListener (listener) {
+        this.listeners.push(listener);
+    }
+
+    removeListener (listener) {
+        const index = this.listeners.indexOf(listener);
+        if (index > -1) {
+            this.listeners.splice(index, 1);
+        }
+    }
+
+    emit (...args) {
+        if (this.emitter !== null) {
+            this.emitter.emit(this.name, ...args);
+        }
+        for (let i = 0; i < this.listeners.length; i++) {
+            this.listeners[i].apply(null, ...args);
+        }
+    }
+}
+
 /**
  * Rendered target: instance of a sprite (clone), or the stage.
  */
@@ -162,6 +192,9 @@ class RenderedTarget extends Target {
          * @type {string}
          */
         this.textToSpeechLanguage = null;
+
+        this.targetMovedBeacon = new Beacon(RenderedTarget.EVENT_TARGET_MOVED);
+        this.targetVisualChangeBeacon = new Beacon(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE);
     }
 
     /**
@@ -258,6 +291,15 @@ class RenderedTarget extends Target {
         };
     }
 
+    addListener (name, ...args) {
+        if (name === RenderedTarget.EVENT_TARGET_MOVED) {
+            this.targetMovedBeacon.emitter = this;
+        } else if (name === RenderedTarget.EVENT_TARGET_VISUAL_CHANGE) {
+            this.targetVisualChangeBeacon.emitter = this;
+        }
+        super.addListener(name, ...args);
+    }
+
     /**
      * Set the X and Y coordinates.
      * @param {!number} x New X coordinate, in Scratch coordinates.
@@ -278,14 +320,14 @@ class RenderedTarget extends Target {
 
             this.renderer.updateDrawablePosition(this.drawableID, position);
             if (this.visible) {
-                this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
+                this.targetVisualChangeBeacon.emit(this);
                 this.runtime.requestRedraw();
             }
         } else {
             this.x = x;
             this.y = y;
         }
-        this.emit(RenderedTarget.EVENT_TARGET_MOVED, this, oldX, oldY, force);
+        this.targetMovedBeacon.emit(this, oldX, oldY, force);
         this.runtime.requestTargetsUpdate(this);
     }
 
@@ -326,7 +368,7 @@ class RenderedTarget extends Target {
             const {direction, scale} = this._getRenderedDirectionAndScale();
             this.renderer.updateDrawableDirectionScale(this.drawableID, direction, scale);
             if (this.visible) {
-                this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
+                this.targetVisualChangeBeacon.emit(this);
                 this.runtime.requestRedraw();
             }
         }
@@ -372,7 +414,7 @@ class RenderedTarget extends Target {
         if (this.renderer) {
             this.renderer.updateDrawableVisible(this.drawableID, this.visible);
             if (this.visible) {
-                this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
+                this.targetVisualChangeBeacon.emit(this);
                 this.runtime.requestRedraw();
             }
         }
@@ -402,7 +444,7 @@ class RenderedTarget extends Target {
             const {direction, scale} = this._getRenderedDirectionAndScale();
             this.renderer.updateDrawableDirectionScale(this.drawableID, direction, scale);
             if (this.visible) {
-                this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
+                this.targetVisualChangeBeacon.emit(this);
                 this.runtime.requestRedraw();
             }
         }
@@ -420,7 +462,7 @@ class RenderedTarget extends Target {
         if (this.renderer) {
             this.renderer.updateDrawableEffect(this.drawableID, effectName, value);
             if (this.visible) {
-                this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
+                this.targetVisualChangeBeacon.emit(this);
                 this.runtime.requestRedraw();
             }
         }
@@ -437,7 +479,7 @@ class RenderedTarget extends Target {
         if (this.renderer) {
             this.renderer.updateDrawableProperties(this.drawableID, this.effects);
             if (this.visible) {
-                this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
+                this.targetVisualChangeBeacon.emit(this);
                 this.runtime.requestRedraw();
             }
         }
@@ -472,7 +514,7 @@ class RenderedTarget extends Target {
             }
 
             if (this.visible) {
-                this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
+                this.targetVisualChangeBeacon.emit(this);
                 this.runtime.requestRedraw();
             }
         }
@@ -610,7 +652,7 @@ class RenderedTarget extends Target {
             const {direction, scale} = this._getRenderedDirectionAndScale();
             this.renderer.updateDrawableDirectionScale(this.drawableID, direction, scale);
             if (this.visible) {
-                this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
+                this.targetVisualChangeBeacon.emit(this);
                 this.runtime.requestRedraw();
             }
         }
@@ -724,7 +766,7 @@ class RenderedTarget extends Target {
             }
             this.renderer.updateDrawableProperties(this.drawableID, props);
             if (this.visible) {
-                this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
+                this.targetVisualChangeBeacon.emit(this);
                 this.runtime.requestRedraw();
             }
         }
@@ -1142,7 +1184,7 @@ class RenderedTarget extends Target {
                 StageLayering.BACKGROUND_LAYER :
                 StageLayering.SPRITE_LAYER);
             if (this.visible) {
-                this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
+                this.targetVisualChangeBeacon.emit(this);
                 this.runtime.requestRedraw();
             }
         }
