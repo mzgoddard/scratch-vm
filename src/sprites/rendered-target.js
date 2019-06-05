@@ -270,13 +270,13 @@ class RenderedTarget extends Target {
         const oldX = this.x;
         const oldY = this.y;
         if (this.renderer) {
-            const position = this.renderer.getFencedPositionOfDrawable(this.drawableID, [x, y]);
+            __setXYPosition[0] = x;
+            __setXYPosition[1] = y;
+            const position = this.renderer.getFencedPositionOfDrawable(this.drawableID, __setXYPosition, __setXYPosition);
             this.x = position[0];
             this.y = position[1];
 
-            this.renderer.updateDrawableProperties(this.drawableID, {
-                position: position
-            });
+            this.renderer.updateDrawablePosition(this.drawableID, position);
             if (this.visible) {
                 this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
                 this.runtime.requestRedraw();
@@ -323,11 +323,8 @@ class RenderedTarget extends Target {
         // Keep direction between -179 and +180.
         this.direction = MathUtil.wrapClamp(direction, -179, 180);
         if (this.renderer) {
-            const renderedDirectionScale = this._getRenderedDirectionAndScale();
-            this.renderer.updateDrawableProperties(this.drawableID, {
-                direction: renderedDirectionScale.direction,
-                scale: renderedDirectionScale.scale
-            });
+            const {direction, scale} = this._getRenderedDirectionAndScale();
+            this.renderer.updateDrawableDirectionScale(this.drawableID, direction, scale);
             if (this.visible) {
                 this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
                 this.runtime.requestRedraw();
@@ -373,9 +370,7 @@ class RenderedTarget extends Target {
         }
         this.visible = !!visible;
         if (this.renderer) {
-            this.renderer.updateDrawableProperties(this.drawableID, {
-                visible: this.visible
-            });
+            this.renderer.updateDrawableVisible(this.drawableID, this.visible);
             if (this.visible) {
                 this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
                 this.runtime.requestRedraw();
@@ -404,11 +399,8 @@ class RenderedTarget extends Target {
                 (1.5 * this.runtime.constructor.STAGE_HEIGHT) / origH
             );
             this.size = MathUtil.clamp(size / 100, minScale, maxScale) * 100;
-            const renderedDirectionScale = this._getRenderedDirectionAndScale();
-            this.renderer.updateDrawableProperties(this.drawableID, {
-                direction: renderedDirectionScale.direction,
-                scale: renderedDirectionScale.scale
-            });
+            const {direction, scale} = this._getRenderedDirectionAndScale();
+            this.renderer.updateDrawableDirectionScale(this.drawableID, direction, scale);
             if (this.visible) {
                 this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
                 this.runtime.requestRedraw();
@@ -426,9 +418,7 @@ class RenderedTarget extends Target {
         if (!this.effects.hasOwnProperty(effectName)) return;
         this.effects[effectName] = value;
         if (this.renderer) {
-            const props = {};
-            props[effectName] = this.effects[effectName];
-            this.renderer.updateDrawableProperties(this.drawableID, props);
+            this.renderer.updateDrawableEffect(this.drawableID, effectName, value);
             if (this.visible) {
                 this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
                 this.runtime.requestRedraw();
@@ -467,21 +457,20 @@ class RenderedTarget extends Target {
         );
         if (this.renderer) {
             const costume = this.getCostumes()[this.currentCostume];
-            const drawableProperties = {
-                skinId: costume.skinId,
-                costumeResolution: costume.bitmapResolution
-            };
             if (
                 typeof costume.rotationCenterX !== 'undefined' &&
                 typeof costume.rotationCenterY !== 'undefined'
             ) {
                 const scale = costume.bitmapResolution || 2;
-                drawableProperties.rotationCenter = [
+                const rotationCenter = [
                     costume.rotationCenterX / scale,
                     costume.rotationCenterY / scale
                 ];
+                this.renderer.updateDrawableSkinIdRotationCenter(this.drawableID, costume.skinId, rotationCenter);
+            } else {
+                this.renderer.updateDrawableSkinId(this.drawableID, costume.skinId);
             }
-            this.renderer.updateDrawableProperties(this.drawableID, drawableProperties);
+
             if (this.visible) {
                 this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
                 this.runtime.requestRedraw();
@@ -618,11 +607,8 @@ class RenderedTarget extends Target {
             this.rotationStyle = RenderedTarget.ROTATION_STYLE_LEFT_RIGHT;
         }
         if (this.renderer) {
-            const renderedDirectionScale = this._getRenderedDirectionAndScale();
-            this.renderer.updateDrawableProperties(this.drawableID, {
-                direction: renderedDirectionScale.direction,
-                scale: renderedDirectionScale.scale
-            });
+            const {direction, scale} = this._getRenderedDirectionAndScale();
+            this.renderer.updateDrawableDirectionScale(this.drawableID, direction, scale);
             if (this.visible) {
                 this.emit(RenderedTarget.EVENT_TARGET_VISUAL_CHANGE, this);
                 this.runtime.requestRedraw();
