@@ -131,6 +131,18 @@ class Thread {
         this.topBlock = firstBlock;
 
         /**
+         * Is this thread running because a user clicked it?
+         * @type {boolean}
+         */
+        this.stackClick = false;
+
+        /**
+         * Should we update the related monitor at the end of this thread?
+         * @type {boolean}
+         */
+        this.updateMonitor = false;
+
+        /**
          * Stack for the thread. When the sequencer enters a control structure,
          * the block is pushed onto the stack so we know where to exit.
          * @type {Array.<string>}
