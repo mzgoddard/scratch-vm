@@ -754,11 +754,10 @@ const deserializeInputs = function (inputs, parentId, blocks) {
             block = deserializeInputDesc(inputDescArr[1], parentId, false, blocks);
             shadow = deserializeInputDesc(inputDescArr[2], parentId, true, blocks);
         }
-        // console.log
         obj[inputName] = {
             name: inputName,
-            block: $id(block),
-            shadow: $id(shadow)
+            block: block,
+            shadow: shadow
         };
     }
     return obj;

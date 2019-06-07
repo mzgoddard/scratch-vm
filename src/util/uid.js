@@ -8,8 +8,10 @@
  * Removed $ due to issue 251.
  * @private
  */
-const soup_ = '!#%()*+,-./:;=?@[]^_`{|}~' +
-    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+// const soup_ = '!#%()*+,-./:;=?@[]^_`{|}~' +
+//     'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+const soup_ = '_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
 /**
  * Generate a unique ID, from Blockly.  This should be globally unique.
@@ -21,9 +23,9 @@ const uid = function () {
     const soupLength = soup_.length;
     const id = [];
     for (let i = 0; i < length; i++) {
-        id[i + 1] = soup_.charAt(Math.random() * soupLength);
+        id[i] = soup_.charAt(Math.random() * soupLength);
     }
-    return id.join('');
+    return '_' + id.join('');
 };
 
 module.exports = uid;
