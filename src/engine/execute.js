@@ -3057,6 +3057,7 @@ const _getCached = function (thread, currentBlockId) {
 };
 
 const getCached = function (thread, currentBlockIndex, currentBlockId) {
+    // if (thread.stackFrame._blockExecuteRef.block === null && currentBlockId !== thread.topBlock) debugger;
     const blockCached = (
         thread.stackFrame._blockExecuteRef.block ||
         _getCached(thread, currentBlockId)
