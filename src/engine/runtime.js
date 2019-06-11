@@ -143,13 +143,89 @@ let stepThreadsProfilerId = -1;
  */
 let rendererDrawProfilerId = -1;
 
+const targetThreads = [{}];
+const emptyThreadList = {};
+
+class ThreadFinder {
+    constructor () {
+        this._cached = false;
+        this.opcode = '';
+        this.targets = null;
+        this.threads = null;
+        this.targetThreads = [{}];
+        this.idToIndex = {};
+        this.targetIndex = -1;
+        this.targetRunning = null;
+    }
+
+    setup (opcode, targets, threads) {
+        this._cached = false;
+        this.opcode = opcode;
+        this.targets = targets;
+        this.threads = threads;
+        this.targetThreads = [{}];
+        this.idToIndex = {};
+    }
+
+    _cache () {
+        this._cached = true;
+        const {opcode, targets, threads, targetThreads, idToIndex} = this;
+        if (targets.length === 1) {
+            const targetRunning = targetThreads[0] = {};
+            for (let i = 0, l = threads.length; i < l; i++) {
+                const thread = threads[i];
+                if (thread.target === targets[0] && thread.topOpcode === opcode && !thread.stackClick) {
+                    targetRunning[thread.topBlock] = thread;
+                }
+            }
+        } else {
+            for (let i = 0, l = threads.length; i < l; i++) {
+                const thread = threads[i];
+                if (thread.topOpcode === opcode && !thread.stackClick) {
+                    let targetRunning = targetThreads[idToIndex[thread.target.id]];
+                    if (typeof targetRunning === 'undefined') {
+                        if (typeof idToIndex[thread.target.id] !== 'number') {
+                            for (let t = 0; t < targets.length; t++) {
+                                idToIndex[targets[t].id] = t;
+                            }
+                        }
+                        targetRunning = targetThreads[idToIndex[thread.target.id]] = {};
+                    }
+                    targetRunning[thread.topBlock] = thread;
+                }
+            }
+        }
+    }
+
+    listByTargetIndex (index) {
+        if (!this._cached) this._cache();
+        return this.targetThreads[index] || emptyThreadList;
+    }
+
+    findByThreadAndBlockId (thread, blockId) {
+        if (!this._cached) this._cache();
+        return (this.targetThreads[this.idToIndex[thread.target.id]] || emptyThreadList)[blockId];
+    }
+
+    setTargetIndex (targetIndex) {
+        this.targetIndex = targetIndex;
+        this.targetRunning = null;
+    }
+
+    findByBlockId (blockId) {
+        if (!this._cached) this._cache();
+        if (!this.targetRunning) this.targetRunning = this.targetThreads[this.targetIndex] || emptyThreadList;
+        // return null;
+        return this.targetRunning[blockId];
+    }
+}
+
+const threadFinder = new ThreadFinder();
+
 /**
  * Manages targets, scripts, and the sequencer.
  * @constructor
  */
-
-const targetThreads = [{}];
-const emptyThreadList = {};
 class Runtime extends EventEmitter {
     constructor () {
         super();
@@ -1602,35 +1678,37 @@ class Runtime extends EventEmitter {
         if (optTarget) {
             targets = [optTarget];
 
-            const targetRunning = targetThreads[0];
-            for (let i = 0, l = this.threads.length; i < l; i++) {
-                const thread = this.threads[i];
-                if (thread.target === optTarget && thread.topOpcode === opcode && !thread.stackClick) {
-                    targetRunning[thread.topBlock] = thread;
-                }
-            }
+            // const targetRunning = targetThreads[0];
+            // for (let i = 0, l = this.threads.length; i < l; i++) {
+            //     const thread = this.threads[i];
+            //     if (thread.target === optTarget && thread.topOpcode === opcode && !thread.stackClick) {
+            //         targetRunning[thread.topBlock] = thread;
+            //     }
+            // }
         } else {
-            for (let i = 0, l = this.threads.length; i < l; i++) {
-                const thread = this.threads[i];
-                if (thread.topOpcode === opcode && !thread.stackClick) {
-                    let targetRunning = targetThreads[thread.target.id];
-                    if (typeof targetRunning === 'undefined') {
-                        targetRunning = targetThreads[thread.target.id] = {};
-                    }
-                    targetRunning[thread.topBlock] = thread;
-                }
-            }
+            // for (let i = 0, l = this.threads.length; i < l; i++) {
+            //     const thread = this.threads[i];
+            //     if (thread.topOpcode === opcode && !thread.stackClick) {
+            //         let targetRunning = targetThreads[thread.target.id];
+            //         if (typeof targetRunning === 'undefined') {
+            //             targetRunning = targetThreads[thread.target.id] = {};
+            //         }
+            //         targetRunning[thread.topBlock] = thread;
+            //     }
+            // }
         }
+        threadFinder.setup(opcode, targets, this.threads);
 
         for (let t = targets.length - 1; t >= 0; t--) {
             const target = targets[t];
             const scripts = BlocksRuntimeCache.getScripts(target.blocks, opcode);
             if (scripts.length === 0) continue;
-            const threads = targetThreads[t] || emptyThreadList;
+            // const threads = threadFinder.findByTargetIndex(t);
+            threadFinder.setTargetIndex(t);
             for (let j = 0; j < scripts.length; j++) {
                 const script = scripts[j];
-                f(script, target, threads[script.blockId]);
-                threads[script.blockId] = null;
+                f(script, target, threadFinder);
+                // threads[script.blockId] = null;
             }
         }
     }
@@ -1659,7 +1737,7 @@ class Runtime extends EventEmitter {
         }
 
         // Consider all scripts, looking for hats with opcode `requestedHatOpcode`.
-        this.allScriptsByOpcodeDo(requestedHatOpcode, (script, target, currentThread) => {
+        this.allScriptsByOpcodeDo(requestedHatOpcode, (script, target, threadFinder) => {
             const {
                 blockId: topBlockId,
                 fieldsOfInputs: hatFields
@@ -1677,6 +1755,7 @@ class Runtime extends EventEmitter {
                 }
             }
 
+            const currentThread = threadFinder.findByBlockId(topBlockId);
             if (currentThread) {
                 if (hatMeta.restartExistingThreads) {
                     // If `restartExistingThreads` is true, we should stop
