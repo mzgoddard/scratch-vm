@@ -94,10 +94,113 @@ class Scratch3VMBlocks {
         }
     }
 
+    doEnd (args, utils) {
+        const {thread} = utils;
+        if (thread.continuous && thread.pointer === args.EXPECT_STACK) {
+            const endOp = thread.stackFrame.endBlockId;
+            if (args.END_OPERATION === endOp) {
+                args.END_FUNCTION(args, utils);
+            } else {
+                let endFunction = utils.sequencer.runtime.getOpcodeFunction(endOp);
+                if (endFunction) {
+                    args.END_OPERATION = endOp;
+                    args.END_FUNCTION = endFunction;
+                    endFunction(args, utils);
+                }
+            }
+            if (thread.status === Thread.STATUS_RUNNING) {
+                thread.status = Thread.STATUS_INTERRUPT;
+            }
+        } else {
+            thread.status = Thread.STATUS_INTERRUPT;
+        }
+    }
+
     doStack (args, utils) {
         const blockCached = args.BLOCK_CACHED;
         const thread = utils.thread;
         if (thread.continuous && thread.pointer === blockCached.id) {
+            thread.stackFrame._blockExecuteRef = blockCached.ref;
+
+            if (blockCached.COMPILED) {
+                const opCached = blockCached._allOps[0];
+                opCached._blockFunction(opCached._argValues, utils);
+            } else {
+                if (blockCached.count >= blockCached._allOps.length) blockCached.compile();
+
+                const ops = blockCached._allOps;
+                let i = -1;
+
+                while (thread.status === Thread.STATUS_RUNNING) {
+                    const opCached = ops[++i];
+                    opCached._parentValues[opCached._parentKey] =
+                        opCached._blockFunction(opCached._argValues, utils);
+                }
+
+                if (i === ops.length - 1) {
+                    blockCached.count++;
+                }
+            }
+
+            if (thread.status <= Thread.STATUS_RUNNING &&
+                thread.pointer === args.NEXT_STACK) {
+                if (args.NEXT_STACK !== null) {
+                    thread.status = Thread.STATUS_RUNNING;
+                } else if (args.END_OPERATION === thread.stackFrame.endBlockId) {
+                    args.END_FUNCTION(args, utils);
+                } else {
+                    const endOp = thread.stackFrame.endBlockId;
+                    let endFunction = utils.sequencer.runtime.getOpcodeFunction(endOp);
+                    if (endFunction) {
+                        args.END_OPERATION = endOp;
+                        args.END_FUNCTION = endFunction;
+                        endFunction(args, utils);
+                    }
+                }
+            } else if (thread.status === Thread.STATUS_PROMISE_WAIT && thread.reported === null) {
+                ops[i].handlePromise();
+            }
+        } else {
+            const elseCached = args.ELSE_CACHED;
+            elseCached._blockFunction(elseCached._argValues, utils);
+        }
+    }
+
+    doProcedure (args, utils) {
+        const blockCached = args.BLOCK_CACHED;
+        const thread = utils.thread;
+        if (thread.continuous) {
+            const {proccode, definition, doWarp} = args.PROCEDURE_INFO;
+
+            const isRecursive = thread.isRecursiveCall(args.PROCEDURE_INFO);
+            thread.pushStack(definition, 'vm_end_of_procedure');
+            if (!thread.stackFrame.warpMode ||
+                thread.warpTimer.timeElapsed() <= Sequencer.WARP_TIME) {
+                if (doWarp) {
+                    thread.stackFrame.warpMode = true;
+
+                    if (!thread.warpTimer) {
+                        thread.warpTimer = new Timer();
+                        thread.warpTimer.start();
+                    }
+                } else if (isRecursive) {
+                    thread.status = Thread.STATUS_YIELD;
+                }
+            } else {
+                thread.status = Thread.STATUS_YIELD;
+            }
+
+            const {paramNames, paramIds} = args.PROCEDURE_INFO;
+
+            thread.stackFrame.params = Object.create(null);
+            for (let i = 0; i < paramIds.length; i++) {
+                thread.stackFrame.params[paramNames[i]] = args[paramIds[i]];
+            }
+
+            if (thread.status !== Thread.STATUS_RUNNING) {
+                return;
+            }
+
             thread.stackFrame._blockExecuteRef = blockCached.ref;
 
             if (blockCached.COMPILED) {
@@ -138,8 +241,7 @@ class Scratch3VMBlocks {
                 ops[i].handlePromise();
             }
         } else {
-            const elseCached = args.ELSE_CACHED;
-            elseCached._blockFunction(elseCached._argValues, utils);
+            thread.status = Thread.STATUS_INTERRUPT;
         }
     }
 
