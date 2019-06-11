@@ -34,17 +34,13 @@ class Scratch3ProcedureBlocks {
             return;
         }
 
-        const {paramNames, paramIds} = procedureInfo;
-
         util.startProcedure(procedureInfo);
 
-        // Initialize params for the current stackFrame to {}, even if the procedure does
-        // not take any arguments. This is so that `getParam` down the line does not look
-        // at earlier stack frames for the values of a given parameter (#1729)
+        // Initialize params for the current stackFrame to {}, even if the
+        // procedure does not take any arguments. This is so that `getParam`
+        // down the line does not look at earlier stack frames for the values of
+        // a given parameter (#1729)
         util.initParams(procedureInfo, args);
-        // for (let i = 0; i < paramIds.length; i++) {
-        //     util.pushParam(paramNames[i], args[paramIds[i]]);
-        // }
     }
 
     argumentReporterStringNumber (args, util) {
