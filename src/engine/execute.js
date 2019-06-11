@@ -553,6 +553,16 @@ class CommandBlockCached extends InputBlockCached {
             this._argValues.NEXT_PARENT = {NEXT: null};
         }
 
+        if (this.opcode === 'procedures_call') {
+            const procedureInfo = blockContainer.getProcedureInfo(this._argValues.mutation.proccode);
+            const {paramIds, paramDefaults} = procedureInfo;
+            for (let p = 0; p < paramIds.length; p++) {
+                if (typeof this._argValues[paramIds[p]] === 'undefined') {
+                    this._argValues[paramIds[p]] = paramDefaults[p];
+                }
+            }
+        }
+
         const nextId = blockContainer ?
             blockContainer.getNextBlock(this.id) :
             null;
