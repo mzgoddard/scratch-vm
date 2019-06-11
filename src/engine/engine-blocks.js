@@ -97,16 +97,27 @@ class Scratch3VMBlocks {
     doStack (args, utils) {
         const blockCached = args.BLOCK_CACHED;
         const thread = utils.thread;
-        if (thread.continuous && thread.pointer === blockCached.id && blockCached.COMPILED) {
-            // const nextParent = blockCached.NEXT_PARENT.NEXT;
-            // blockCached.NEXT_PARENT.NEXT = args.NEXT_STACK;
-
+        if (thread.continuous && thread.pointer === blockCached.id) {
             thread.stackFrame._blockExecuteRef = blockCached.ref;
 
-            const opCached = blockCached._allOps[0];
-            opCached._blockFunction(opCached._argValues, utils);
+            if (blockCached.COMPILED) {
+                const opCached = blockCached._allOps[0];
+                opCached._blockFunction(opCached._argValues, utils);
+            } else {
+                if (blockCached.count >= blockCached._allOps.length) blockCached.compile();
 
-            // blockCached.NEXT_PARENT.NEXT = nextParent;
+                const ops = blockCached._allOps;
+                let i = -1;
+
+                while (thread.status === Thread.STATUS_RUNNING) {
+                    const opCached = ops[++i];
+                    opCached._parentValues[opCached._parentKey] =
+                        opCached._blockFunction(opCached._argValues, utils);
+                }
+                if (i === ops.length - 1) {
+                    blockCached.count++;
+                }
+            }
 
             if (thread.status <= Thread.STATUS_RUNNING &&
                 thread.pointer === args.NEXT_STACK) {
@@ -122,47 +133,6 @@ class Scratch3VMBlocks {
                         args.END_FUNCTION = endFunction;
                         endFunction(args, utils);
                     }
-                }
-            }
-        } else if (thread.continuous && thread.pointer === blockCached.id) {
-            if (blockCached.count >= blockCached._allOps.length) blockCached.compile();
-
-            thread.stackFrame._blockExecuteRef = blockCached.ref;
-
-            const ops = blockCached._allOps;
-            let i = -1;
-
-            // const lastArgs = ops[ops.length - 1]._argValues;
-            // const nextParent = lastArgs.NEXT_PARENT;
-            // lastArgs.NEXT_PARENT = args.NEXT_STACK;
-
-            while (thread.status === Thread.STATUS_RUNNING) {
-                const opCached = ops[++i];
-                opCached._parentValues[opCached._parentKey] =
-                    opCached._blockFunction(opCached._argValues, utils);
-            }
-            if (i === ops.length - 1) {
-                blockCached.count++;
-            }
-
-            // lastArgs.NEXT_PARENT = nextParent;
-
-            if (thread.status === Thread.STATUS_INTERRUPT &&
-                thread.pointer === args.NEXT_STACK) {
-                if (args.NEXT_STACK === null) {
-                    const endOp = thread.stackFrame.endBlockId;
-                    if (args.END_OPERATION === endOp) {
-                        args.END_FUNCTION(args, utils);
-                    } else {
-                        let endFunction = utils.sequencer.runtime.getOpcodeFunction(endOp);
-                        if (endFunction) {
-                            args.END_OPERATION = endOp;
-                            args.END_FUNCTION = endFunction;
-                            endFunction(args, utils);
-                        }
-                    }
-                } else {
-                    thread.status = Thread.STATUS_RUNNING;
                 }
             } else if (thread.status === Thread.STATUS_PROMISE_WAIT && thread.reported === null) {
                 ops[i].handlePromise();
