@@ -16,6 +16,8 @@ const getMonitorIdForBlockWithArgs = require('../util/get-monitor-id');
  * and handle updates from Scratch Blocks events.
  */
 
+const _blockIndices = [''];
+
 /**
  * Create a block container.
  * @param {Runtime} runtime The runtime this block container operates within
@@ -38,7 +40,7 @@ class Blocks {
          * A list of block IDs that represent scripts (i.e., first block in script).
          * @type {Array.<String>}
          */
-        this._scripts = [];
+        // this._scripts = [];
 
         /**
          * Runtime Cache
@@ -81,7 +83,11 @@ class Blocks {
              * A cache of hat opcodes to collection of theads to execute.
              * @type {object.<string, object>}
              */
-            scripts: {}
+            scripts: {},
+
+            scriptsArray: null,
+
+            _blocks: []
         };
 
         /**
@@ -105,14 +111,91 @@ class Blocks {
         return 'SUBSTACK';
     }
 
+    static get _blockIndices () {
+        return _blockIndices;
+    }
+
+    get _scripts () {
+        let scripts = this._cache.scriptsArray;
+        if (scripts !== null) {
+            return scripts;
+        }
+
+        scripts = this._cache.scriptsArray = [];
+        for (const id in this._blocks) {
+            if (this._blocks[id].topLevel) {
+                scripts.push(this.getBlock(id).id);
+            }
+        }
+
+        return scripts;
+    }
+
+    static _index (id) {
+        if (id === null) return null;
+        if (Blocks._blockIndices[id]) return Blocks._blockIndices[id];
+        Blocks._blockIndices[Blocks._blockIndices[id] = Blocks._blockIndices.length] = id;
+        return Blocks._blockIndices[id];
+    }
+
+    static _indexBlock (rawBlock) {
+        if (typeof rawBlock.id !== 'string') {
+            return rawBlock;
+        }
+
+        return {
+            id: Blocks._index(rawBlock.id),
+            opcode: rawBlock.opcode,
+            parent: Blocks._index(rawBlock.parent),
+            next: Blocks._index(rawBlock.next),
+            inputs: Object.entries(rawBlock.inputs || {}).reduce((carry, [key, value]) => {
+                carry[key] = {
+                    name: value.name,
+                    block: Blocks._index(value.block),
+                    shadow: Blocks._index(value.shadow),
+                };
+                return carry;
+            }, {}),
+            fields: rawBlock.fields,
+
+            mutation: rawBlock.mutation,
+            shadow: rawBlock.shadow,
+
+            x: rawBlock.x,
+            y: rawBlock.y,
+            topLevel: rawBlock.topLevel,
+
+            isMonitored: rawBlock.isMonitored,
+            targetId: rawBlock.targetId
+        };
+    }
+
+    getBlock (blockIndex) {
+        let block = this._cache._blocks[blockIndex];
+        if (typeof block !== 'undefined') return block;
+        if (blockIndex === null) return;
+
+        let blockId = blockIndex;
+        if (typeof blockIndex === 'string') {
+            blockIndex = Blocks._index(blockId);
+        } else {
+            blockId = Blocks._blockIndices[blockIndex];
+        }
+        if (typeof blockId === 'undefined') throw new Error('An id should always be ready');
+
+        if (typeof this._blocks[blockId] === 'undefined') return;
+
+        return this._cache._blocks[blockId] = this._cache._blocks[blockIndex] = Blocks._indexBlock(this._blocks[blockId]);
+    }
+
     /**
      * Provide an object with metadata for the requested block ID.
      * @param {!string} blockId ID of block we have stored.
      * @return {?object} Metadata about the block, if it exists.
      */
-    getBlock (blockId) {
-        return this._blocks[blockId];
-    }
+    // getBlock (blockId) {
+    //     return this._blocks[blockId];
+    // }
 
     /**
      * Get all known top-level blocks that start scripts.
@@ -128,7 +211,7 @@ class Blocks {
       * @return {?string} ID of next block in the sequence
       */
     getNextBlock (id) {
-        const block = this._blocks[id];
+        const block = this.getBlock(id);
         return (typeof block === 'undefined') ? null : block.next;
     }
 
@@ -139,7 +222,7 @@ class Blocks {
      * @return {?string} ID of block in the branch.
      */
     getBranch (id, branchNum) {
-        const block = this._blocks[id];
+        const block = this.getBlock(id);
         if (typeof block === 'undefined') return null;
         if (!branchNum) branchNum = 1;
 
@@ -211,10 +294,10 @@ class Blocks {
      * @return {?string} ID of top-level script block.
      */
     getTopLevelScript (id) {
-        let block = this._blocks[id];
+        let block = this.getBlock(id);
         if (typeof block === 'undefined') return null;
         while (block.parent !== null) {
-            block = this._blocks[block.parent];
+            block = this.getBlock(block.parent);
         }
         return block.id;
     }
@@ -232,12 +315,12 @@ class Blocks {
 
         for (const id in this._blocks) {
             if (!this._blocks.hasOwnProperty(id)) continue;
-            const block = this._blocks[id];
+            const block = this.getBlock(id);
             if (block.opcode === 'procedures_definition') {
                 const internal = this._getCustomBlockInternal(block);
                 if (internal && internal.mutation.proccode === name) {
-                    this._cache.procedureDefinitions[name] = id; // The outer define block id
-                    return id;
+                    this._cache.procedureDefinitions[name] = block.id; // The outer define block id
+                    return block.id;
                 }
             }
         }
@@ -268,7 +351,7 @@ class Blocks {
 
         for (const id in this._blocks) {
             if (!this._blocks.hasOwnProperty(id)) continue;
-            const block = this._blocks[id];
+            const block = this.getBlock(id);
             if (block.opcode === 'procedures_prototype' &&
                 block.mutation.proccode === name) {
                 const names = JSON.parse(block.mutation.argumentnames);
@@ -287,7 +370,7 @@ class Blocks {
     duplicate () {
         const newBlocks = new Blocks(this.runtime, this.forceNoGlow);
         newBlocks._blocks = Clone.simple(this._blocks);
-        newBlocks._scripts = Clone.simple(this._scripts);
+        // newBlocks._scripts = Clone.simple(this._scripts);
         return newBlocks;
     }
     // ---------------------------------------------------------------------
@@ -511,12 +594,14 @@ class Blocks {
      * Reset all runtime caches.
      */
     resetCache () {
+        this._cache._blocks = [];
         this._cache.inputs = {};
         this._cache.procedureParamNames = {};
         this._cache.procedureDefinitions = {};
         this._cache._executeCached = {};
         this._cache._monitored = null;
         this._cache.scripts = {};
+        this._cache.scriptsArray = null;
     }
 
     /**
@@ -1034,6 +1119,9 @@ class Blocks {
      * @return {string} String of XML representing this block and any children.
      */
     blockToXML (blockId, comments) {
+        if (typeof blockId === 'number') {
+            blockId = Blocks._index(blockId);
+        }
         const block = this._blocks[blockId];
         // block should exist, but currently some blocks' next property point
         // to a blockId for non-existent blocks. Until we track down that behavior,
@@ -1155,7 +1243,7 @@ class Blocks {
      */
     _getCustomBlockInternal (defineBlock) {
         if (defineBlock.inputs && defineBlock.inputs.custom_block) {
-            return this._blocks[defineBlock.inputs.custom_block.block];
+            return this.getBlock(defineBlock.inputs.custom_block.block);
         }
     }
 
@@ -1164,11 +1252,13 @@ class Blocks {
      * @param {?string} topBlockId ID of block that starts the script.
      */
     _addScript (topBlockId) {
+        // Update `topLevel` property on the top block.
+        this._blocks[topBlockId].topLevel = true;
+        return;
+
         const i = this._scripts.indexOf(topBlockId);
         if (i > -1) return; // Already in scripts.
         this._scripts.push(topBlockId);
-        // Update `topLevel` property on the top block.
-        this._blocks[topBlockId].topLevel = true;
     }
 
     /**
@@ -1176,10 +1266,12 @@ class Blocks {
      * @param {?string} topBlockId ID of block that starts the script.
      */
     _deleteScript (topBlockId) {
-        const i = this._scripts.indexOf(topBlockId);
-        if (i > -1) this._scripts.splice(i, 1);
         // Update `topLevel` property on the top block.
         if (this._blocks[topBlockId]) this._blocks[topBlockId].topLevel = false;
+        return;
+
+        const i = this._scripts.indexOf(topBlockId);
+        if (i > -1) this._scripts.splice(i, 1);
     }
 }
 
