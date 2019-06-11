@@ -276,6 +276,8 @@ class Blocks {
             return null;
         }
 
+        const [paramNames, paramIds, paramDefaults] = this.getProcedureParamNamesIdsAndDefaults(name);
+
         const definitionBlock = this.getBlock(definition);
         const innerBlock = this.getBlock(definitionBlock.inputs.custom_block.block);
 
@@ -296,13 +298,32 @@ class Blocks {
                 block.mutation.proccode === name;
         }
 
+        // function Params (paramsById) {
+        //     for (let i = 0; i < paramIds.length; i++) {
+        //         this[paramNames[i]] = paramsById[paramIds[i]];
+        //     }
+        // }
+        const Params = new Function([
+            `return function Params (paramsById) {`,
+            paramIds.map((id, i) => (
+                /^\w+$/.test(paramNames[i]) ?
+                `    this.${paramNames[i]} = paramsById.${id};` :
+                `    this[${JSON.stringify(paramNames[i])}] = paramsById.${id};`
+            )).join('\n'),
+            `};`
+        ].join('\n'))();
+
         info = {
             proccode: name,
             definition,
             definitionBlock,
             innerBlock,
             doWarp,
-            isCaller
+            isCaller,
+            paramNames,
+            paramIds,
+            paramDefaults,
+            Params
         };
         this._cache.procedureInfo[name] = info;
         return info;

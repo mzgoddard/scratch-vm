@@ -398,9 +398,9 @@ class Thread {
     /**
      * Initialize procedure parameters on this stack frame.
      */
-    initParams () {
+    initParams ({Params}, paramsById) {
         const stackFrame = this.stackFrame;
-        stackFrame.params = Object.create(null);
+        stackFrame.params = new Params(paramsById);
     }
 
     /**
