@@ -39,6 +39,41 @@ let stepThreadsInnerProfilerId = -1;
  */
 let executeProfilerId = -1;
 
+class SometimesNow {
+    constructor (frequency = 10) {
+        this.last = 0;
+        this.i = 0;
+        this.limit = 1;
+        this.frequency = frequency;
+    }
+
+    now () {
+        if (this.i++ > this.limit) {
+            const now = Date.now();
+            this.i = 0;
+            this.limit = Math.min(
+                Math.max(
+                    this.limit * (this.frequency / (Math.max(now - this.last, 1))),
+                    1
+                ),
+                100000
+            );
+            window.LIMIT = this.limit;
+            window.DT = now - this.last;
+            this.last = now;
+        }
+        return this.last;
+    }
+
+    reset () {
+        this.last = Date.now();
+        this.i = 0;
+        this.limit = 1;
+    }
+}
+
+const sometime = new SometimesNow();
+
 class Sequencer {
     constructor (runtime) {
         /**
@@ -149,6 +184,7 @@ class Sequencer {
         this.runtime.updateCurrentMSecs();
         // Start counting toward WORK_TIME.
         this.timer.start();
+        sometime.reset();
         // Count of active threads.
         let numActiveThreads = Infinity;
         // Whether `stepThreads` has run through a full single tick.
@@ -260,7 +296,7 @@ class Sequencer {
         if (thread.peekStackFrame().warpMode && !thread.warpTimer) {
             // Initialize warp-mode timer if it hasn't been already.
             // This will start counting the thread toward `Sequencer.WARP_TIME`.
-            thread.warpTimer = new Timer();
+            thread.warpTimer = new Timer(sometime);
             thread.warpTimer.start();
         }
 
