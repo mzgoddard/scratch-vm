@@ -2501,6 +2501,53 @@ class InlineArgumentBlocks extends InlineBlocks {
         }
     }
 }
+class InlineProcedureBlocks extends InlineBlocks {
+    procedures_call (node, path, state, info) {
+        const bindings = state.bindings;
+
+        path.root.getKey('bindings').appendChild(ast.storeVar('Timer', ast.p('bindings', 'Timer')));
+        bindings.Timer = Timer;
+
+        const procedureInfo = info.op.blockContainer.getProcedureInfo(info.op._argValues.mutation.proccode);
+        const safeProccode = safe64(procedureInfo.proccode);
+        path.root.getKey('bindings').appendChild(ast.storeVar(safeProccode, ast.p('bindings', safeProccode)));
+        bindings[safeProccode] = procedureInfo;
+
+        const isRecursiveId = `${node.args}_isRecursive`;
+        path.insertBefore(ast.storeVar(isRecursiveId, ast.cast(ast.p('thread', 'isRecursiveCall'), safeProccode)));
+        path.insertBefore(ast.expressionStatement(ast.cast2(ast.p('thread', 'pushStack'), ast.p(safeProccode, 'definition'), `'vm_end_of_procedure'`)));
+        path.insertBefore(ast.ifStatement(ast.op2('||',
+            ast.cast('!', ast.p(ast.p('thread', 'stackFrame'), 'warpMode')),
+            ast.op2('<=', ast.castArgs(ast.p(ast.p('thread', 'warpTimer'), 'timeElapsed'), []), Sequencer.WARP_TIME)
+        ), [
+            ast.ifStatement(ast.p(safeProccode, 'doWarp'), [
+                ast.storeArg('thread', 'stackFrame.warpMode', true),
+                ast.ifStatement(ast.cast('!', ast.p('thread', 'warpTimer')), [
+                    ast.storeArg('thread', 'warpTimer', ['new ', 'Timer', '()']),
+                    ast.castArgs(ast.p(ast.p('thread', 'warpTimer'), 'start'), [])
+                ])
+            ], [
+                ast.ifStatement(isRecursiveId, [
+                    ast.storeArg('thread', 'status', Thread.STATUS_YIELD)
+                ])
+            ])
+        ], [
+            ast.storeArg('thread', 'status', Thread.STATUS_YIELD)
+        ]));
+
+        const {paramNames, paramIds} = procedureInfo;
+
+        ast.insertBefore(ast.storeArg(ast.p('thread', 'stackFrame'), 'params', 'Object.create(null)'));
+        for (let i = 0; i < paramIds.length; i++) {
+            ast.insertBefore(ast.storeArg(
+                ast.p(ast.p('thread', 'stackFrame'), 'params'),
+                paramNames[i],
+                ast.p(args, paramIds[i])));
+        }
+
+        path.remove();
+    }
+}
 class JSInlineOperators {
     call (node, path, state) {
         const info = state.opMap[node.args.value];
@@ -2622,6 +2669,9 @@ class JSInlineOperators {
             info && info.op._blockFunctionUnbound.toString().indexOf('this') === -1
         ) path.replaceWith(ast.callFunction(node.func, node.args));
     }
+    // ifStatement (node, path, state) {
+    //
+    // }
     storeArg (node, path, state) {
         if (node.name.value === '$a_') path.replaceWith(ast.expressionStatement(node.expr));
     }
@@ -2740,7 +2790,7 @@ class JSPrinter {
     }
     storeArg ({name, key, expr}, path, state) {
         const {t} = code;
-        path.replaceWith([name, '.', key, ' = ', expr, ';']);
+        path.replaceWith([ast.p(name, key), ' = ', expr, ';']);
     }
     storeVar ({uses, scope, name, expr}, path, state) {
         const {t} = code;
