@@ -346,6 +346,16 @@ class BlockCached {
             }
         }
 
+        if (opcode === 'procedures_call') {
+            const procedureInfo = blockContainer.getProcedureInfo(this._argValues.mutation.proccode);
+            if (procedureInfo) {
+                const {paramIds, paramDefaults} = procedureInfo;
+                for (let i = 0; i < paramIds.length; i++) {
+                    this._argValues[paramIds[i]] = paramDefaults[i];
+                }
+            }
+        }
+
         // Cache all input children blocks in the operation lists. The
         // operations can later be run in the order they appear in correctly
         // executing the operations quickly in a flat loop instead of needing to

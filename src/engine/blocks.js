@@ -261,6 +261,9 @@ class Blocks {
      * @return {?Array.<string>} List of param names for a procedure.
      */
     getProcedureParamNamesIdsAndDefaults (name) {
+    }
+
+    _getProcedureParamNamesIdsAndDefaults (name) {
         const cachedNames = this._cache.procedureParamNames[name];
         if (typeof cachedNames !== 'undefined') {
             return cachedNames;
@@ -282,6 +285,56 @@ class Blocks {
 
         this._cache.procedureParamNames[name] = null;
         return null;
+    }
+
+    getProcedureInfo (name) {
+        let info = this._cache.procedureInfo[name];
+        if (typeof info !== 'undefined') return info;
+
+        const definition = this.getProcedureDefinition(name);
+        if (!definition) {
+            this._cache.procedureInfo[name] = null;
+            return null;
+        }
+
+        const paramNamesIdsAndDefaults = this._getProcedureParamNamesIdsAndDefaults(name);
+        const [paramNames, paramIds, paramDefaults] = paramNamesIdsAndDefaults;
+
+        const definitionBlock = this.getBlock(definition);
+        const innerBlock = this.getBlock(definitionBlock.inputs.custom_block.block);
+
+        let doWarp = false;
+        if (innerBlock && innerBlock.mutation) {
+            const warp = innerBlock.mutation.warp;
+            if (typeof warp === 'boolean') {
+                doWarp = warp;
+            } else if (typeof warp === 'string') {
+                doWarp = JSON.parse(warp);
+            }
+        }
+
+        const isCaller = {};
+        for (const key of Object.keys(this._blocks)) {
+            const block = this._blocks[key];
+            isCaller[key] = block.opcode === 'procedures_call' &&
+                block.mutation.proccode === name;
+        }
+
+        info = {
+            proccode: name,
+            definition,
+            definitionBlock,
+            innerBlock,
+            doWarp,
+            isCaller,
+            paramNamesIdsAndDefaults,
+            paramNames,
+            paramIds,
+            paramDefaults
+        };
+        this._cache.procedureInfo[name] = info;
+
+        return info;
     }
 
     duplicate () {

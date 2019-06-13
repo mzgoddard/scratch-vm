@@ -324,11 +324,9 @@ class Thread {
     /**
      * Initialize procedure parameters on this stack frame.
      */
-    initParams () {
+    initParams (params) {
         const stackFrame = this.peekStackFrame();
-        if (stackFrame.params === null) {
-            stackFrame.params = {};
-        }
+        stackFrame.params = params;
     }
 
     /**
@@ -387,14 +385,11 @@ class Thread {
      * @return {boolean} True if the call appears recursive.
      */
     isRecursiveCall (procedureCode) {
+        const {isCaller} = this.blockContainer.getProcedureInfo(procedureCode);
         let callCount = 5; // Max number of enclosing procedure calls to examine.
         const sp = this.stack.length - 1;
         for (let i = sp - 1; i >= 0; i--) {
-            const block = this.target.blocks.getBlock(this.stack[i]);
-            if (block.opcode === 'procedures_call' &&
-                block.mutation.proccode === procedureCode) {
-                return true;
-            }
+            if (isCaller[this.stack[i]]) return true;
             if (--callCount < 0) return false;
         }
         return false;
