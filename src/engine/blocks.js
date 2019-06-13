@@ -48,6 +48,11 @@ class Blocks {
         Object.defineProperty(this, '_cache', {writable: true, enumerable: false});
         this._cache = {
             /**
+             * Cache block branches by block id.
+             * @type {object.<string, Array.<?string>}
+             */
+            branches: {},
+            /**
              * Cache block inputs by block id
              * @type {object.<string, !Array.<object>>}
              */
@@ -106,6 +111,14 @@ class Blocks {
     }
 
     /**
+     * Maximum number of branches a block may have.
+     * @const {number}
+     */
+    static get BRANCH_INPUT_MAX () {
+        return 2;
+    }
+
+    /**
      * Provide an object with metadata for the requested block ID.
      * @param {!string} blockId ID of block we have stored.
      * @return {?object} Metadata about the block, if it exists.
@@ -139,18 +152,29 @@ class Blocks {
      * @return {?string} ID of block in the branch.
      */
     getBranch (id, branchNum) {
-        const block = this._blocks[id];
-        if (typeof block === 'undefined') return null;
         if (!branchNum) branchNum = 1;
 
-        let inputName = Blocks.BRANCH_INPUT_PREFIX;
-        if (branchNum > 1) {
-            inputName += branchNum;
-        }
+        let branches = this._cache.branches[id];
+        if (typeof branches !== 'undefined') return branches[branchNum - 1];
 
-        // Empty C-block?
-        const input = block.inputs[inputName];
-        return (typeof input === 'undefined') ? null : input.block;
+        const block = this._blocks[id];
+        if (typeof block === 'undefined') return null;
+        branches = [];
+        for (const branch in block.inputs) {
+            if (branch.startsWith(Blocks.BRANCH_INPUT_PREFIX)) {
+                const suffix = branch.substring(Blocks.BRANCH_INPUT_PREFIX.length);
+                const index = Number(suffix) || 1;
+                const input = block.inputs[branch];
+                // Empty C-block?
+                branches[index - 1] = typeof input === 'undefined' ? null : input.block;
+            }
+        }
+        for (let i = 0; i < Blocks.BRANCH_INPUT_MAX; i++) {
+            branches[i] = branches[i] || null;
+        }
+        this._cache.branches[id] = branches;
+
+        return branches[branchNum - 1];
     }
 
     /**
@@ -511,6 +535,7 @@ class Blocks {
      * Reset all runtime caches.
      */
     resetCache () {
+        this._cache.branches = {};
         this._cache.inputs = {};
         this._cache.procedureParamNames = {};
         this._cache.procedureDefinitions = {};
