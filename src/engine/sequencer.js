@@ -304,17 +304,17 @@ class Sequencer {
      * @param {!Thread} thread Thread object to step to procedure.
      * @param {!string} procedureCode Procedure code of procedure to step to.
      */
-    stepToProcedure (thread, procedureCode) {
-        const info = thread.target.blocks.getProcedureInfo(procedureCode);
-        if (!info) {
-            return;
+    stepToProcedure (thread, procedureInfo) {
+        if (typeof procedureInfo === 'string') {
+            procedureInfo = thread.target.blocks.getProcedureInfo(procedureInfo);
+            if (procedureInfo === null) return;
         }
 
-        const {definition, doWarp} = info;
+        const {definition, doWarp} = procedureInfo;
 
         // Check if the call is recursive.
         // If so, set the thread to yield after pushing.
-        const isRecursive = !doWarp && thread.isRecursiveCall(procedureCode);
+        const isRecursive = !doWarp && thread.isRecursiveCall(procedureInfo);
         // To step to a procedure, we put its definition on the stack.
         // Execution for the thread will proceed through the definition hat
         // and on to the main definition of the procedure.
@@ -329,7 +329,7 @@ class Sequencer {
             // In normal-mode threads, yield any time we have a recursive call.
             isRecursive ||
             // In known warp-mode threads, only yield when time is up.
-            thread.peekStackFrame().warpMode && thread.warpMode.timeElapsed() > Sequencer.WARP_TIME
+            thread.peekStackFrame().warpMode && thread.warpTimer.timeElapsed() > Sequencer.WARP_TIME
         ) {
             thread.status = Thread.STATUS_YIELD;
         }

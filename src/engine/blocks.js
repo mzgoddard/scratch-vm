@@ -63,6 +63,8 @@ class Blocks {
              */
             procedureDefinitions: {},
 
+            procedureInfo: {},
+
             /**
              * A cache for execute to use and store on. Only available to
              * execute.
@@ -252,7 +254,7 @@ class Blocks {
      * @return {?Array.<string>} List of param names for a procedure.
      */
     getProcedureParamNamesAndIds (name) {
-        return this.getProcedureParamNamesIdsAndDefaults(name).slice(0, 2);
+        return this.getProcedureInfo(name).paramNamesIdsAndDefaults.slice(0, 2);
     }
 
     /**
@@ -261,14 +263,10 @@ class Blocks {
      * @return {?Array.<string>} List of param names for a procedure.
      */
     getProcedureParamNamesIdsAndDefaults (name) {
+        return this.getProcedureInfo(name).paramNamesIdsAndDefaults;
     }
 
     _getProcedureParamNamesIdsAndDefaults (name) {
-        const cachedNames = this._cache.procedureParamNames[name];
-        if (typeof cachedNames !== 'undefined') {
-            return cachedNames;
-        }
-
         for (const id in this._blocks) {
             if (!this._blocks.hasOwnProperty(id)) continue;
             const block = this._blocks[id];
@@ -278,13 +276,31 @@ class Blocks {
                 const ids = JSON.parse(block.mutation.argumentids);
                 const defaults = JSON.parse(block.mutation.argumentdefaults);
 
-                this._cache.procedureParamNames[name] = [names, ids, defaults];
-                return this._cache.procedureParamNames[name];
+                return [names, ids, defaults];
             }
         }
 
-        this._cache.procedureParamNames[name] = null;
         return null;
+    }
+
+    _getProcedureDoWarp (name) {
+        const definition = this.getProcedureDefinition(name);
+        if (!definition) return false;
+
+        const definitionBlock = this.getBlock(definition);
+        const innerBlock = this.getBlock(definitionBlock.inputs.custom_block.block);
+
+        let doWarp = false;
+        if (innerBlock && innerBlock.mutation) {
+            const warp = innerBlock.mutation.warp;
+            if (typeof warp === 'boolean') {
+                doWarp = warp;
+            } else if (typeof warp === 'string') {
+                doWarp = JSON.parse(warp);
+            }
+        }
+
+        return doWarp;
     }
 
     getProcedureInfo (name) {
@@ -303,18 +319,10 @@ class Blocks {
         const definitionBlock = this.getBlock(definition);
         const innerBlock = this.getBlock(definitionBlock.inputs.custom_block.block);
 
-        let doWarp = false;
-        if (innerBlock && innerBlock.mutation) {
-            const warp = innerBlock.mutation.warp;
-            if (typeof warp === 'boolean') {
-                doWarp = warp;
-            } else if (typeof warp === 'string') {
-                doWarp = JSON.parse(warp);
-            }
-        }
+        const doWarp = this._getProcedureDoWarp(name);
 
         const isCaller = {};
-        for (const key of Object.keys(this._blocks)) {
+        for (const key in this._blocks) {
             const block = this._blocks[key];
             isCaller[key] = block.opcode === 'procedures_call' &&
                 block.mutation.proccode === name;
@@ -323,14 +331,16 @@ class Blocks {
         info = {
             proccode: name,
             definition,
-            definitionBlock,
-            innerBlock,
-            doWarp,
-            isCaller,
+
             paramNamesIdsAndDefaults,
             paramNames,
             paramIds,
-            paramDefaults
+            paramDefaults,
+
+            definitionBlock,
+            innerBlock,
+            doWarp,
+            isCaller
         };
         this._cache.procedureInfo[name] = info;
 
@@ -567,6 +577,7 @@ class Blocks {
         this._cache.inputs = {};
         this._cache.procedureParamNames = {};
         this._cache.procedureDefinitions = {};
+        this._cache.procedureInfo = {};
         this._cache._executeCached = {};
         this._cache._monitored = null;
         this._cache.scripts = {};

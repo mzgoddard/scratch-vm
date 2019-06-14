@@ -326,7 +326,7 @@ class Thread {
      */
     initParams (params) {
         const stackFrame = this.peekStackFrame();
-        stackFrame.params = params;
+        stackFrame.params = params || {};
     }
 
     /**
@@ -384,8 +384,11 @@ class Thread {
      * @param {!string} procedureCode Procedure code of procedure being called.
      * @return {boolean} True if the call appears recursive.
      */
-    isRecursiveCall (procedureCode) {
-        const {isCaller} = this.blockContainer.getProcedureInfo(procedureCode);
+    isRecursiveCall (procedureInfo) {
+        if (typeof procedureInfo === 'string') {
+            procedureInfo = this.blockContainer.getProcedureInfo(procedureInfo);
+        }
+        const {isCaller} = procedureInfo;
         let callCount = 5; // Max number of enclosing procedure calls to examine.
         const sp = this.stack.length - 1;
         for (let i = sp - 1; i >= 0; i--) {

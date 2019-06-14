@@ -172,11 +172,15 @@ class BlockUtility {
         return this.thread.target.blocks.getProcedureParamNamesIdsAndDefaults(procedureCode);
     }
 
+    getProcedureInfo (procedureCode) {
+        return this.thread.blockContainer.getProcedureInfo(procedureCode);
+    }
+
     /**
      * Initialize procedure parameters in the thread before pushing parameters.
      */
-    initParams () {
-        this.thread.initParams();
+    initParams (params) {
+        this.thread.initParams(params);
     }
 
     /**
