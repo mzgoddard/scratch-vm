@@ -283,7 +283,12 @@ class Blocks {
         return null;
     }
 
-    _getProcedureDoWarp (definition) {
+    _getProcedureDoWarp (name, definition) {
+        if (!definition) {
+            definition = this._getProcedureDefinition(name);
+            if (!definition) return false;
+        }
+
         const definitionBlock = this.getBlock(definition);
         const innerBlock = this.getBlock(definitionBlock.inputs.custom_block.block);
 
@@ -315,15 +320,11 @@ class Blocks {
         if (typeof info !== 'undefined') return info;
 
         const definition = this._getProcedureDefinition(name);
-        if (!definition) {
-            this._cache.procedureInfo[name] = null;
-            return null;
-        }
 
         const paramNamesIdsAndDefaults = this._getProcedureParamNamesIdsAndDefaults(name);
-        const [paramNames, paramIds, paramDefaults] = paramNamesIdsAndDefaults;
+        const [paramNames, paramIds, paramDefaults] = paramNamesIdsAndDefaults || [null, null, null];
 
-        const doWarp = this._getProcedureDoWarp(definition);
+        const doWarp = this._getProcedureDoWarp(name, definition);
 
         const isCaller = this._getProcedureIsCaller(name);
 
