@@ -227,25 +227,8 @@ class Blocks {
      * @return {?string} ID of procedure definition.
      */
     getProcedureDefinition (name) {
-        const blockID = this._cache.procedureDefinitions[name];
-        if (typeof blockID !== 'undefined') {
-            return blockID;
-        }
-
-        for (const id in this._blocks) {
-            if (!this._blocks.hasOwnProperty(id)) continue;
-            const block = this._blocks[id];
-            if (block.opcode === 'procedures_definition') {
-                const internal = this._getCustomBlockInternal(block);
-                if (internal && internal.mutation.proccode === name) {
-                    this._cache.procedureDefinitions[name] = id; // The outer define block id
-                    return id;
-                }
-            }
-        }
-
-        this._cache.procedureDefinitions[name] = null;
-        return null;
+        const info = this.getProcedureInfo(name);
+        return info === null ? null : info.definition;
     }
 
     /**
@@ -254,7 +237,8 @@ class Blocks {
      * @return {?Array.<string>} List of param names for a procedure.
      */
     getProcedureParamNamesAndIds (name) {
-        return this.getProcedureInfo(name).paramNamesIdsAndDefaults.slice(0, 2);
+        const info = this.getProcedureInfo(name);
+        return info === null ? null : info.paramNamesAndIds;
     }
 
     /**
@@ -263,7 +247,23 @@ class Blocks {
      * @return {?Array.<string>} List of param names for a procedure.
      */
     getProcedureParamNamesIdsAndDefaults (name) {
-        return this.getProcedureInfo(name).paramNamesIdsAndDefaults;
+        const info = this.getProcedureInfo(name);
+        return info === null ? null : info.paramNamesIdsAndDefaults;
+    }
+
+    _getProcedureDefinition (name) {
+        for (const id in this._blocks) {
+            if (!this._blocks.hasOwnProperty(id)) continue;
+            const block = this._blocks[id];
+            if (block.opcode === 'procedures_definition') {
+                const internal = this._getCustomBlockInternal(block);
+                if (internal && internal.mutation.proccode === name) {
+                    return id;
+                }
+            }
+        }
+
+        return null;
     }
 
     _getProcedureParamNamesIdsAndDefaults (name) {
@@ -283,10 +283,7 @@ class Blocks {
         return null;
     }
 
-    _getProcedureDoWarp (name) {
-        const definition = this.getProcedureDefinition(name);
-        if (!definition) return false;
-
+    _getProcedureDoWarp (definition) {
         const definitionBlock = this.getBlock(definition);
         const innerBlock = this.getBlock(definitionBlock.inputs.custom_block.block);
 
@@ -303,11 +300,21 @@ class Blocks {
         return doWarp;
     }
 
+    _getProcedureIsCaller (name) {
+        const isCaller = {};
+        for (const key in this._blocks) {
+            const block = this._blocks[key];
+            isCaller[key] = block.opcode === 'procedures_call' &&
+                block.mutation.proccode === name;
+        }
+        return isCaller;
+    }
+
     getProcedureInfo (name) {
         let info = this._cache.procedureInfo[name];
         if (typeof info !== 'undefined') return info;
 
-        const definition = this.getProcedureDefinition(name);
+        const definition = this._getProcedureDefinition(name);
         if (!definition) {
             this._cache.procedureInfo[name] = null;
             return null;
@@ -316,30 +323,22 @@ class Blocks {
         const paramNamesIdsAndDefaults = this._getProcedureParamNamesIdsAndDefaults(name);
         const [paramNames, paramIds, paramDefaults] = paramNamesIdsAndDefaults;
 
-        const definitionBlock = this.getBlock(definition);
-        const innerBlock = this.getBlock(definitionBlock.inputs.custom_block.block);
+        const doWarp = this._getProcedureDoWarp(definition);
 
-        const doWarp = this._getProcedureDoWarp(name);
-
-        const isCaller = {};
-        for (const key in this._blocks) {
-            const block = this._blocks[key];
-            isCaller[key] = block.opcode === 'procedures_call' &&
-                block.mutation.proccode === name;
-        }
+        const isCaller = this._getProcedureIsCaller(name);
 
         info = {
             proccode: name,
             definition,
 
-            paramNamesIdsAndDefaults,
             paramNames,
             paramIds,
             paramDefaults,
+            paramNamesAndIds: [paramNames, paramIds],
+            paramNamesIdsAndDefaults,
 
-            definitionBlock,
-            innerBlock,
             doWarp,
+
             isCaller
         };
         this._cache.procedureInfo[name] = info;
