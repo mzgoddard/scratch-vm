@@ -54,7 +54,8 @@ const ScratchSVGRenderer = require('scratch-svg-renderer');
 const Scratch = window.Scratch = window.Scratch || {};
 
 const ASSET_SERVER = 'https://cdn.assets.scratch.mit.edu/';
-const PROJECT_SERVER = 'https://cdn.projects.scratch.mit.edu/';
+// const PROJECT_SERVER = 'https://cdn.projects.scratch.mit.edu/';
+const PROJECT_SERVER = 'https://projects.scratch.mit.edu/';
 
 const SLOW = .1;
 
@@ -88,10 +89,11 @@ const loadProject = function () {
  */
 const getProjectUrl = function (asset) {
     const assetIdParts = asset.assetId.split('.');
-    const assetUrlParts = [PROJECT_SERVER, 'internalapi/project/', assetIdParts[0], '/get/'];
-    if (assetIdParts[1]) {
-        assetUrlParts.push(assetIdParts[1]);
-    }
+    // const assetUrlParts = [PROJECT_SERVER, 'internalapi/project/', assetIdParts[0], '/get/'];
+    const assetUrlParts = [PROJECT_SERVER, assetIdParts[0]];
+    // if (assetIdParts[1]) {
+    //     assetUrlParts.push(assetIdParts[1]);
+    // }
     return assetUrlParts.join('');
 };
 
@@ -696,7 +698,7 @@ const runBenchmark = function () {
             return;
         }
         Scratch.vm.postIOData('keyboard', {
-            keyCode: e.keyCode,
+            key: e.key,
             isDown: true
         });
         e.preventDefault();
@@ -705,7 +707,7 @@ const runBenchmark = function () {
         // Always capture up events,
         // even those that have switched to other targets.
         Scratch.vm.postIOData('keyboard', {
-            keyCode: e.keyCode,
+            key: e.key,
             isDown: false
         });
         // E.g., prevent scroll.
