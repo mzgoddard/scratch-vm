@@ -1,6 +1,9 @@
 const JSZip = require('jszip');
 const log = require('../util/log');
 
+const LoadTask from '../import/load-task';
+const loadAspect from '../import/load-aspect';
+
 /**
  * Deserializes sound from file into storage cache so that it can
  * be loaded into the runtime.
@@ -74,103 +77,135 @@ const deserializeSound = function (sound, runtime, zip, assetFileName) {
  * into the runtime storage cache, the costume was already stored, or an error has
  * occurred.
  */
-const deserializeCostume = function (costume, runtime, zip, assetFileName, textLayerFileName) {
-    const storage = runtime.storage;
-    const assetId = costume.assetId;
-    const fileName = assetFileName ? assetFileName :
-        `${assetId}.${costume.dataFormat}`;
+// const deserializeCostume = function (costume, runtime, zip, assetFileName, textLayerFileName) {
+//     const storage = runtime.storage;
+//     const assetId = costume.assetId;
+//     const fileName = assetFileName ? assetFileName :
+//         `${assetId}.${costume.dataFormat}`;
+//
+//     if (!storage) {
+//         log.error('No storage module present; cannot load costume asset: ', fileName);
+//         return Promise.resolve(null);
+//     }
+//
+//     if (costume.asset) {
+//         // When uploading a sprite from an image file, the asset data will be provided
+//         // @todo Cache the asset data somewhere and pull it out here
+//         return Promise.resolve(storage.createAsset(
+//             costume.asset.assetType,
+//             costume.asset.dataFormat,
+//             new Uint8Array(Object.keys(costume.asset.data).map(key => costume.asset.data[key])),
+//             null,
+//             true
+//         )).then(asset => {
+//             costume.asset = asset;
+//             costume.assetId = asset.assetId;
+//             costume.md5 = `${asset.assetId}.${asset.dataFormat}`;
+//         });
+//     }
+//
+//     if (!zip) {
+//         // Zip will not be provided if loading project json from server
+//         return Promise.resolve(null);
+//     }
+//
+//     let costumeFile = zip.file(fileName);
+//     if (!costumeFile) {
+//         // look for assetfile in a flat list of files, or in a folder
+//         const fileMatch = new RegExp(`^([^/]*/)?${fileName}$`);
+//         costumeFile = zip.file(fileMatch)[0]; // use the first matched file
+//     }
+//
+//     if (!costumeFile) {
+//         log.error(`Could not find costume file associated with the ${costume.name} costume.`);
+//         return Promise.resolve(null);
+//     }
+//     let assetType = null;
+//     const costumeFormat = costume.dataFormat.toLowerCase();
+//     if (costumeFormat === 'svg') {
+//         assetType = storage.AssetType.ImageVector;
+//     } else if (['png', 'bmp', 'jpeg', 'jpg', 'gif'].indexOf(costumeFormat) >= 0) {
+//         assetType = storage.AssetType.ImageBitmap;
+//     } else {
+//         log.error(`Unexpected file format for costume: ${costumeFormat}`);
+//     }
+//     if (!JSZip.support.uint8array) {
+//         log.error('JSZip uint8array is not supported in this browser.');
+//         return Promise.resolve(null);
+//     }
+//
+//     // textLayerMD5 exists if there is a text layer, which is a png of text from Scratch 1.4
+//     // that was opened in Scratch 2.0. In this case, set costume.textLayerAsset.
+//     let textLayerFilePromise;
+//     if (costume.textLayerMD5) {
+//         const textLayerFile = zip.file(textLayerFileName);
+//         if (!textLayerFile) {
+//             log.error(`Could not find text layer file associated with the ${costume.name} costume.`);
+//             return Promise.resolve(null);
+//         }
+//         textLayerFilePromise = textLayerFile.async('uint8array')
+//             .then(data => storage.createAsset(
+//                 storage.AssetType.ImageBitmap,
+//                 'png',
+//                 data,
+//                 costume.textLayerMD5
+//             ))
+//             .then(asset => {
+//                 costume.textLayerAsset = asset;
+//             });
+//     } else {
+//         textLayerFilePromise = Promise.resolve(null);
+//     }
+//
+//     return Promise.all([textLayerFilePromise,
+//         costumeFile.async('uint8array')
+//             .then(data => storage.createAsset(
+//                 assetType,
+//                 // TODO eventually we want to map non-png's to their actual file types?
+//                 costumeFormat,
+//                 data,
+//                 null,
+//                 true
+//             ))
+//             .then(asset => {
+//                 costume.asset = asset;
+//                 costume.assetId = asset.assetId;
+//                 costume.md5 = `${asset.assetId}.${asset.dataFormat}`;
+//             })
+//     ]);
+// };
 
-    if (!storage) {
-        log.error('No storage module present; cannot load costume asset: ', fileName);
-        return Promise.resolve(null);
-    }
-
-    if (costume.asset) {
-        // When uploading a sprite from an image file, the asset data will be provided
-        // @todo Cache the asset data somewhere and pull it out here
-        return Promise.resolve(storage.createAsset(
-            costume.asset.assetType,
-            costume.asset.dataFormat,
-            new Uint8Array(Object.keys(costume.asset.data).map(key => costume.asset.data[key])),
-            null,
-            true
-        )).then(asset => {
-            costume.asset = asset;
-            costume.assetId = asset.assetId;
-            costume.md5 = `${asset.assetId}.${asset.dataFormat}`;
-        });
-    }
-
-    if (!zip) {
-        // Zip will not be provided if loading project json from server
-        return Promise.resolve(null);
-    }
-
-    let costumeFile = zip.file(fileName);
-    if (!costumeFile) {
-        // look for assetfile in a flat list of files, or in a folder
-        const fileMatch = new RegExp(`^([^/]*/)?${fileName}$`);
-        costumeFile = zip.file(fileMatch)[0]; // use the first matched file
-    }
-
-    if (!costumeFile) {
-        log.error(`Could not find costume file associated with the ${costume.name} costume.`);
-        return Promise.resolve(null);
-    }
-    let assetType = null;
-    const costumeFormat = costume.dataFormat.toLowerCase();
-    if (costumeFormat === 'svg') {
-        assetType = storage.AssetType.ImageVector;
-    } else if (['png', 'bmp', 'jpeg', 'jpg', 'gif'].indexOf(costumeFormat) >= 0) {
-        assetType = storage.AssetType.ImageBitmap;
-    } else {
-        log.error(`Unexpected file format for costume: ${costumeFormat}`);
-    }
-    if (!JSZip.support.uint8array) {
-        log.error('JSZip uint8array is not supported in this browser.');
-        return Promise.resolve(null);
-    }
-
-    // textLayerMD5 exists if there is a text layer, which is a png of text from Scratch 1.4
-    // that was opened in Scratch 2.0. In this case, set costume.textLayerAsset.
-    let textLayerFilePromise;
-    if (costume.textLayerMD5) {
-        const textLayerFile = zip.file(textLayerFileName);
-        if (!textLayerFile) {
-            log.error(`Could not find text layer file associated with the ${costume.name} costume.`);
-            return Promise.resolve(null);
-        }
-        textLayerFilePromise = textLayerFile.async('uint8array')
-            .then(data => storage.createAsset(
-                storage.AssetType.ImageBitmap,
-                'png',
-                data,
-                costume.textLayerMD5
-            ))
-            .then(asset => {
-                costume.textLayerAsset = asset;
-            });
-    } else {
-        textLayerFilePromise = Promise.resolve(null);
-    }
-
-    return Promise.all([textLayerFilePromise,
-        costumeFile.async('uint8array')
-            .then(data => storage.createAsset(
-                assetType,
-                // TODO eventually we want to map non-png's to their actual file types?
-                costumeFormat,
-                data,
-                null,
-                true
-            ))
-            .then(asset => {
-                costume.asset = asset;
-                costume.assetId = asset.assetId;
-                costume.md5 = `${asset.assetId}.${asset.dataFormat}`;
-            })
+const deserializeCostume = (function () {
+    const {Branch, Sequence, GeneratedFunction, Parallel} = LoadTask;
+    const assetTasks = new Sequence([
+        new Branch(new GeneratedFunction(loadAspect.missingAsset, {}),
+            new GeneratedFunction(loadAspect.readZipAsset_, {}),
+            new GeneratedFunction(loadAspect.duplicateAssetData_, {})),
+        new GeneratedFunction(loadAspect.saveAsset_, {})
     ]);
-};
+    const tasks = new Parallel([
+        assetTasks.withConfig({
+            assetName: 'costume',
+            field: 'asset',
+            fieldId: 'assetId',
+            fieldMd5: 'md5',
+        }),
+        assetTasks.withConfig({
+            assetName: 'text layer',
+            field: 'textLayerAsset',
+            fieldId: 'textLayerID',
+            fieldMd5: 'textLayerMD5',
+            generateMd5: true,
+            formatOf: () => 'png',
+            typeOf: (, {storage}) => storage.AssetType.ImageBitmap
+        })
+    ]);
+    return function (costume, runtime, zip, assetFileName, textLayerFileName) {
+        const options = {runtime, zip, assetFileName, textLayerFileName};
+        return tasks.run(costume, options)
+            .then(() => costume);
+    };
+}());
 
 module.exports = {
     deserializeSound,
