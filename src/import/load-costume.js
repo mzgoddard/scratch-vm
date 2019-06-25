@@ -649,6 +649,8 @@ const loadCostume = (function () {
         const ext = idParts[1].toLowerCase();
         costume.dataFormat = ext;
 
+        window.COSTUME_INDEX = (window.COSTUME_INDEX | 0) + 1;
+
         if (!costume.asset) {
             // Need to load the costume from storage. The server should have a reference to this md5.
             if (!runtime.storage) {
@@ -663,7 +665,7 @@ const loadCostume = (function () {
         }
 
         return tasks.run({costume, md5ext, md5, ext}, {runtime, optVersion})
-            .then(() => (console.log('done', window.COSTUME_INDEX = (window.COSTUME_INDEX | 0) + 1, costume), costume))
+            .then(() => (console.log('done', window.COSTUME_INDEX = (window.COSTUME_INDEX | 0) - 1, costume, costume.assetId), costume))
             .catch(() => (console.log('fail', window.COSTUME_INDEX_CATCH = (window.COSTUME_INDEX_CATCH | 0) + 1), costume));
     };
 }());
