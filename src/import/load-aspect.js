@@ -33,7 +33,7 @@ const loadCostumeTypeOf = function ({
     assetName = 'costume',
     formatOf = loadCostumeFormatOf({assetName})
 }) {
-    return function (asset, options) {
+    return function (asset, {runtime: {storage}}) {
         let assetType = null;
         const aspectFormat = formatOf(asset, options);
         if (aspectFormat === 'svg') {
@@ -68,6 +68,10 @@ const loadAspectReadZipAsset = function ({
             return Promise.resolve(null);
         }
 
+        if (!zip) {
+            return;
+        }
+
         if (!storage) {
             log.error(`No storage module present; cannot load ${assetName} asset: ${fileName}`);
             return Promise.resolve(null);
@@ -87,8 +91,8 @@ const loadAspectReadZipAsset = function ({
 
         // Call before testing zip array support so error messages may be
         // emitted.
-        const dataFormat = formatOf(aspect);
-        const assetType = typeOf(aspect, dataFormat);
+        const dataFormat = formatOf(aspect, options);
+        const assetType = typeOf(aspect, options);
 
         if (!JSZip.support.uint8array) {
             log.error('JSZip uint8array is not supported in this browser.');
@@ -123,8 +127,9 @@ const loadAspectSaveAsset = function ({
     formatOf = asset => asset.dataFormat,
     typeOf = asset => asset.assetType
 }) {
-    return function (aspect, {runtime}) {
+    return function (aspect, options) {
         if (aspect[field]) {
+            const {runtime} = options;
             const storage = runtime.storage;
             if (!storage) {
                 log.error(`No storage module present; cannot load ${assetName} asset`);
@@ -135,8 +140,8 @@ const loadAspectSaveAsset = function ({
             // be provided
             // @todo Cache the asset data somewhere and pull it out here
             return Promise.resolve(storage.createAsset(
-                typeOf(aspect[field]),
-                formatOf(aspect[field]),
+                typeOf(aspect[field], options),
+                formatOf(aspect[field], options),
                 aspect[field].data,
                 !generateMd5 && aspect[fieldMd5] ? aspect[fieldMd5] : null,
                 generateMd5 || !aspect[fieldMd5]
@@ -162,13 +167,16 @@ const loadAspectLoadAsset = function ({
     fieldMd5 = field === 'asset' ? 'md5' : `${field_}Md5`,
     generateMd5 = false,
     formatOf = asset => asset.dataFormat,
-    typeOf = asset => asset.assetType
+    typeOf = asset => asset.assetType,
+    md5Of = asset => asset[fieldMd5].split('.')[0]
 }) {
-    return function (aspect, {runtime}) {
+    return function (aspect, options) {
         if (!aspect[field]) {
-            const dataFormat = formatOf(aspect);
-            const assetType = typeOf(aspect);
-            return runtime.storage.load(assetType, aspect[fieldMd5], dataFormat)
+            const {runtime} = options;
+            const dataFormat = formatOf(aspect, options);
+            const md5 = md5Of(aspect, options);
+            const assetType = typeOf(aspect, options);
+            const promise = runtime.storage.load(assetType, md5, dataFormat)
             .then(asset => {
                 aspect[field] = asset;
                 if (fieldId) {
@@ -179,6 +187,12 @@ const loadAspectLoadAsset = function ({
                 }
                 return aspect;
             });
+            if (promise) {
+                return promise;
+            } else {
+                log.error(`Couldn't fetch ${assetName} asset: ${md5}.${dataFormat}`);
+                throw new Error('Could not complete loadAspect.loadAsset');
+            }
         }
     };
 };

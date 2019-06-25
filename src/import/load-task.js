@@ -24,7 +24,7 @@ LoadTask.Function = class LoadTaskFunction extends LoadTask {
     }
 
     async run (mediator, options) {
-        await this.func(mediator, options);
+        return await this.func(mediator, options);
     }
 
     withConfig () {
@@ -45,6 +45,19 @@ LoadTask.GeneratedFunction = class LoadTaskGeneratedFunction extends LoadTask.Fu
     }
 };
 
+LoadTask.DerefScope = class LoadTaskDerefScope extends LoadTask {
+    constructor (key, subtask) {
+        super();
+
+        this.key = key;
+        this.subtask = subtask;
+    }
+
+    async run (scope, options) {
+        return await this.subtask.run(scope[this.key], options);
+    }
+};
+
 LoadTask.Branch = class LoadTaskBranch extends LoadTask {
     constructor (test, ifTrue, ifFalse) {
         super();
@@ -56,9 +69,9 @@ LoadTask.Branch = class LoadTaskBranch extends LoadTask {
 
     async run (mediator, options) {
         if (await this.test.run(mediator, options)) {
-            await this.ifTrue && this.ifTrue.run(mediator, options);
+            await (this.ifTrue && this.ifTrue.run(mediator, options));
         } else {
-            await this.ifFalse && this.ifFalse.run(mediator, options);
+            await (this.ifFalse && this.ifFalse.run(mediator, options));
         }
     }
 
