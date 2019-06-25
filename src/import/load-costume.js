@@ -1,5 +1,192 @@
+const regeneratorRuntime = require('regenerator-runtime');
+
 const StringUtil = require('../util/string-util');
 const log = require('../util/log');
+
+const LoadTask = require('./load-task');
+const loadAspect = require('./load-aspect');
+
+const loadCostumeHasTextLayer = function ({
+
+}) {
+    return function (scope, options) {
+        return Boolean(scope.costume.textLayerMD5);
+    };
+};
+
+const loadCostumeHasWrongScale = function ({
+
+}) {
+    return function (scope, options) {
+        return scope.costume.bitmapResolution === 1;
+    };
+};
+
+const loadCostumeUpgrades = function (config) {
+    const {
+        hasTextLayer = loadCostumeHasTextLayer(config),
+        hasWrongScale = loadCostumeHasWrongScale(config)
+    } = config;
+    return function (scope, options) {
+        return hasTextLayer(scope, options) || hasWrongScale(scope, options);
+    };
+};
+
+const loadBitmapFromAsset = function ({
+    field = 'asset',
+    elementField = 'baseImageElement'
+}) {
+    return function (scope, options) {
+        const asset = scope.costume[field];
+
+        if (typeof createImageBitmap !== 'undefined') {
+            return createImageBitmap(
+                new Blob([asset.data], {type: asset.assetType.contentType})
+            ).then(bitmap => {
+                scope[elementField] = bitmap;
+            });
+        }
+
+        return new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = function () {
+                resolve(image);
+                image.onload = null;
+                image.onerror = null;
+            };
+            image.onerror = function () {
+                reject('Costume load failed. Asset could not be read.');
+                image.onload = null;
+                image.onerror = null;
+            };
+            image.src = asset.encodeDataURI();
+        }).then(element => {
+            scope[elementField] = element;
+        });
+    };
+};
+
+const loadBitmapCanvas = function ({
+    elementField = 'baseImageElement'
+}) {
+    return function (scope, {costume}) {
+        const imageElement = scope[elementField];
+
+        const mergeCanvas = scope.mergeCanvas = scope.canvas = canvasPool.create();
+
+        mergeCanvas.width = imageElement.width;
+        mergeCanvas.height = imageElement.height;
+
+        const ctx = mergeCanvas.getContext('2d');
+        ctx.drawImage(imageElement, 0, 0);
+    };
+};
+
+const loadBitmapUpgradeTextLayer = function ({
+
+}) {
+    return function (scope, {costume}) {
+        const {
+            mergeCanvas,
+            textImageElement
+        } = scope;
+
+        const ctx = mergeCanvas.getContext('2d');
+        if (textImageElement) {
+            ctx.drawImage(textImageElement, 0, 0);
+        }
+
+        // Clean up the costume object
+        delete costume.textLayerAsset;
+        delete costume.textLayerID;
+        delete costume.textLayerMD5;
+    };
+};
+
+const loadBitmapUpgradeScale = function ({
+
+}) {
+    return function (scope, {runtime, rotationCenter}) {
+        // Track the canvas we merged the bitmaps onto separately from the
+        // canvas that we receive from resize if scale is not 1. We know
+        // resize treats mergeCanvas as read only data. We don't know when
+        // resize may use or modify the canvas. So we'll only release the
+        // mergeCanvas back into the canvas pool. Reusing the canvas from
+        // resize may cause errors.
+        const scale = costume.bitmapResolution === 1 ? 2 : 1;
+        if (scale !== 1) {
+            const {mergeCanvas} = scope;
+            scope.canvas = runtime.v2BitmapAdapter.resize(mergeCanvas, mergeCanvas.width * scale, mergeCanvas.height * scale);
+        }
+
+        // By scaling, we've converted it to bitmap resolution 2
+        const {costume} = scope;
+        costume.bitmapResolution = 2;
+        if (rotationCenter) {
+            rotationCenter[0] = rotationCenter[0] * scale;
+            rotationCenter[1] = rotationCenter[1] * scale;
+            costume.rotationCenterX = rotationCenter[0];
+            costume.rotationCenterY = rotationCenter[1];
+        }
+    };
+};
+
+const loadBitmapUpgradeAsset = function ({
+
+}) {
+    return function (scope, {runtime: {storage, v2BitmapAdapter}}) {
+        const dataURI = scope.canvas.toDataURL();
+        scope.costume.asset = {
+            assetType: storage.AssetType.ImageBitmap,
+            dataFormat: storage.DataFormat.PNG,
+            data: v2BitmapAdapter.convertDataURIToBinary(dataURI)
+        };
+    };
+};
+
+const loadBitmapRender = function ({
+
+}) {
+    return function ({costume, canvas}, {runtime: {renderer}, rotationCenter}) {
+        // createBitmapSkin does the right thing if costume.bitmapResolution or
+        // rotationCenter are undefined...
+        costume.skinId = renderer.createBitmapSkin(canvas, costume.bitmapResolution, rotationCenter);
+    };
+};
+
+const loadCostumeUpdateSkinRotationCenter = function ({
+
+}) {
+    return function ({costume}, {runtime: {renderer}, rotationCenter}) {
+        costume.size = renderer.getSkinSize(costume.skinId);
+        if (!rotationCenter) {
+            rotationCenter = renderer.getSkinRotationCenter(costume.skinId);
+            costume.rotationCenterX = rotationCenter[0];
+            costume.rotationCenterY = rotationCenter[1];
+        }
+    };
+};
+
+const loadCostumeScaleSkinRotationCenter = function ({
+    scale = 2
+}) {
+    return function ({costume}, {rotationCenter}) {
+        costume.size = [costume.size[0] * scale, costume.size[1] * scale];
+        if (!rotationCenter) {
+            costume.rotationCenterX = costume.rotationCenterX * scale;
+            costume.rotationCenterY = costume.rotationCenterY * scale;
+            costume.bitmapResolution = scale;
+        }
+    };
+};
+
+const loadBitmapCanvasCleanup = function ({
+
+}) {
+    return function (scope, options) {
+        canvasPool.release(scope.mergeCanvas);
+    };
+};
 
 const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
     return new Promise(resolve => {
@@ -178,81 +365,79 @@ const fetchBitmapCanvas_ = function (costume, runtime, rotationCenter) {
         });
 };
 
-const loadBitmap_ = function (costume, runtime, _rotationCenter) {
-    return fetchBitmapCanvas_(costume, runtime, _rotationCenter)
-        .then(fetched => {
-            const updateCostumeAsset = function (dataURI) {
-                if (!runtime.v2BitmapAdapter) {
-                    // TODO: This might be a bad practice since the returned
-                    // promise isn't acted on. If this is something we should be
-                    // creating a rejected promise for we should also catch it
-                    // somewhere and act on that error (like logging).
-                    //
-                    // Return a rejection to stop executing updateCostumeAsset.
-                    return Promise.reject('No V2 Bitmap adapter present.');
-                }
-
-                const storage = runtime.storage;
-                costume.asset = storage.createAsset(
-                    storage.AssetType.ImageBitmap,
-                    storage.DataFormat.PNG,
-                    runtime.v2BitmapAdapter.convertDataURIToBinary(dataURI),
-                    null,
-                    true // generate md5
-                );
-                costume.dataFormat = storage.DataFormat.PNG;
-                costume.assetId = costume.asset.assetId;
-                costume.md5 = `${costume.assetId}.${costume.dataFormat}`;
-            };
-
-            if (!fetched.assetMatchesBase) {
-                updateCostumeAsset(fetched.canvas.toDataURL());
-            }
-
-            return fetched;
-        })
-        .then(({canvas, mergeCanvas, rotationCenter}) => {
-            // createBitmapSkin does the right thing if costume.bitmapResolution or rotationCenter are undefined...
-            costume.skinId = runtime.renderer.createBitmapSkin(canvas, costume.bitmapResolution, rotationCenter);
-            canvasPool.release(mergeCanvas);
-            const renderSize = runtime.renderer.getSkinSize(costume.skinId);
-            costume.size = [renderSize[0] * 2, renderSize[1] * 2]; // Actual size, since all bitmaps are resolution 2
-
-            if (!rotationCenter) {
-                rotationCenter = runtime.renderer.getSkinRotationCenter(costume.skinId);
-                // Actual rotation center, since all bitmaps are resolution 2
-                costume.rotationCenterX = rotationCenter[0] * 2;
-                costume.rotationCenterY = rotationCenter[1] * 2;
-                costume.bitmapResolution = 2;
-            }
-            return costume;
-        });
-};
+// const loadBitmap_ = function (costume, runtime, _rotationCenter) {
+//     return fetchBitmapCanvas_(costume, runtime, _rotationCenter)
+//         .then(fetched => {
+//             const updateCostumeAsset = function (dataURI) {
+//                 if (!runtime.v2BitmapAdapter) {
+//                     // TODO: This might be a bad practice since the returned
+//                     // promise isn't acted on. If this is something we should be
+//                     // creating a rejected promise for we should also catch it
+//                     // somewhere and act on that error (like logging).
+//                     //
+//                     // Return a rejection to stop executing updateCostumeAsset.
+//                     return Promise.reject('No V2 Bitmap adapter present.');
+//                 }
+//
+//                 const storage = runtime.storage;
+//                 costume.asset = storage.createAsset(
+//                     storage.AssetType.ImageBitmap,
+//                     storage.DataFormat.PNG,
+//                     runtime.v2BitmapAdapter.convertDataURIToBinary(dataURI),
+//                     null,
+//                     true // generate md5
+//                 );
+//                 costume.dataFormat = storage.DataFormat.PNG;
+//                 costume.assetId = costume.asset.assetId;
+//                 costume.md5 = `${costume.assetId}.${costume.dataFormat}`;
+//             };
+//
+//             if (!fetched.assetMatchesBase) {
+//                 updateCostumeAsset(fetched.canvas.toDataURL());
+//             }
+//
+//             return fetched;
+//         })
+//         .then(({canvas, mergeCanvas, rotationCenter}) => {
+//             // createBitmapSkin does the right thing if costume.bitmapResolution or rotationCenter are undefined...
+//             costume.skinId = runtime.renderer.createBitmapSkin(canvas, costume.bitmapResolution, rotationCenter);
+//             canvasPool.release(mergeCanvas);
+//             const renderSize = runtime.renderer.getSkinSize(costume.skinId);
+//             costume.size = [renderSize[0] * 2, renderSize[1] * 2]; // Actual size, since all bitmaps are resolution 2
+//
+//             if (!rotationCenter) {
+//                 rotationCenter = runtime.renderer.getSkinRotationCenter(costume.skinId);
+//                 // Actual rotation center, since all bitmaps are resolution 2
+//                 costume.rotationCenterX = rotationCenter[0] * 2;
+//                 costume.rotationCenterY = rotationCenter[1] * 2;
+//                 costume.bitmapResolution = 2;
+//             }
+//             return costume;
+//         });
+// };
 
 const loadBitmap_ = (function () {
-    const {} = LoadTask;
+    const {Branch, GeneratedFunction, Parallel, Sequence} = LoadTask;
+    const firstLoad = new Sequence([
+        // new GeneratedFunction(loadAspect.loadAsset, {}),
+        new GeneratedFunction(loadBitmapFromAsset, {}),
+    ]);
     const tasks = new Sequence([
-        Parallel([
-            Sequence([
-                new GeneratedFunction(loadAspectLoadAsset, {}),
-                new GeneratedFunction(loadBitmapFromAsset, {}),
+        new Parallel([
+            new Sequence([
+                firstLoad,
                 new GeneratedFunction(loadBitmapCanvas, {}),
             ]),
-            Branch(new GeneratedFunction(loadCostumeHasTextLayer, {}), Sequence([
-                new GeneratedFunction(loadAspectLoadAsset, {
-                    field: 'textLayerAsset'
-                }),
-                new GeneratedFunction(loadBitmapFromAsset, {
-                    field: 'textLayerAsset'
-                }),
-            ])),
+            new Branch(new GeneratedFunction(loadCostumeHasTextLayer, {}), firstLoad.withConfig({
+                field: 'textLayerAsset'
+            })),
         ]),
-        new Branch(new GeneratedFunction(loadCostumeHasTextLayer, {}), new GeneratedFunction(loadBitmapUpgradeTextLayer, {})),
-        new Branch(new GeneratedFunction(loadCostumeHasWrongScale, {}), new GeneratedFunction(loadBitmapUpgradeScale, {})),
-        new Branch(new GeneratedFunction(loadCostumeUpgrades, {}), new GeneratedFunction(loadCostumeSaveAsset, {})),
+        // new Branch(new GeneratedFunction(loadCostumeHasTextLayer, {}), new GeneratedFunction(loadBitmapUpgradeTextLayer, {})),
+        // new Branch(new GeneratedFunction(loadCostumeHasWrongScale, {}), new GeneratedFunction(loadBitmapUpgradeScale, {})),
+        // new Branch(new GeneratedFunction(loadCostumeUpgrades, {}), new GeneratedFunction(loadAspect.saveAsset, {})),
         new GeneratedFunction(loadBitmapRender, {}),
         new GeneratedFunction(loadCostumeUpdateSkinRotationCenter, {}),
-        new GeneratedFunction(loadCostumeScaleSkinRotationeCenter, {scale: 2}),
+        new GeneratedFunction(loadCostumeScaleSkinRotationCenter, {scale: 2}),
         new GeneratedFunction(loadBitmapCanvasCleanup, {}),
     ]);
     return function (costume, runtime, rotationCenter) {
@@ -290,6 +475,7 @@ const loadCostumeFromAsset = function (costume, runtime, optVersion) {
             typeof costume.rotationCenterY === 'number' && !isNaN(costume.rotationCenterY)) {
         rotationCenter = [costume.rotationCenterX, costume.rotationCenterY];
     }
+    debugger;
     if (costume.asset.assetType.runtimeFormat === AssetType.ImageVector.runtimeFormat) {
         return loadVector_(costume, runtime, rotationCenter, optVersion)
             .catch(() => {
@@ -362,185 +548,6 @@ const loadCostume = function (md5ext, costume, runtime, optVersion) {
         }
         return loadCostumeFromAsset(costume, runtime, optVersion);
     });
-};
-
-const loadCostumeHasTextLayer = function ({
-
-}) {
-    return function (scope, options) {
-        return Boolean(scope.costume.textLayerMD5);
-    };
-};
-
-const loadCostumeHasWrongScale = function ({
-
-}) {
-    return function (scope, options) {
-        return scope.costume.bitmapResolution === 1;
-    };
-};
-
-const loadCostumeUpgrades = function (config) {
-    const hasTextLayer = loadCostumeHasTextLayer(config);
-    const hasWrongScale = loadCostumeHasWrongScale(config);
-    return function (scope, options) {
-        return hasTextLayer(scope, options) || hasWrongScale(scope, options);
-    };
-};
-
-const loadBitmapFromAsset = function ({
-    field: 'asset'
-}) {
-    return function (scope, options) {
-        const asset = scope.costume[field];
-
-        if (typeof createImageBitmap !== 'undefined') {
-            return createImageBitmap(
-                new Blob([asset.data], {type: asset.assetType.contentType})
-            ).then(bitmap => {
-                scope[elementField] = bitmap;
-            });
-        }
-
-        return new Promise((resolve, reject) => {
-            const image = new Image();
-            image.onload = function () {
-                resolve(image);
-                image.onload = null;
-                image.onerror = null;
-            };
-            image.onerror = function () {
-                reject('Costume load failed. Asset could not be read.');
-                image.onload = null;
-                image.onerror = null;
-            };
-            image.src = asset.encodeDataURI();
-        }).then(element => {
-            scope[elementField] = element;
-        });
-    };
-};
-
-const loadBitmapCanvas = function ({
-
-}) {
-    return function (scope, {costume}) {
-        const {baseImageElement} = scope;
-
-        scope.canvas = scope.mergeCanvas = canvasPool.create();
-
-        mergeCanvas.width = baseImageElement.width;
-        mergeCanvas.height = baseImageElement.height;
-
-        const ctx = mergeCanvas.getContext('2d');
-        ctx.drawImage(baseImageElement, 0, 0);
-    };
-};
-
-const loadBitmapUpgradeTextLayer = function ({
-
-}) {
-    return function (scope, {costume}) {
-        const {
-            mergeCanvas,
-            textImageElement
-        } = scope;
-
-        const ctx = mergeCanvas.getContext('2d');
-        if (textImageElement) {
-            ctx.drawImage(textImageElement, 0, 0);
-        }
-
-        // Clean up the costume object
-        delete costume.textLayerAsset;
-        delete costume.textLayerID;
-        delete costume.textLayerMD5;
-    };
-};
-
-const loadBitmapUpgradeScale = function ({
-
-}) {
-    return function (scope, {runtime, rotationCenter}) {
-        // Track the canvas we merged the bitmaps onto separately from the
-        // canvas that we receive from resize if scale is not 1. We know
-        // resize treats mergeCanvas as read only data. We don't know when
-        // resize may use or modify the canvas. So we'll only release the
-        // mergeCanvas back into the canvas pool. Reusing the canvas from
-        // resize may cause errors.
-        const scale = costume.bitmapResolution === 1 ? 2 : 1;
-        if (scale !== 1) {
-            const {mergeCanvas} = scope;
-            scope.canvas = runtime.v2BitmapAdapter.resize(mergeCanvas, mergeCanvas.width * scale, mergeCanvas.height * scale);
-        }
-
-        // By scaling, we've converted it to bitmap resolution 2
-        const {costume} = scope;
-        costume.bitmapResolution = 2;
-        if (rotationCenter) {
-            rotationCenter[0] = rotationCenter[0] * scale;
-            rotationCenter[1] = rotationCenter[1] * scale;
-            costume.rotationCenterX = rotationCenter[0];
-            costume.rotationCenterY = rotationCenter[1];
-        }
-    };
-};
-
-const loadBitmapUpgradeAsset = function ({
-
-}) {
-    return function (scope, {runtime: {storage, v2BitmapAdapter}}) {
-        const dataURI = scope.canvas.toDataURL();
-        scope.costume.asset = {
-            assetType: storage.AssetType.ImageBitmap,
-            dataFormat: storage.DataFormat.PNG,
-            data: v2BitmapAdapter.convertDataURIToBinary(dataURI)
-        };
-    };
-};
-
-const loadBitmapRender = function ({
-
-}) {
-    return function ({costume, canvas}, {runtime, rotationCenter}) {
-        // createBitmapSkin does the right thing if costume.bitmapResolution or
-        // rotationCenter are undefined...
-        costume.skinId = runtime.renderer.createBitmapSkin(canvas, costume.bitmapResolution, rotationCenter);
-    };
-};
-
-const loadCostumeUpdateSkinRotationCenter = function ({
-
-}) {
-    return function ({costume}, {runtime: {renderer}, rotationCenter}) {
-        costume.size = runtime.renderer.getSkinSize(costume.skinId);
-        if (!rotationCenter) {
-            rotationCenter = runtime.renderSize.getSkinRotationCenter(costume.skinId);
-            costume.rotationCenterX = rotationCenter[0];
-            costume.rotationCenterY = rotationCenter[1];
-        }
-    };
-};
-
-const loadCostumeScaleSkinRotationCenter = function ({
-    scale = 2
-}) {
-    return function ({costume}, {rotationCenter}) {
-        costume.size = [costume.size[0] * scale, costume.size[1] * scale];
-        if (!rotationCenter) {
-            costume.rotationCenterX = costume.rotationCenterX * scale;
-            costume.rotationCenterY = costume.rotationCenterY * scale;
-            costume.bitmapResolution = scale;
-        }
-    };
-};
-
-const loadBitmapCanvasCleanup = function ({
-
-}) {
-    return function (scope, options) {
-        canvasPool.release(scope.mergeCanvas);
-    };
 };
 
 module.exports = {

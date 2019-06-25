@@ -1,10 +1,12 @@
+const regeneratorRuntime = require('regenerator-runtime');
+
 const loadAspectMissingAsset = function ({field = 'asset'}) {
     return function (aspect) {
         return !aspect[field];
     };
 };
 
-const arrayFrom = funciton (obj) {
+const arrayFrom = function (obj) {
     if (Array.isArray(obj)) {
         return obj;
     } else if (aspect[field].length >= 0) {
@@ -21,7 +23,7 @@ const loadAspectDuplicateAssetData = function ({
         }
         return aspect;
     };
-});
+};
 const loadCostumeFormatOf = function () {
     return function (asset) {
         return asset.dataFormat.toLowerCase();
@@ -55,7 +57,7 @@ const loadAspectReadZipAsset = function ({
     formatOf = loadCostumeFormatOf({assetName}),
     typeOf = loadCostumeTypeOf({assetName, formatOf})
 }) {
-    function (aspect, options) {
+    return function (aspect, options) {
         const {runtime, zip} = options;
         const storage = runtime.storage;
         const fileName = options[fieldFileName] ? options[fieldFileName] :
@@ -116,12 +118,12 @@ const loadAspectSaveAsset = function ({
     field_ = '',
     field = field_ === '' ? 'asset' : `${field_}Asset`,
     fieldId = field_ === '' ? 'assetId' : `${field_}ID`,
-    fieldMd5 = field === 'asset' ? 'md5' : `${field}Md5`,
+    fieldMd5 = field === 'asset' ? 'md5' : `${field_}Md5`,
     generateMd5 = false,
     formatOf = asset => asset.dataFormat,
     typeOf = asset => asset.assetType
 }) {
-    function (aspect, {runtime}) {
+    return function (aspect, {runtime}) {
         if (aspect[field]) {
             const storage = runtime.storage;
             if (!storage) {
@@ -152,11 +154,36 @@ const loadAspectSaveAsset = function ({
         return aspect;
     };
 };
-const loadAspectLoadAsset = function (aspect, options) {
-
+const loadAspectLoadAsset = function ({
+    assetName = 'costume',
+    field_ = '',
+    field = field_ === '' ? 'asset' : `${field_}Asset`,
+    fieldId = field_ === '' ? 'assetId' : `${field_}ID`,
+    fieldMd5 = field === 'asset' ? 'md5' : `${field_}Md5`,
+    generateMd5 = false,
+    formatOf = asset => asset.dataFormat,
+    typeOf = asset => asset.assetType
+}) {
+    return function (aspect, {runtime}) {
+        if (!aspect[field]) {
+            const dataFormat = formatOf(aspect);
+            const assetType = typeOf(aspect);
+            return runtime.storage.load(assetType, aspect[fieldMd5], dataFormat)
+            .then(asset => {
+                aspect[field] = asset;
+                if (fieldId) {
+                    aspect[fieldId] = asset.assetId;
+                }
+                if (fieldMd5) {
+                    aspect[fieldMd5] = `${asset.assetId}.${asset.dataFormat}`;
+                }
+                return aspect;
+            });
+        }
+    };
 };
 
-export default {
+module.exports = {
     missingAsset: loadAspectMissingAsset,
     formatOf: loadCostumeFormatOf,
     typeOf: loadCostumeTypeOf,

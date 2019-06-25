@@ -1,3 +1,5 @@
+const regeneratorRuntime = require('regenerator-runtime');
+
 class LoadTask {
     async run () {}
 
@@ -30,7 +32,7 @@ LoadTask.Function = class LoadTaskFunction extends LoadTask {
     }
 };
 
-LoadTask.GeneratedFunction = class LoadTaskGeneratedFunction extends LoadTaskFunction {
+LoadTask.GeneratedFunction = class LoadTaskGeneratedFunction extends LoadTask.Function {
     constructor (func, config) {
         super(func(config));
 
@@ -54,9 +56,9 @@ LoadTask.Branch = class LoadTaskBranch extends LoadTask {
 
     async run (mediator, options) {
         if (await this.test.run(mediator, options)) {
-            await this.ifTrue.run(mediator, options);
+            await this.ifTrue && this.ifTrue.run(mediator, options);
         } else {
-            await this.ifFalse.run(mediator, options);
+            await this.ifFalse && this.ifFalse.run(mediator, options);
         }
     }
 
@@ -98,7 +100,7 @@ LoadTask.Sequence = class LoadTaskSequence extends LoadTask {
 };
 
 LoadTask.Parallel = class LoadTaskParallel extends LoadTask {
-    constructor (parallel) {
+    constructor (tasks) {
         super();
 
         this.tasks = tasks.map(LoadTask.taskify);
@@ -112,3 +114,5 @@ LoadTask.Parallel = class LoadTaskParallel extends LoadTask {
         return new LoadTask.Sequence(this.tasks.map(task => task.withConfig(config)));
     }
 };
+
+module.exports = LoadTask;

@@ -1,8 +1,10 @@
+const regeneratorRuntime = require('regenerator-runtime');
+
 const JSZip = require('jszip');
 const log = require('../util/log');
 
-const LoadTask from '../import/load-task';
-const loadAspect from '../import/load-aspect';
+const LoadTask = require('../import/load-task');
+const loadAspect = require('../import/load-aspect');
 
 /**
  * Deserializes sound from file into storage cache so that it can
@@ -179,9 +181,9 @@ const deserializeCostume = (function () {
     const {Branch, Sequence, GeneratedFunction, Parallel} = LoadTask;
     const assetTasks = new Sequence([
         new Branch(new GeneratedFunction(loadAspect.missingAsset, {}),
-            new GeneratedFunction(loadAspect.readZipAsset_, {}),
-            new GeneratedFunction(loadAspect.duplicateAssetData_, {})),
-        new GeneratedFunction(loadAspect.saveAsset_, {})
+            new GeneratedFunction(loadAspect.readZipAsset, {}),
+            new GeneratedFunction(loadAspect.duplicateAssetData, {})),
+        new GeneratedFunction(loadAspect.saveAsset, {})
     ]);
     const tasks = new Parallel([
         assetTasks.withConfig({
@@ -197,7 +199,7 @@ const deserializeCostume = (function () {
             fieldMd5: 'textLayerMD5',
             generateMd5: true,
             formatOf: () => 'png',
-            typeOf: (, {storage}) => storage.AssetType.ImageBitmap
+            typeOf: (_, {storage}) => storage.AssetType.ImageBitmap
         })
     ]);
     return function (costume, runtime, zip, assetFileName, textLayerFileName) {
