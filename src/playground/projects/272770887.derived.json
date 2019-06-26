@@ -1,0 +1,83 @@
+{
+  "atlas": {
+    "0": {
+      "width": 2048,
+      "height": 2048,
+      "dataFormat": "png",
+      "tiles": {
+        "8baf037be8d86fe4c65730d2a30b5d9d": {
+          "width": 669,
+          "height": 638,
+          "x": 6,
+          "y": 1408,
+          "map": "0"
+        },
+        "ba4ec89d5ea369610ac200b13d197c7d": {
+          "width": 960,
+          "height": 720,
+          "x": 695,
+          "y": 2,
+          "map": "0"
+        },
+        "ca96da3a8a665d2a172b13c19f54a55f": {
+          "width": 521,
+          "height": 666,
+          "x": 22,
+          "y": 659,
+          "map": "0"
+        },
+        "d36db14e9fb3ab8a2a89d3e566728357": {
+          "width": 960,
+          "height": 720,
+          "x": 693,
+          "y": 731,
+          "map": "0"
+        },
+        "f5b87442020b31d94e52955b139c4d96": {
+          "width": 625,
+          "height": 720,
+          "x": 22,
+          "y": 659,
+          "map": "0"
+        }
+      }
+    }
+  },
+  "skins": {
+    "8baf037be8d86fe4c65730d2a30b5d9d": {
+      "width": 669,
+      "height": 638,
+      "x": 6,
+      "y": 1408,
+      "map": "0"
+    },
+    "ba4ec89d5ea369610ac200b13d197c7d": {
+      "width": 960,
+      "height": 720,
+      "x": 695,
+      "y": 2,
+      "map": "0"
+    },
+    "ca96da3a8a665d2a172b13c19f54a55f": {
+      "width": 521,
+      "height": 666,
+      "x": 22,
+      "y": 659,
+      "map": "0"
+    },
+    "d36db14e9fb3ab8a2a89d3e566728357": {
+      "width": 960,
+      "height": 720,
+      "x": 693,
+      "y": 731,
+      "map": "0"
+    },
+    "f5b87442020b31d94e52955b139c4d96": {
+      "width": 625,
+      "height": 720,
+      "x": 22,
+      "y": 659,
+      "map": "0"
+    }
+  }
+}
