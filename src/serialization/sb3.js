@@ -1227,6 +1227,13 @@ const deserialize = function (json, runtime, zip, isSingleSprite) {
 
     const monitorObjects = json.monitors || [];
 
+    if (json.meta.derived) {
+        if (json.meta.derived.atlas) {
+            const loadAtlas = require('../import/load-atlas');
+            runtime.atlas = loadAtlas.loadAtlas(json.meta.derived.atlas, runtime, zip);
+        }
+    }
+
     return Promise.resolve(
         targetObjects.map(target =>
             parseScratchAssets(target, runtime, zip))
