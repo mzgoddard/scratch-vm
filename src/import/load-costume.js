@@ -66,6 +66,59 @@ const loadBitmapFromAsset = function ({
     };
 };
 
+const loadCostumeInAtlas = function ({
+    field = 'asset'
+}) {
+    return function (scope, {runtime}) {
+        // console.log('atlas?', !!runtime.atlas);
+        if (runtime.atlas) {
+            const tile = runtime.atlas.findTile(scope.costume.assetId);
+            // console.log(scope.costume.assetId, tile);
+            return Boolean(tile);
+        }
+        return false;
+    };
+};
+
+const loadBitmapFromAtlas = function ({
+    field = 'asset',
+    elementField = 'baseImageElement'
+}) {
+    return function (scope, {runtime}) {
+        if (runtime.atlas) {
+            const tile = runtime.atlas.findTile(scope.costume.assetId);
+            if (tile) {
+                if (!tile.map.asset.promise) {
+                    return tile.map.asset.loadCanvas(Promise.resolve()
+                        .then(() => {
+                            const assetType = runtime.storage.AssetType.ImageBitmap;
+                            const md5 = tile.map.asset.assetId;
+                            // console.log('load', md5);
+                            const dataFormat = tile.map.asset.dataFormat;
+                            return runtime.storage.load(assetType, md5, dataFormat);
+                        })
+                        .then(asset => (
+                            createImageBitmap(
+                                new Blob([asset.data], {type: asset.assetType.contentType})
+                            )
+                        ))
+                        .then(bitmap => {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = bitmap.width;
+                            canvas.height = bitmap.height;
+                            canvas.getContext('2d').drawImage(bitmap, 0, 0);
+                            return canvas;
+                        })
+                    );
+                }
+                return tile.map.asset.loadCanvas().then(mapAsset => {
+                    scope.canvas = tile.getImageData(mapAsset);
+                });
+            }
+        }
+    };
+};
+
 const loadBitmapCanvas = function ({
     elementField = 'baseImageElement'
 }) {
@@ -617,31 +670,39 @@ const loadCostume = (function () {
             new GeneratedFunction(loadCostumeAfterLoad, {}),
             new GeneratedFunction(loadVectorWrapper, {}),
         ]),
-        new Sequence([
-            new Parallel([
-                new Sequence([
-                    firstBitmapLoad,
-                    new GeneratedFunction(loadCostumeAfterLoad, {}),
-                    new GeneratedFunction(loadBitmapCanvas, {}),
-                ]),
-                new Branch(new GeneratedFunction(loadCostumeHasTextLayer, {}),
-                    firstBitmapLoad.withConfig({
-                        elementField: 'textImageElement',
-                        field: 'textLayerAsset',
-                        formatOf: () => 'png',
-                        md5Of: ({textLayerMD5}) => textLayerMD5,
-                        typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageBitmap
-                    })
-                ),
+        new Branch(new GeneratedFunction(loadCostumeInAtlas, {}),
+            new Sequence([
+                new GeneratedFunction(loadBitmapFromAtlas, {}),
+                new GeneratedFunction(loadBitmapRender, {}),
+                new GeneratedFunction(loadCostumeUpdateSkinRotationCenter, {}),
+                new GeneratedFunction(loadCostumeScaleSkinRotationCenter, {scale: 2}),
             ]),
-            new Branch(new GeneratedFunction(loadCostumeHasTextLayer, {}), new GeneratedFunction(loadBitmapUpgradeTextLayer, {})),
-            new Branch(new GeneratedFunction(loadCostumeHasWrongScale, {}), new GeneratedFunction(loadBitmapUpgradeScale, {})),
-            new Branch(new GeneratedFunction(loadCostumeUpgrades, {}), new DerefScope('costume', new GeneratedFunction(loadAspect.saveAsset, {}))),
-            new GeneratedFunction(loadBitmapRender, {}),
-            new GeneratedFunction(loadCostumeUpdateSkinRotationCenter, {}),
-            new GeneratedFunction(loadCostumeScaleSkinRotationCenter, {scale: 2}),
-            new GeneratedFunction(loadBitmapCanvasCleanup, {}),
-        ])
+            new Sequence([
+                new Parallel([
+                    new Sequence([
+                        firstBitmapLoad,
+                        new GeneratedFunction(loadCostumeAfterLoad, {}),
+                        new GeneratedFunction(loadBitmapCanvas, {}),
+                    ]),
+                    new Branch(new GeneratedFunction(loadCostumeHasTextLayer, {}),
+                        firstBitmapLoad.withConfig({
+                            elementField: 'textImageElement',
+                            field: 'textLayerAsset',
+                            formatOf: () => 'png',
+                            md5Of: ({textLayerMD5}) => textLayerMD5,
+                            typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageBitmap
+                        })
+                    ),
+                ]),
+                new Branch(new GeneratedFunction(loadCostumeHasTextLayer, {}), new GeneratedFunction(loadBitmapUpgradeTextLayer, {})),
+                new Branch(new GeneratedFunction(loadCostumeHasWrongScale, {}), new GeneratedFunction(loadBitmapUpgradeScale, {})),
+                new Branch(new GeneratedFunction(loadCostumeUpgrades, {}), new DerefScope('costume', new GeneratedFunction(loadAspect.saveAsset, {}))),
+                new GeneratedFunction(loadBitmapRender, {}),
+                new GeneratedFunction(loadCostumeUpdateSkinRotationCenter, {}),
+                new GeneratedFunction(loadCostumeScaleSkinRotationCenter, {scale: 2}),
+                new GeneratedFunction(loadBitmapCanvasCleanup, {}),
+            ])
+        )
     );
     return async function (md5ext, costume, runtime, optVersion) {
         const idParts = StringUtil.splitFirst(md5ext, '.');
@@ -649,7 +710,7 @@ const loadCostume = (function () {
         const ext = idParts[1].toLowerCase();
         costume.dataFormat = ext;
 
-        window.COSTUME_INDEX = (window.COSTUME_INDEX | 0) + 1;
+        // window.COSTUME_INDEX = (window.COSTUME_INDEX | 0) + 1;
 
         if (!costume.asset) {
             // Need to load the costume from storage. The server should have a reference to this md5.
@@ -665,8 +726,14 @@ const loadCostume = (function () {
         }
 
         return tasks.run({costume, md5ext, md5, ext}, {runtime, optVersion})
-            .then(() => (console.log('done', window.COSTUME_INDEX = (window.COSTUME_INDEX | 0) - 1, costume, costume.assetId), costume))
-            .catch(() => (console.log('fail', window.COSTUME_INDEX_CATCH = (window.COSTUME_INDEX_CATCH | 0) + 1), costume));
+            .then(() => (
+                // console.log('done', window.COSTUME_INDEX = (window.COSTUME_INDEX | 0) - 1, costume, costume.assetId),
+                costume
+            ))
+            .catch(() => (
+                // console.log('fail', window.COSTUME_INDEX_CATCH = (window.COSTUME_INDEX_CATCH | 0) + 1),
+                costume
+            ));
     };
 }());
 
