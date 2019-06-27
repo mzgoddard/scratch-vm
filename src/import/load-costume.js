@@ -89,7 +89,7 @@ const loadBitmapFromAtlas = function ({
             const tile = runtime.atlas.findTile(scope.costume.assetId);
             if (tile) {
                 if (!tile.map.asset.promise) {
-                    return tile.map.asset.loadCanvas(Promise.resolve()
+                    tile.map.asset.loadCanvas(Promise.resolve()
                         .then(() => {
                             const assetType = runtime.storage.AssetType.ImageBitmap;
                             const md5 = tile.map.asset.assetId;
@@ -112,6 +112,29 @@ const loadBitmapFromAtlas = function ({
                     );
                 }
                 return tile.map.asset.loadCanvas().then(mapAsset => {
+                    let _bytes;
+                    scope.costume.asset = {
+                        assetType: runtime.storage.AssetType.ImageBitmap,
+                        assetId: tile.asset.assetId,
+                        dataFormat: 'png',
+                        get data () {
+                            if (!_bytes) {
+                                console.log('bytes for');
+                                const canvas = document.createElement('canvas');
+                                canvas.width = tile.tile.width;
+                                canvas.height = tile.tile.height;
+                                canvas.getContext('2d').drawImage(mapAsset.canvas, tile.tile.left, tile.tile.top, tile.tile.width, tile.tile.height, 0, 0, tile.tile.width, tile.tile.height);
+                                const dataURL = canvas.toDataURL();
+                                const codes = btoa(dataURL.substring(dataURL.indexOf(',')));
+                                _bytes = new Uint8Array(codes.length);
+                                for (let i = 0; i < _bytes.length; i++) {
+                                    _bytes[i] = codes.charCodeAt(i);
+                                }
+                                console.log(_bytes.length);
+                            }
+                            return _bytes;
+                        }
+                    };
                     scope.canvas = tile.getImageData(mapAsset);
                 });
             }
@@ -256,6 +279,25 @@ const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
             costume.assetId = costume.asset.assetId;
             costume.md5 = `${costume.assetId}.${costume.dataFormat}`;
         }
+
+        if (costume.derivedAsset) {
+            const jsonText = costume.derivedAsset.decodeText();
+            svgString = JSON.parse(jsonText);
+        } else {
+            runtime.v2SvgAdapter.loadString(svgString);
+            runtime.v2SvgAdapter.toJson().then(json => {
+                const data = JSON.stringify(json);
+                costume.derivedAsset = runtime.storage.createAsset({
+                    contentType: 'application/json',
+                    name: 'ImagePaper',
+                    runtimeFormat: runtime.storage.DataFormat.JSON,
+                    immutable: true
+                }, runtime.storage.DataFormat.JSON, null, costume.assetId, false);
+                costume.derivedAsset.encodeTextData(data, runtime.storage.DataFormat.JSON, false);
+                console.log(costume.derivedAsset);
+            });
+        }
+
         // createSVGSkin does the right thing if rotationCenter isn't provided, so it's okay if it's
         // undefined here
         costume.skinId = runtime.renderer.createSVGSkin(svgString, rotationCenter);
@@ -662,17 +704,29 @@ const loadCostume = (function () {
     ]);
     const tasks = new Branch(new GeneratedFunction(loadCostumeIsVector, {}),
         new Sequence([
-            new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
-                formatOf: ({dataFormat}) => dataFormat,
-                // md5Of: ({md5}) => md5,
-                typeOf: ({dataFormat}, {runtime: {storage: {AssetType}}}) => (dataFormat === 'svg') ? AssetType.ImageVector : AssetType.ImageBitmap
-            })),
+            new Parallel([
+                new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
+                    formatOf: ({dataFormat}) => dataFormat,
+                    typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
+                })),
+                new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
+                    assetName: 'derived costume',
+                    field: 'derivedAsset',
+                    fieldId: null,
+                    fieldMd5: null,
+                    generateMd5: false,
+                    formatOf: () => 'json',
+                    md5Of: ({asset, assetId}) => assetId || asset.assetId,
+                    typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
+                })),
+            ]),
             new GeneratedFunction(loadCostumeAfterLoad, {}),
             new GeneratedFunction(loadVectorWrapper, {}),
         ]),
         new Branch(new GeneratedFunction(loadCostumeInAtlas, {}),
             new Sequence([
                 new GeneratedFunction(loadBitmapFromAtlas, {}),
+                new GeneratedFunction(loadCostumeAfterLoad, {}),
                 new GeneratedFunction(loadBitmapRender, {}),
                 new GeneratedFunction(loadCostumeUpdateSkinRotationCenter, {}),
                 new GeneratedFunction(loadCostumeScaleSkinRotationCenter, {scale: 2}),

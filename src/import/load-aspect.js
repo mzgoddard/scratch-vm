@@ -186,6 +186,9 @@ const loadAspectLoadAsset = function ({
                     aspect[fieldMd5] = `${asset.assetId}.${asset.dataFormat}`;
                 }
                 return aspect;
+            })
+            .catch((error) => {
+                log.error(`Couldn't fetch ${assetName} asset: ${md5}.${dataFormat}`);
             });
             if (promise) {
                 return promise;

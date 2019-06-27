@@ -724,6 +724,19 @@ const runBenchmark = function () {
 
     // Run threads
     vm.start();
+
+    const downloadLink = document.querySelector('.download');
+    const downloadLabel = downloadLink.querySelector('label');
+    downloadLink.download = (location.hash.substring(1).split(',')[0] || 'project') + '.sb3';
+    downloadLink.addEventListener('click', function () {
+        if (downloadLabel.innerText.indexOf('(') === -1) {
+            vm.saveProjectSb3().then(blob => {
+                downloadLink.href = URL.createObjectURL(blob);
+                downloadLabel.innerText = 'Download this project (Ready)';
+            });
+            downloadLabel.innerText = 'Download this project (compressing)';
+        }
+    });
 };
 
 /**

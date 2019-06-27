@@ -20,6 +20,13 @@ const serializeAssets = function (runtime, assetType, optTargetId) {
             assetDescs.push({
                 fileName: `${asset.assetId}.${asset.dataFormat}`,
                 fileContent: asset.data});
+
+            const derivedAsset = currAsset.derivedAsset;
+            if (derivedAsset) {
+                assetDescs.push({
+                    fileName: `${derivedAsset.assetId}.${derivedAsset.dataFormat}`,
+                    fileContent: derivedAsset.data});
+            }
         }
     }
     return assetDescs;
