@@ -558,6 +558,9 @@ const serialize = function (runtime, targetId) {
     meta.semver = '3.0.0';
     meta.vm = vmPackage.version;
 
+    // meta.atlas = null;
+    meta.derived = runtime.derived;
+
     // Attach full user agent string to metadata if available
     meta.agent = 'none';
     if (typeof navigator !== 'undefined') meta.agent = navigator.userAgent;
@@ -1231,6 +1234,9 @@ const deserialize = function (json, runtime, zip, isSingleSprite) {
         if (json.meta.derived.atlas) {
             const loadAtlas = require('../import/load-atlas');
             runtime.atlas = loadAtlas.loadAtlas(json.meta.derived.atlas, runtime, zip);
+        }
+        if (json.meta.derived) {
+            runtime.derived = json.meta.derived;
         }
     }
 

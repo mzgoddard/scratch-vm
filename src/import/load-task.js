@@ -45,6 +45,26 @@ LoadTask.GeneratedFunction = class LoadTaskGeneratedFunction extends LoadTask.Fu
     }
 };
 
+LoadTask.MayFail = class LoadTaskMayFail extends LoadTask {
+    constructor (subtask, catchtask) {
+        super();
+        this.subtask = subtask;
+        this.catchtask = catchtask;
+    }
+
+    async run (scope, options) {
+        try {
+            await this.subtask.run(scope, options);
+        } catch (error) {
+            if (this.catchtask) {
+                await this.catchtask.run(scope, options);
+            } else {
+                console.error(error.stack || error);
+            }
+        }
+    }
+};
+
 LoadTask.DerefScope = class LoadTaskDerefScope extends LoadTask {
     constructor (key, subtask) {
         super();

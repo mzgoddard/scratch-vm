@@ -1,3 +1,6 @@
+const JSZip = require('jszip');
+const log = require('../util/log');
+
 const regeneratorRuntime = require('regenerator-runtime');
 
 const loadAspectMissingAsset = function ({field = 'asset'}) {
@@ -33,7 +36,8 @@ const loadCostumeTypeOf = function ({
     assetName = 'costume',
     formatOf = loadCostumeFormatOf({assetName})
 }) {
-    return function (asset, {runtime: {storage}}) {
+    return function (asset, options) {
+        const {runtime: {storage}} = options;
         let assetType = null;
         const aspectFormat = formatOf(asset, options);
         if (aspectFormat === 'svg') {

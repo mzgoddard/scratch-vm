@@ -66,6 +66,17 @@ const loadBitmapFromAsset = function ({
     };
 };
 
+const loadCostumeInDerived = function ({
+}) {
+    return function (scope, {runtime}) {
+        if (runtime.derived) {
+            // console.log(scope.costume.assetId, runtime.derived[scope.costume.assetId]);
+            return Boolean(runtime.derived[scope.costume.assetId]);
+        }
+        return false;
+    }
+};
+
 const loadCostumeInAtlas = function ({
     field = 'asset'
 }) {
@@ -280,7 +291,7 @@ const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
             costume.md5 = `${costume.assetId}.${costume.dataFormat}`;
         }
 
-        if (costume.derivedAsset) {
+        if (costume.derivedAsset && costume.derivedAsset.data) {
             const jsonText = costume.derivedAsset.decodeText();
             svgString = JSON.parse(jsonText);
         } else {
@@ -292,9 +303,8 @@ const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
                     name: 'ImagePaper',
                     runtimeFormat: runtime.storage.DataFormat.JSON,
                     immutable: true
-                }, runtime.storage.DataFormat.JSON, null, costume.assetId, false);
-                costume.derivedAsset.encodeTextData(data, runtime.storage.DataFormat.JSON, false);
-                console.log(costume.derivedAsset);
+                }, runtime.storage.DataFormat.JSON, null, null, false);
+                costume.derivedAsset.encodeTextData(data, runtime.storage.DataFormat.JSON, true);
             });
         }
 
@@ -693,7 +703,7 @@ const loadCostumeAfterLoad = function ({
 };
 
 const loadCostume = (function () {
-    const {Branch, DerefScope, GeneratedFunction, Parallel, Sequence} = LoadTask;
+    const {Branch, DerefScope, GeneratedFunction, MayFail, Parallel, Sequence} = LoadTask;
     const firstBitmapLoad = new Sequence([
         new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
             formatOf: ({dataFormat}) => dataFormat,
@@ -709,16 +719,18 @@ const loadCostume = (function () {
                     formatOf: ({dataFormat}) => dataFormat,
                     typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
                 })),
-                new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
-                    assetName: 'derived costume',
-                    field: 'derivedAsset',
-                    fieldId: null,
-                    fieldMd5: null,
-                    generateMd5: false,
-                    formatOf: () => 'json',
-                    md5Of: ({asset, assetId}) => assetId || asset.assetId,
-                    typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
-                })),
+                new Branch(new GeneratedFunction(loadCostumeInDerived, {}),
+                    new MayFail(new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
+                        assetName: 'derived costume',
+                        field: 'derivedAsset',
+                        fieldId: null,
+                        fieldMd5: null,
+                        generateMd5: false,
+                        formatOf: () => 'json',
+                        md5Of: ({asset, assetId}, {runtime}) => runtime.derived[assetId || asset.assetId].assetId,
+                        typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
+                    }))),
+                )
             ]),
             new GeneratedFunction(loadCostumeAfterLoad, {}),
             new GeneratedFunction(loadVectorWrapper, {}),

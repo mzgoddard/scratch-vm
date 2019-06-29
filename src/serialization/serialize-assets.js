@@ -23,6 +23,12 @@ const serializeAssets = function (runtime, assetType, optTargetId) {
 
             const derivedAsset = currAsset.derivedAsset;
             if (derivedAsset) {
+                runtime.derived = runtime.derived || {};
+
+                runtime.derived[asset.assetId] = {
+                    assetId: derivedAsset.assetId,
+                    dataFormat: derivedAsset.dataFormat
+                };
                 assetDescs.push({
                     fileName: `${derivedAsset.assetId}.${derivedAsset.dataFormat}`,
                     fileContent: derivedAsset.data});
