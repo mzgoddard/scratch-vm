@@ -560,6 +560,7 @@ const serialize = function (runtime, targetId) {
 
     // meta.atlas = null;
     meta.derived = runtime.derived;
+    // meta.bulk = runtime.bulk;
 
     // Attach full user agent string to metadata if available
     meta.agent = 'none';

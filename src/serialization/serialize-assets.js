@@ -21,6 +21,13 @@ const serializeAssets = function (runtime, assetType, optTargetId) {
                 fileName: `${asset.assetId}.${asset.dataFormat}`,
                 fileContent: asset.data});
 
+            // runtime.bulk = runtime.bulk || new LoadBulk();
+            // runtime.bulk.add({
+            //     assetId: asset.assetId,
+            //     dataFormat: asset.dataFormat,
+            //     data: asset.data
+            // });
+
             const derivedAsset = currAsset.derivedAsset;
             if (derivedAsset) {
                 runtime.derived = runtime.derived || {};
@@ -32,6 +39,13 @@ const serializeAssets = function (runtime, assetType, optTargetId) {
                 assetDescs.push({
                     fileName: `${derivedAsset.assetId}.${derivedAsset.dataFormat}`,
                     fileContent: derivedAsset.data});
+
+                // runtime.bulk = runtime.bulk || new LoadBulk();
+                // runtime.bulk.add({
+                //     assetId: derivedAsset.assetId,
+                //     dataFormat: derivedAsset.dataFormat,
+                //     data: derivedAsset.data
+                // });
             }
         }
     }
