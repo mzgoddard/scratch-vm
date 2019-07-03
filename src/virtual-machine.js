@@ -368,9 +368,24 @@ class VirtualMachine extends EventEmitter {
      * @returns {string} Project in a Scratch 3.0 JSON representation.
      */
     saveProjectSb3 () {
+        this.runtime.bulk = null;
+
         const soundDescs = serializeSounds(this.runtime);
         const costumeDescs = serializeCostumes(this.runtime);
+
+        if (this.runtime.bulk) {
+            this.runtime.bulk = this.runtime.bulk.createAssets();
+        }
+
         const projectJson = this.toJSON();
+
+        if (this.runtime.bulk) {
+            const bulkAssets = this.runtime.bulk;
+            costumeDescs.push(...bulkAssets.assets.map(asset => ({
+                fileName: `${asset.assetId}.${asset.dataFormat}`,
+                fileContent: asset.data
+            })));
+        }
 
         // TODO want to eventually move zip creation out of here, and perhaps
         // into scratch-storage

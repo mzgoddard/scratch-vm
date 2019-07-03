@@ -560,7 +560,8 @@ const serialize = function (runtime, targetId) {
 
     // meta.atlas = null;
     meta.derived = runtime.derived;
-    // meta.bulk = runtime.bulk;
+    // console.log(runtime.bulk);
+    meta.bulk = runtime.bulk.assetIds;
 
     // Attach full user agent string to metadata if available
     meta.agent = 'none';
@@ -1238,6 +1239,9 @@ const deserialize = function (json, runtime, zip, isSingleSprite) {
         }
         if (json.meta.derived) {
             runtime.derived = json.meta.derived;
+        }
+        if (json.meta.bulk) {
+            runtime.bulk = json.meta.bulk;
         }
     }
 

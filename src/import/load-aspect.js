@@ -3,6 +3,8 @@ const log = require('../util/log');
 
 const regeneratorRuntime = require('regenerator-runtime');
 
+const LoadBulk = require('./load-bulk').Bulk;
+
 const loadAspectMissingAsset = function ({field = 'asset'}) {
     return function (aspect) {
         return !aspect[field];
@@ -203,6 +205,61 @@ const loadAspectLoadAsset = function ({
         }
     };
 };
+const loadAspectLoadBulk = function ({
+}) {
+    return function (scope, {runtime}) {
+        if (runtime.bulk && runtime.bulk.length > 0 && typeof runtime.bulk[0] === 'string') {
+            runtime.bulk = LoadBulk.fromSliceAssets(runtime.bulk.map(assetId => {
+                return runtime.storage.load({
+                    contentType: 'octet/bitstream',
+                    name: 'Bulk',
+                    runtimeFormat: 'bulk',
+                    immutable: true
+                }, assetId, 'bulk');
+            }));
+        }
+    };
+};
+const loadAspectLoadAssetFromBulk = function ({
+    assetName = 'costume',
+    field_ = '',
+    field = field_ === '' ? 'asset' : `${field_}Asset`,
+    fieldId = field_ === '' ? 'assetId' : `${field_}ID`,
+    fieldMd5 = field === 'asset' ? 'md5' : `${field_}Md5`,
+    generateMd5 = false,
+    formatOf = asset => asset.dataFormat,
+    typeOf = asset => asset.assetType,
+    md5Of = asset => asset[fieldMd5].split('.')[0]
+}) {
+    return function (aspect, options) {
+        const {runtime} = options;
+        if (runtime.bulk) {
+            const dataFormat = formatOf(aspect, options);
+            const md5 = md5Of(aspect, options);
+            const assetType = typeOf(aspect, options);
+            return Promise.resolve(runtime.bulk.find(md5))
+            .then(function (asset) {
+                return runtime.storage.createAsset(
+                    assetType,
+                    dataFormat,
+                    asset.data,
+                    md5
+                );
+            })
+            .then(function (asset) {
+                aspect[field] = asset;
+                if (fieldId) {
+                    aspect[fieldId] = asset.assetId;
+                }
+                if (fieldMd5) {
+                    aspect[fieldMd5] = `${asset.assetId}.${asset.dataFormat}`;
+                }
+                return aspect;
+            });
+        }
+        throw new Error('No bulk');
+    };
+};
 
 module.exports = {
     missingAsset: loadAspectMissingAsset,
@@ -214,4 +271,6 @@ module.exports = {
     readZipAssetMap: loadAspectReadZipAssetMap,
     saveAsset: loadAspectSaveAsset,
     loadAsset: loadAspectLoadAsset,
+    loadBulk: loadAspectLoadBulk,
+    loadAssetFromBulk: loadAspectLoadAssetFromBulk
 };

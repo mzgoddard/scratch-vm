@@ -715,21 +715,40 @@ const loadCostume = (function () {
     const tasks = new Branch(new GeneratedFunction(loadCostumeIsVector, {}),
         new Sequence([
             new Parallel([
-                new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
-                    formatOf: ({dataFormat}) => dataFormat,
-                    typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
-                })),
-                new Branch(new GeneratedFunction(loadCostumeInDerived, {}),
-                    new MayFail(new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
-                        assetName: 'derived costume',
-                        field: 'derivedAsset',
-                        fieldId: null,
-                        fieldMd5: null,
-                        generateMd5: false,
-                        formatOf: () => 'json',
-                        md5Of: ({asset, assetId}, {runtime}) => runtime.derived[assetId || asset.assetId].assetId,
+                new GeneratedFunction(loadAspect.loadBulk, {}),
+                new Sequence([
+                    new MayFail(new DerefScope('costume', new GeneratedFunction(loadAspect.loadAssetFromBulk, {
+                        formatOf: ({dataFormat}) => dataFormat,
                         typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
                     }))),
+                    new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
+                        formatOf: ({dataFormat}) => dataFormat,
+                        typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
+                    })),
+                ]),
+                new Branch(new GeneratedFunction(loadCostumeInDerived, {}),
+                    new Sequence([
+                        new MayFail(new DerefScope('costume', new GeneratedFunction(loadAspect.loadAssetFromBulk, {
+                            assetName: 'derived costume',
+                            field: 'derivedAsset',
+                            fieldId: null,
+                            fieldMd5: null,
+                            generateMd5: false,
+                            formatOf: () => 'json',
+                            md5Of: ({asset, assetId}, {runtime}) => runtime.derived[assetId || asset.assetId].assetId,
+                            typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
+                        }))),
+                        new MayFail(new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
+                            assetName: 'derived costume',
+                            field: 'derivedAsset',
+                            fieldId: null,
+                            fieldMd5: null,
+                            generateMd5: false,
+                            formatOf: () => 'json',
+                            md5Of: ({asset, assetId}, {runtime}) => runtime.derived[assetId || asset.assetId].assetId,
+                            typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
+                        })))
+                    ])
                 )
             ]),
             new GeneratedFunction(loadCostumeAfterLoad, {}),

@@ -1,22 +1,38 @@
 const Asset = require('scratch-storage/src/Asset');
 
+const isPromise = obj => typeof obj.then === 'function';
+
 class Bulk {
     constructor () {
-        this.table = {};
+        // this.table = {};
         this.slices = [];
     }
 
     static fromSliceAssets (sliceAssets) {
         const bulk = new Bulk();
-        bulk.slices = sliceAssets.map(BulkSlice.fromAsset);
+        bulk.slices = sliceAssets.slice();
+        for (let i = 0; i < bulk.slices.length; i++) {
+            bulk.slices[i] = BulkSlice.fromAsset(bulk.slices[i]);
+            if (isPromise(bulk.slices[i])) {
+                bulk.slices[i].then((bulkPromise => slice => {
+                    const j = bulk.slices.indexOf(bulkPromise);
+                    bulk.slices[j] = slice;
+                })(bulk.slices[i]));
+            }
+        }
+        return bulk;
     }
 
     static createAssets (bulk) {
-        const assets = this.slices.map(BulkSlice.createAsset);
+        const assets = bulk.slices.map(BulkSlice.createAsset);
         return {
             assetIds: assets.map(asset => asset.assetId),
             assets,
         };
+    }
+
+    createAssets () {
+        return Bulk.createAssets(this);
     }
 
     add (asset, offset = 0) {
@@ -24,13 +40,13 @@ class Bulk {
             this.slices.unshift(new BulkSlice());
         }
 
-        this.table[asset.assetId] = this.table[asset.assetId] || {
-            assetId: asset.assetId,
-            dataFormat: asset.dataFormat,
-            dataSize: asset.data.length,
-            slices: []
-        };
-        this.table[asset.assetId].slices.push(this.slices.length);
+        // this.table[asset.assetId] = this.table[asset.assetId] || {
+        //     assetId: asset.assetId,
+        //     dataFormat: asset.dataFormat,
+        //     dataSize: asset.data.length,
+        //     slices: []
+        // };
+        // this.table[asset.assetId].slices.push(this.slices.length);
 
         const written = this.slices[0].add(asset, offset);
 
@@ -41,31 +57,50 @@ class Bulk {
     }
 
     find (assetId) {
-        const pieces = [];
-        for (let i = 0; i < this.slices.length; i++) {
-            const piece = this.slices[i].find(assetId);
-            if (piece) {
-                pieces.unshift(piece, this.slices[i]);
-            } else if (pieces.length > 0) {
-                break;
-            }
-        }
+        const search = () => {
+            const pieces = [];
+            let size = 0;
+            let available = 0;
+            for (let i = 0; i < this.slices.length; i++) {
+                if (typeof this.slices[i].then === 'function') continue;
 
-        if (pieces.length) {
-            const data = new Uint8Array(pieces[0].dataSize);
-            for (let i = 0; i < pieces.length; i += 2) {
-                const piece = pieces[i + 0];
-                const slice = pieces[i + 1];
-
-                data.set(new Uint8Buffer(slice.buffer, piece.bulkOffset, piece.bulkEnd), piece.dataOffset);
+                const piece = this.slices[i].find(assetId);
+                if (piece) {
+                    size = piece.dataSize;
+                    available += piece.bulkEnd - piece.bulkOffset;
+                    pieces.unshift([piece, this.slices[i]]);
+                } else if (pieces.length > 0) {
+                    break;
+                }
             }
-            return {
-                assetId,
-                dataFormat: pieces[0].dataFormat,
-                data
-            };
-        }
-        return null;
+
+            if (pieces.length > 0 && size !== available) {
+                return build(pieces);
+            } else if (this.slices.some(isPromise)) {
+                return Promise.race(this.slices.filter(isPromise))
+                .then(search);
+            }
+
+            return null;
+        };
+
+        const build = (pieces) => {
+            if (pieces.length) {
+                const data = new Uint8Array(pieces[0][0].dataSize);
+                for (let i = 0; i < pieces.length; i++) {
+                    const [piece, slice] = pieces[i];
+                    data.set(new Uint8Array(slice.buffer, piece.bulkOffset, piece.bulkEnd - piece.bulkOffset), piece.dataOffset);
+                }
+                return {
+                    assetId,
+                    dataFormat: pieces[0][0].dataFormat,
+                    data
+                };
+            }
+            return null;
+        };
+
+        return search();
     }
 }
 
@@ -83,15 +118,19 @@ class BulkSlice {
     }
 
     static fromAsset (asset) {
+        if (isPromise(asset)) return asset.then(BulkSlice.fromAsset);
+
         const slice = new BulkSlice();
 
         const data = asset.data.buffer ? asset.data : new Uint8Array(asset.data);
-        const writeIndex = new Uint32Array(data, data.length - 4)[0];
-        const decodedTail = new TextDecoder().decode(new Uint8Array(data.buffer, writeIndex, data.length - 4));
+        const writeIndex = new Uint32Array(data.buffer, data.length - TAIL_INDEX_SIZE)[0];
+        const decodedTail = new TextDecoder().decode(new Uint8Array(data.buffer, writeIndex, data.length - TAIL_INDEX_SIZE - writeIndex));
 
         slice.bytes.set(new Uint8Array(data.buffer, 0, writeIndex));
         slice.table = JSON.parse(decodedTail);
         slice.writeIndex = writeIndex;
+
+        return slice;
     }
 
     static createAsset (slice) {
@@ -100,12 +139,12 @@ class BulkSlice {
         const data = new Uint8Array(slice.writeIndex + slice.tailSize + TAIL_INDEX_SIZE);
         data.set(new Uint8Array(slice.buffer, 0, slice.writeIndex));
         data.set(encodedTail, slice.writeIndex);
-        data.set(new Uint32Array([slice.writeIndex]), slice.writeIndex + slice.tailSize);
+        data.set(new Uint8Array(new Uint32Array([slice.writeIndex]).buffer), slice.writeIndex + slice.tailSize);
 
         const asset = new Asset({}, null, {}, data, true);
         return {
             assetId: asset.assetId,
-            dataFormat: asset.dataFormat,
+            dataFormat: 'bulk',
             data: asset.data
         };
     }
@@ -122,8 +161,8 @@ class BulkSlice {
         }
 
         this.table[asset.assetId] = {
-            assetId: assetId,
-            dataFormat: dataFormat,
+            assetId: asset.assetId,
+            dataFormat: asset.dataFormat,
             dataOffset: offset,
             dataSize: data.length,
             bulkOffset: this.writeIndex,
@@ -133,16 +172,22 @@ class BulkSlice {
         this.maxBodySize = MAX_BUFFER_SIZE - this.tailSize - TAIL_INDEX_SIZE;
 
         const written = Math.min(asset.data.length - offset, this.maxBodySize - this.writeIndex);
-        this.bytes.set(new Uint8Array(data.buffer, offset, offset + written), this.writeIndex);
+        this.bytes.set(new Uint8Array(data.buffer, offset, written), this.writeIndex);
         this.writeIndex += written;
         return written;
     }
 
     find (assetId) {
         if (this.table[assetId]) {
-            if (this.table[assetId].dataEnd === -1) {
+            if (this.table[assetId].bulkEnd === -1) {
+                let bulkEnd = this.writeIndex;
+                const tableAssets = Object.values(this.table);
+                const assetIndex = tableAssets.indexOf(this.table[assetId]);
+                if (assetIndex < tableAssets.length - 1) {
+                    bulkEnd = tableAssets[assetIndex].bulkOffset;
+                }
                 return Object.assign({}, this.table[assetId], {
-                    bulkEnd: this.writeIndex
+                    bulkEnd
                 });
             }
             return this.table[assetId];
@@ -151,8 +196,7 @@ class BulkSlice {
     }
 }
 
-class BulkItem {
-    constructor () {
-
-    }
-}
+module.exports = {
+    Bulk,
+    BulkSlice
+};

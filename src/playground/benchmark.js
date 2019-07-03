@@ -600,8 +600,8 @@ const runBenchmark = function () {
     const AssetType = storage.AssetType;
     storage.addWebSource([AssetType.Project], asset => `${location.origin}${location.pathname}/../projects/${asset.assetId.split('.')[0]}.json`);
     storage.addWebSource([AssetType.Project], getProjectUrl);
-    storage.addWebSource([AssetType.ImageVector, AssetType.ImageBitmap, AssetType.Sound], asset => `${location.origin}${location.pathname}/../assets/${asset.assetId}.${asset.dataFormat}`);
-    storage.addWebSource([AssetType.ImageVector, AssetType.ImageBitmap, AssetType.Sound], getAssetUrl);
+    storage.addWebSource([AssetType.ImageVector, AssetType.ImageBitmap, AssetType.Sound, {name: 'Bulk'}], asset => `${location.origin}${location.pathname}/../assets/${asset.assetId}.${asset.dataFormat}`);
+    storage.addWebSource([AssetType.ImageVector, AssetType.ImageBitmap, AssetType.Sound, {name: 'Bulk'}], getAssetUrl);
     vm.attachStorage(storage);
 
     new LoadingProgress(progress => {
