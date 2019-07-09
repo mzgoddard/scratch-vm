@@ -238,6 +238,16 @@ const loadBitmapRender = function ({
         // createBitmapSkin does the right thing if costume.bitmapResolution or
         // rotationCenter are undefined...
         costume.skinId = renderer.createBitmapSkin(canvas, costume.bitmapResolution, rotationCenter);
+
+        let imageData = canvas;
+        if (imageData instanceof HTMLCanvasElement) {
+            imageData = canvas.getContext('2d').getImageData(0, 0, imageData.width, imageData.height);
+        }
+        if (imageData instanceof ImageData) {
+            costume._imageData = imageData;
+        } else {
+            console.error('Cannot determine image data from bitmap asset');
+        }
     };
 };
 
@@ -297,6 +307,20 @@ const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
         } else {
             runtime.v2SvgAdapter.loadString(svgString);
             runtime.v2SvgAdapter.toJson().then(json => {
+                const walk = (node, index, parent) => {
+                    if (Array.isArray(node)) {
+                        if (node[0] === 'Raster') {
+                            console.log(node);
+                            // parent[Object.keys(parent)[index]] = ["Raster", node[1].name];
+                        } else {
+                            node.forEach(walk);
+                        }
+                    } else if (node && typeof node === 'object') {
+                        Object.values(node).forEach(walk);
+                    }
+                };
+                walk(json);
+
                 const data = JSON.stringify(json);
                 costume.derivedAsset = runtime.storage.createAsset({
                     contentType: 'application/json',

@@ -30,6 +30,22 @@ const serializeAssets = function (runtime, assetType, optTargetId) {
                 data: asset.data
             });
 
+            if (asset._imageData && asset.dataFormat === 'png') {
+                runtime.atlas = runtime.atlas || new Atlas();
+
+                if (!runtime.atlas.findTile(asset.assetId)) {
+                    runtime.atlas.createTile({
+                        asset: runtime.atlas.createAsset({
+                            assetId: asset.assetId,
+                            dataFormat: asset.dataFormat,
+                            imageData: asset._imageData
+                        }),
+                        map: null,
+                        tile: null
+                    });
+                }
+            }
+
             const derivedAsset = currAsset.derivedAsset;
             if (derivedAsset) {
                 runtime.derived = runtime.derived || {};

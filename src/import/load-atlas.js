@@ -54,6 +54,39 @@ class Asset {
         // }
         return this.context.getImageData(left, top, width, height);
     }
+
+    putImageData (x, y, width, height, data) {
+        if (!this.canvas) {
+            if (this.promise) {
+                throw new Error('Cannot put image data into loading canvas');
+            }
+
+            this.canvas = document.createElement('canvas');
+            this.promise = Promise.resolve(this.canvas);
+            this.canvas.width = 2048;
+            this.canvas.height = 2048;
+            this.context = this.canvas.getContext('2d');
+        }
+
+        this.context.putImageData(x, y, width, height, data);
+    }
+
+    toDataURL () {
+        return this.canvas.toDataURL();
+    }
+
+    toDataArray () {
+        const url = this.toDataURL();
+        const content = url.split(/^[^,]+,/)[1];
+        const utfBytes = btoa(content);
+        const bytes = new Uint8Array(utfBytes.length);
+
+        for (let i = 0; i < bytes.length; i++) {
+            bytes[i] = utfBytes.charCodeAt(i);
+        }
+
+        return bytes;
+    }
 }
 
 class MapTile {
@@ -66,6 +99,29 @@ class MapTile {
 
     getImageData (mapAsset) {
         return mapAsset.getImageData(this.left, this.top, this.width, this.height);
+    }
+
+    putImageData (mapAsset, data) {
+        mapAsset.putImageData(this.left, this.top, this.width, this.height, data);
+    }
+}
+
+class MapArea {
+    findFreeArea (width, height) {
+        if (this.subarea) {
+            const areaInSub = this.subarea.findFreeArea(width, height);
+            if (areaInSub) return areaInSub;
+        }
+
+        if (this.width >= width && this.height >= height) {
+            const {left, top} = this;
+            this.subarea = new MapArea({subarea: this.subarea, width, height: this.height - height, left, top: top + height});
+            this.left += width;
+            this.width -= width;
+            return new MapTile({width, height, top, left});
+        }
+
+        return null;
     }
 }
 
@@ -84,7 +140,9 @@ class Map {
         return tile;
     }
 
-    findFreeArea (width, height) {}
+    findFreeArea (width, height) {
+        return this.area.findFreeArea(width, height);
+    }
 }
 
 class AtlasTile {
@@ -94,8 +152,38 @@ class AtlasTile {
         this.tile = tile;
     }
 
-    getImageData (mapAsset) {
-        return this.tile.getImageData(mapAsset);
+    findFreeArea (atlas, width, height) {
+        if (this.map && this.tile) return true;
+
+        for (let i = 0; i < atlas.maps.length; i++) {
+            const areaInMap = atlas.maps[i].findFreeArea(width, height);
+            if (areaInMap) {
+                this.map = atlas.maps[i];
+                this.tile = areaInMap;
+                return true;
+            }
+        }
+
+        const map = atlas.createMap({
+            asset: atlas.createAsset({
+                assetId: `${atlas.maps.length}`,
+                dataFormat: 'png'
+            }),
+            width: 2048,
+            height: 2048
+        });
+
+        this.map = map;
+        this.tile = map.findFreeArea(width, height);
+        return true;
+    }
+
+    getImageData () {
+        return this.tile.getImageData(this.map.asset);
+    }
+
+    putImageData (data) {
+        return this.tile.putImageData(this.map.asset, data);
     }
 }
 
@@ -130,10 +218,61 @@ class Atlas {
         return null;
     }
 
-    findFreeArea (width, height) {}
+    findFreeArea (width, height) {
+        for (let i = 0; i < this.maps.length; i++) {
+            const areaInMap = this.maps[i].findFreeArea(width, height);
+            if (areaInMap) return this.createTile({
+                asset: this.createAsset(),
+                map: this.maps[i],
+                tile: areaInMap
+            });
+        }
+
+        const map = this.createMap({
+            asset: this.createAsset({
+                assetId: `${this.maps.length}`,
+                dataFormat: 'png'
+            }),
+            width: 2048,
+            height: 2048
+        });
+
+        return this.createTile({
+            asset: this.createAsset(),
+            map,
+            tile: map.findFreeArea(width, height)
+        });
+    }
 
     updateTile (tile, asset) {}
+
+    save (runtime, zipDescs) {
+        return saveAtlas(this, runtime, zipDescs);
+    }
 }
+
+const serializeAtlas = function (atlas) {
+    return {
+        maps: atlas.maps.map(map => ({
+            asset: {
+                assetId: map.asset.assetId,
+                dataFormat: map.asset.dataFormat
+            },
+            width: map.width,
+            height: map.height,
+            tiles: map.tiles.map(tile => atlas.tiles.find(atlasTile => atlasTile.tile === tile)).map(atlasTile => ({
+                asset: {
+                    assetId: atlasTile.asset.assetId,
+                    dataFormat: atlasTile.asset.dataFormat
+                },
+                width: atlasTile.tile.width,
+                height: atlasTile.tile.height,
+                top: atlasTile.tile.top,
+                left: atlasTile.tile.left
+            }))
+        }))
+    };
+};
 
 const deserializeAtlas = function (atlasData) {
     const atlas = new Atlas();
@@ -166,13 +305,87 @@ const deserializeAtlas = function (atlasData) {
     }
 
     return atlas;
-}
+};
+
+const saveAtlas = function (atlas, runtime, zipDescs) {
+    atlas.tiles.sort((a, b) => {
+        if (a.asset.imageData && b.asset.imageData) {
+            return b.asset.imageData.width - a.asset.imageData.width;
+        } else if (a.asset.imageData) {
+            return 1;
+        } else if (b.asset.imageData) {
+            return -1;
+        }
+        return 0;
+    });
+
+    for (let i = 0; i < atlas.tiles.length; i++) {
+        const tile = atlas.tiles[0];
+        if (!tile.asset.imageData) continue;
+        tile.findFreeArea(atlas, tile.asset.imageData.width, tile.asset.imageData.height);
+        tile.putImageData(tile.asset.imageData);
+    }
+
+    for (let i = 0; i < atlas.maps.length; i++) {
+        const map = atlas.maps[i];
+        const data = map.asset.toDataArray();
+        const asset = runtime.storage.createAsset(
+            runtime.storage.AssetType.ImageBitmap,
+            runtime.storage.DataFormat.PNG,
+            data, null, true);
+        map.asset.assetId = asset.assetId;
+
+        zipDescs.push({
+            fileName: `${asset.assetId}.${asset.dataFormat}`,
+            fileContent: asset.data
+        });
+
+        runtime.bulk = runtime.bulk || new LoadBulk();
+        runtime.bulk.add({
+            assetId: asset.assetId,
+            dataFormat: asset.dataFormat,
+            data: asset.data
+        });
+    }
+
+    return serializeAtlas(atlas);
+};
 
 const loadAtlas = function (atlasData, runtime, zip) {
-    return deserializeAtlas(atlasData);
+    const atlas = deserializeAtlas(atlasData);
+
+    for (let i = 0; i < atlas.maps.length; i++) {
+        const map = atlas.maps[i];
+        if (!map.asset.promise) {
+            map.asset.loadCanvas(Promise.resolve()
+                .then(() => {
+                    const assetType = runtime.storage.AssetType.ImageBitmap;
+                    const md5 = map.asset.assetId;
+                    const dataFormat = map.asset.dataFormat;
+                    return runtime.storage.load(assetType, md5, dataFormat);
+                })
+                .then(asset => (
+                    createImageBitmap(
+                        new Blob([asset.data], {type: asset.assetType.contentType})
+                    )
+                ))
+                .then(bitmap => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = bitmap.width;
+                    canvas.height = bitmap.height;
+                    canvas.getContext('2d').drawImage(bitmap, 0, 0);
+                    return canvas;
+                })
+            );
+        }
+    }
+
+    return atlas;
 };
 
 module.exports = {
+    saveAtlas,
     loadAtlas,
+    serializeAtlas,
     deserializeAtlas
 };
