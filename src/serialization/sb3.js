@@ -563,6 +563,8 @@ const serialize = function (runtime, targetId) {
     // console.log(runtime.bulk);
     meta.bulk = runtime.bulk.assetIds;
 
+    if (runtime.atlas) meta.atlas = runtime.atlas.stringify();
+
     // Attach full user agent string to metadata if available
     meta.agent = 'none';
     if (typeof navigator !== 'undefined') meta.agent = navigator.userAgent;
@@ -1233,9 +1235,9 @@ const deserialize = function (json, runtime, zip, isSingleSprite) {
     const monitorObjects = json.monitors || [];
 
     if (json.meta.derived) {
-        if (json.meta.derived.atlas) {
+        if (json.meta.atlas) {
             const loadAtlas = require('../import/load-atlas');
-            runtime.atlas = loadAtlas.loadAtlas(json.meta.derived.atlas, runtime, zip);
+            runtime.atlas = loadAtlas.loadAtlas(json.meta.atlas, runtime, zip);
         }
         if (json.meta.derived) {
             runtime.derived = json.meta.derived;

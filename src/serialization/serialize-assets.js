@@ -1,4 +1,5 @@
 const LoadBulk = require('../import/load-bulk').Bulk;
+const Atlas = require('../import/load-atlas').Atlas;
 
 /**
  * Serialize all the assets of the given type ('sounds' or 'costumes')
@@ -30,10 +31,12 @@ const serializeAssets = function (runtime, assetType, optTargetId) {
                 data: asset.data
             });
 
-            if (asset._imageData && asset.dataFormat === 'png') {
+            if (asset._imageData) {
+                // debugger;
                 runtime.atlas = runtime.atlas || new Atlas();
 
                 if (!runtime.atlas.findTile(asset.assetId)) {
+                    // debugger;
                     runtime.atlas.createTile({
                         asset: runtime.atlas.createAsset({
                             assetId: asset.assetId,
@@ -46,9 +49,19 @@ const serializeAssets = function (runtime, assetType, optTargetId) {
                 }
             }
 
+            // if (asset.rasterAssets) {
+            //     for (let k = 0; k < asset.rasterAssets.length; k++) {
+            //         runtime.bulk.add({
+            //
+            //         });
+            //     }
+            // }
+
             const derivedAsset = currAsset.derivedAsset;
             if (derivedAsset) {
                 runtime.derived = runtime.derived || {};
+
+                if (derivedAsset.parsed) debugger;
 
                 runtime.derived[asset.assetId] = {
                     assetId: derivedAsset.assetId,

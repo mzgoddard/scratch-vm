@@ -81,19 +81,54 @@ const loadCostumeInAtlas = function ({
     field = 'asset'
 }) {
     return function (scope, {runtime}) {
-        // console.log('atlas?', !!runtime.atlas);
+        console.log('atlas?', !!runtime.atlas);
         if (runtime.atlas) {
             const tile = runtime.atlas.findTile(scope.costume.assetId);
-            // console.log(scope.costume.assetId, tile);
+            console.log(scope.costume.assetId, tile);
             return Boolean(tile);
         }
         return false;
     };
 };
 
-const loadBitmapFromAtlas = function ({
+const loadAtlasMapFromBulk = function ({
+}) {
+    return function (scope, {runtime}) {
+        if (runtime.bulk) {
+            const asset = runtime.bulk.find(scope.assetId);
+            if (asset) {
+                return Promise.resolve(asset)
+                .then(asset => {
+                    scope.asset = runtime.storage.createAsset(
+                        runtime.storage.AssetType.ImageBitmap,
+                        runtime.storage.DataFormat.PNG,
+                        asset.data,
+                        scope.assetId
+                    );
+                });
+            }
+        }
+    }
+};
+
+const loadAtlasMapAsset = function ({
+}) {
+    return function (scope, {runtime}) {
+        if (!scope.asset) {
+            const assetType = runtime.storage.AssetType.ImageBitmap;
+            const md5 = scope.assetId;
+            const dataFormat = scope.dataFormat;
+            return runtime.storage.load(assetType, md5, dataFormat)
+            .then(asset => {
+                scope.asset = asset;
+            });
+        }
+    };
+};
+
+const loadAtlasMapCanvas = function ({
     field = 'asset',
-    elementField = 'baseImageElement'
+    loadAsset = loadAtlasMapAset({})
 }) {
     return function (scope, {runtime}) {
         if (runtime.atlas) {
@@ -102,13 +137,17 @@ const loadBitmapFromAtlas = function ({
                 if (!tile.map.asset.promise) {
                     tile.map.asset.loadCanvas(Promise.resolve()
                         .then(() => {
-                            const assetType = runtime.storage.AssetType.ImageBitmap;
-                            const md5 = tile.map.asset.assetId;
-                            // console.log('load', md5);
-                            const dataFormat = tile.map.asset.dataFormat;
-                            return runtime.storage.load(assetType, md5, dataFormat);
+                            const subscope = {
+                                assetId: tile.map.asset.assetId,
+                                dataFormat: tile.map.asset.dataFormat,
+                                asset: null
+                            };
+                            console.log(subscope);
+                            return loadAsset.run(subscope, {runtime})
+                            .then(() => (console.log(subscope), subscope.asset));
                         })
                         .then(asset => (
+                            console.log(asset),
                             createImageBitmap(
                                 new Blob([asset.data], {type: asset.assetType.contentType})
                             )
@@ -122,6 +161,19 @@ const loadBitmapFromAtlas = function ({
                         })
                     );
                 }
+            }
+        }
+    };
+};
+
+const loadBitmapFromAtlas = function ({
+    field = 'asset',
+    elementField = 'baseImageElement'
+}) {
+    return function (scope, {runtime}) {
+        if (runtime.atlas) {
+            const tile = runtime.atlas.findTile(scope.costume.assetId);
+            if (tile) {
                 return tile.map.asset.loadCanvas().then(mapAsset => {
                     let _bytes;
                     scope.costume.asset = {
@@ -244,7 +296,7 @@ const loadBitmapRender = function ({
             imageData = canvas.getContext('2d').getImageData(0, 0, imageData.width, imageData.height);
         }
         if (imageData instanceof ImageData) {
-            costume._imageData = imageData;
+            costume.asset._imageData = imageData;
         } else {
             console.error('Cannot determine image data from bitmap asset');
         }
@@ -304,22 +356,38 @@ const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
         if (costume.derivedAsset && costume.derivedAsset.data) {
             const jsonText = costume.derivedAsset.decodeText();
             svgString = JSON.parse(jsonText);
+            costume.derivedAsset.parsed = svgString;
         } else {
             runtime.v2SvgAdapter.loadString(svgString);
             runtime.v2SvgAdapter.toJson().then(json => {
-                const walk = (node, index, parent) => {
-                    if (Array.isArray(node)) {
-                        if (node[0] === 'Raster') {
-                            console.log(node);
-                            // parent[Object.keys(parent)[index]] = ["Raster", node[1].name];
-                        } else {
-                            node.forEach(walk);
-                        }
-                    } else if (node && typeof node === 'object') {
-                        Object.values(node).forEach(walk);
-                    }
-                };
-                walk(json);
+                // const walk = (node, index, parent) => {
+                //     if (Array.isArray(node)) {
+                //         if (node[0] === 'Raster') {
+                //             const url = node[1].buffer;
+                //             const content = url.split(/^[^,]+,/)[1];
+                //             const utfBytes = atob(content);
+                //             const bytes = new Uint8Array(utfBytes.length);
+                //
+                //             for (let i = 0; i < bytes.length; i++) {
+                //                 bytes[i] = utfBytes.charCodeAt(i);
+                //             }
+                //
+                //             costume.asset.rasterAssets = costume.asset.rasterAssets || [];
+                //             costume.asset.rasterAssets.push(runtime.storage.createAsset(
+                //                 runtime.storage.AssetType.ImageBitmap,
+                //                 runtime.storage.DataFormat.PNG,
+                //                 bytes, null, true));
+                //
+                //             console.log(node);
+                //             // parent[Object.keys(parent)[index]] = ["Raster", node[1].name];
+                //         } else {
+                //             node.forEach(walk);
+                //         }
+                //     } else if (node && typeof node === 'object') {
+                //         Object.values(node).forEach(walk);
+                //     }
+                // };
+                // walk(json);
 
                 const data = JSON.stringify(json);
                 costume.derivedAsset = runtime.storage.createAsset({
@@ -729,9 +797,13 @@ const loadCostumeAfterLoad = function ({
 const loadCostume = (function () {
     const {Branch, DerefScope, GeneratedFunction, MayFail, Parallel, Sequence} = LoadTask;
     const firstBitmapLoad = new Sequence([
+        new GeneratedFunction(loadAspect.loadBulk, {}),
+        new MayFail(new DerefScope('costume', new GeneratedFunction(loadAspect.loadAssetFromBulk, {
+            formatOf: ({dataFormat}) => dataFormat,
+            typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageBitmap
+        }))),
         new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
             formatOf: ({dataFormat}) => dataFormat,
-            // md5Of: ({md5}) => md5,
             typeOf: ({dataFormat}, {runtime: {storage: {AssetType}}}) => (dataFormat === 'svg') ? AssetType.ImageVector : AssetType.ImageBitmap
         })),
         new GeneratedFunction(loadBitmapFromAsset, {}),
@@ -780,6 +852,15 @@ const loadCostume = (function () {
         ]),
         new Branch(new GeneratedFunction(loadCostumeInAtlas, {}),
             new Sequence([
+                new GeneratedFunction(loadAtlasMapCanvas, {
+                    loadAsset: new Sequence([
+                        new MayFail(new Sequence([
+                            new GeneratedFunction(loadAspect.loadBulk, {}),
+                            new GeneratedFunction(loadAtlasMapFromBulk, {}),
+                        ])),
+                        new GeneratedFunction(loadAtlasMapAsset, {}),
+                    ]),
+                }),
                 new GeneratedFunction(loadBitmapFromAtlas, {}),
                 new GeneratedFunction(loadCostumeAfterLoad, {}),
                 new GeneratedFunction(loadBitmapRender, {}),

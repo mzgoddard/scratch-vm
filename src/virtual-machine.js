@@ -374,17 +374,19 @@ class VirtualMachine extends EventEmitter {
         const soundDescs = serializeSounds(this.runtime);
         const costumeDescs = serializeCostumes(this.runtime);
 
-        console.log(this.toJSON());
+        // console.log(this.toJSON());
+        let atlas;
+        if (this.runtime.atlas) {
+            console.log(this.runtime.atlas);
+            atlas = this.runtime.atlas.save(this.runtime, costumeDescs);
+            console.log(atlas);
+        }
         if (this.runtime.bulk) {
             this.runtime.bulk = this.runtime.bulk.createAssets();
         }
-        let atlas;
-        if (this.runtime.atlas) {
-            atlas = this.runtime.atlas.save(this.runtime, costumeDescs);
-        }
 
         const projectJson = this.toJSON();
-        console.log(projectJson);
+        // console.log(projectJson);
 
         if (this.runtime.bulk) {
             const bulkAssets = this.runtime.bulk;
@@ -392,9 +394,6 @@ class VirtualMachine extends EventEmitter {
                 fileName: `${asset.assetId}.${asset.dataFormat}`,
                 fileContent: asset.data
             })));
-        }
-        if (this.runtime.atlas) {
-            projectJson.meta.atlas = atlas;
         }
 
         // TODO want to eventually move zip creation out of here, and perhaps

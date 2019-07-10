@@ -1,7 +1,8 @@
 class Asset {
-    constructor ({assetId, dataFormat}) {
+    constructor ({assetId, dataFormat, imageData}) {
         this.assetId = assetId;
         this.dataFormat = dataFormat;
+        this.imageData = imageData;
 
         this.promise = null;
         this.canvas = null;
@@ -68,7 +69,7 @@ class Asset {
             this.context = this.canvas.getContext('2d');
         }
 
-        this.context.putImageData(x, y, width, height, data);
+        this.context.putImageData(data, x, y);
     }
 
     toDataURL () {
@@ -78,7 +79,7 @@ class Asset {
     toDataArray () {
         const url = this.toDataURL();
         const content = url.split(/^[^,]+,/)[1];
-        const utfBytes = btoa(content);
+        const utfBytes = atob(content);
         const bytes = new Uint8Array(utfBytes.length);
 
         for (let i = 0; i < bytes.length; i++) {
@@ -107,6 +108,14 @@ class MapTile {
 }
 
 class MapArea {
+    constructor ({subarea = null, width, height, left = 0, top = 0}) {
+        this.subarea = subarea;
+        this.left = left;
+        this.top = top;
+        this.width = width;
+        this.height = height;
+    }
+
     findFreeArea (width, height) {
         if (this.subarea) {
             const areaInSub = this.subarea.findFreeArea(width, height);
@@ -141,7 +150,12 @@ class Map {
     }
 
     findFreeArea (width, height) {
-        return this.area.findFreeArea(width, height);
+        if (!this.area) {
+            this.area = new MapArea(this);
+        }
+        const tile = this.area.findFreeArea(width, height);
+        if (tile) this.tiles.push(tile);
+        return tile;
     }
 }
 
@@ -246,6 +260,10 @@ class Atlas {
 
     updateTile (tile, asset) {}
 
+    stringify () {
+        return serializeAtlas(this);
+    }
+
     save (runtime, zipDescs) {
         return saveAtlas(this, runtime, zipDescs);
     }
@@ -320,7 +338,7 @@ const saveAtlas = function (atlas, runtime, zipDescs) {
     });
 
     for (let i = 0; i < atlas.tiles.length; i++) {
-        const tile = atlas.tiles[0];
+        const tile = atlas.tiles[i];
         if (!tile.asset.imageData) continue;
         tile.findFreeArea(atlas, tile.asset.imageData.width, tile.asset.imageData.height);
         tile.putImageData(tile.asset.imageData);
@@ -357,6 +375,7 @@ const loadAtlas = function (atlasData, runtime, zip) {
     for (let i = 0; i < atlas.maps.length; i++) {
         const map = atlas.maps[i];
         if (!map.asset.promise) {
+            continue;
             map.asset.loadCanvas(Promise.resolve()
                 .then(() => {
                     const assetType = runtime.storage.AssetType.ImageBitmap;
@@ -384,6 +403,7 @@ const loadAtlas = function (atlasData, runtime, zip) {
 };
 
 module.exports = {
+    Atlas,
     saveAtlas,
     loadAtlas,
     serializeAtlas,
