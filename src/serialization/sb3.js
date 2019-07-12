@@ -561,7 +561,9 @@ const serialize = function (runtime, targetId) {
     // meta.atlas = null;
     meta.derived = runtime.derived;
     // console.log(runtime.bulk);
-    meta.bulk = runtime.bulk.assetIds;
+    if (runtime.bulk) {
+        meta.bulk = runtime.bulk.assetIds;
+    }
 
     if (runtime.atlas) meta.atlas = runtime.atlas.stringify();
 

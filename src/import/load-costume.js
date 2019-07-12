@@ -77,14 +77,14 @@ const loadCostumeInDerived = function ({
     }
 };
 
-const loadCostumeInAtlas = function ({
+const loadAssetInAtlas = function ({
     field = 'asset'
 }) {
     return function (scope, {runtime}) {
         console.log('atlas?', !!runtime.atlas);
         if (runtime.atlas) {
-            const tile = runtime.atlas.findTile(scope.costume.assetId);
-            console.log(scope.costume.assetId, tile);
+            const tile = runtime.atlas.findTile(scope.assetId);
+            console.log(scope.assetId, tile);
             return Boolean(tile);
         }
         return false;
@@ -118,8 +118,11 @@ const loadAtlasMapAsset = function ({
             const assetType = runtime.storage.AssetType.ImageBitmap;
             const md5 = scope.assetId;
             const dataFormat = scope.dataFormat;
+            performance.mark(`loadMapAsset(${md5}):start`);
             return runtime.storage.load(assetType, md5, dataFormat)
             .then(asset => {
+                performance.mark(`loadMapAsset(${md5}):stop`);
+                performance.measure(`loadMapAsset(${md5})`, `loadMapAsset(${md5}):start`, `loadMapAsset(${md5}):stop`);
                 scope.asset = asset;
             });
         }
@@ -132,7 +135,7 @@ const loadAtlasMapCanvas = function ({
 }) {
     return function (scope, {runtime}) {
         if (runtime.atlas) {
-            const tile = runtime.atlas.findTile(scope.costume.assetId);
+            const tile = runtime.atlas.findTile(scope.assetId);
             if (tile) {
                 if (!tile.map.asset.promise) {
                     tile.map.asset.loadCanvas(Promise.resolve()
@@ -143,16 +146,33 @@ const loadAtlasMapCanvas = function ({
                                 asset: null
                             };
                             console.log(subscope);
+                            performance.mark(`load(${tile.map.asset.assetId}):start`);
                             return loadAsset.run(subscope, {runtime})
                             .then(() => (console.log(subscope), subscope.asset));
                         })
                         .then(asset => (
-                            console.log(asset),
-                            createImageBitmap(
-                                new Blob([asset.data], {type: asset.assetType.contentType})
-                            )
+                            performance.mark(`load(${tile.map.asset.assetId}):stop`),
+                            performance.measure(`load(${tile.map.asset.assetId})`, `load(${tile.map.asset.assetId}):start`, `load(${tile.map.asset.assetId}):stop`),
+
+                            performance.mark(`createImageBitmap(${tile.map.asset.assetId}):start`),
+                            typeof createImageBitmap === 'function' ?
+                                createImageBitmap(new Blob([asset.data], {type: asset.assetType.contentType})) :
+                                new Promise((resolve) => {
+                                    const img = new Image();
+                                    if (URL.createObjectURL) {
+                                        img.src = URL.createObjectURL(new Blob([asset.data], {type: asset.assetType.contentType}));
+                                    } else {
+                                        img.src = asset.encodeDataURI();
+                                    }
+                                    img.onload = () => resolve(img);
+                                })
                         ))
                         .then(bitmap => {
+                            performance.mark(`createImageBitmap(${tile.map.asset.assetId}):stop`);
+                            performance.measure(
+                                `createImageBitmap(${tile.map.asset.assetId})`,
+                                `createImageBitmap(${tile.map.asset.assetId}):start`,
+                                `createImageBitmap(${tile.map.asset.assetId}):stop`);
                             const canvas = document.createElement('canvas');
                             canvas.width = bitmap.width;
                             canvas.height = bitmap.height;
@@ -166,7 +186,73 @@ const loadAtlasMapCanvas = function ({
     };
 };
 
-const loadBitmapFromAtlas = function ({
+const loadImageDataFromAtlas = function ({
+    field = 'asset',
+    elementField = 'baseImageElement'
+}) {
+    return function (scope, {runtime}) {
+        if (runtime.atlas) {
+            const tile = runtime.atlas.findTile(scope.assetId);
+            if (tile) {
+                return tile.map.asset.loadCanvas().then(mapAsset => {
+                    let _bytes;
+                    if (typeof performance === 'object' && performance.mark && performance.measure) {
+                        performance.mark(`getImageData(${tile.tile.width}, ${tile.tile.height}):${tile.asset.assetId}:start`);
+                    }
+                    let imageData = tile.getImageData(mapAsset);
+                    if (typeof performance === 'object' && performance.mark && performance.measure) {
+                        performance.mark(`getImageData(${tile.tile.width}, ${tile.tile.height}):${tile.asset.assetId}:stop`);
+                        performance.measure(
+                            `getImageData(${tile.tile.width}, ${tile.tile.height}):${tile.asset.assetId}`,
+                            `getImageData(${tile.tile.width}, ${tile.tile.height}):${tile.asset.assetId}:start`,
+                            `getImageData(${tile.tile.width}, ${tile.tile.height}):${tile.asset.assetId}:stop`
+                        );
+                    }
+                    scope.asset = {
+                        assetType: runtime.storage.AssetType.ImageBitmap,
+                        assetId: tile.asset.assetId,
+                        dataFormat: 'png',
+                        get data () {
+                            if (!_bytes) {
+                                console.log('bytes for');
+                                const canvas = document.createElement('canvas');
+                                canvas.width = tile.tile.width;
+                                canvas.height = tile.tile.height;
+                                canvas.getContext('2d').drawImage(mapAsset.canvas, tile.tile.left, tile.tile.top, tile.tile.width, tile.tile.height, 0, 0, tile.tile.width, tile.tile.height);
+                                const dataURL = canvas.toDataURL();
+                                const codes = btoa(dataURL.substring(dataURL.indexOf(',')));
+                                _bytes = new Uint8Array(codes.length);
+                                for (let i = 0; i < _bytes.length; i++) {
+                                    _bytes[i] = codes.charCodeAt(i);
+                                }
+                                console.log(_bytes.length);
+                            }
+                            return _bytes;
+                        },
+                        imageData
+                    };
+                    tile.asset.imageData = imageData;
+                });
+            }
+        }
+    };
+};
+
+const loadCanvasFromAtlasImageData = function ({
+}) {
+    return function (scope, {runtime}) {
+        if (runtime.atlas) {
+            const tile = runtime.atlas.findTile(scope.costume.assetId);
+            if (tile) {
+                if (tile.asset.imageData) {
+                    scope.canvas = tile.asset.imageData;
+                }
+            }
+        }
+    };
+};
+
+const loadCanvasFromAtlas = function ({
     field = 'asset',
     elementField = 'baseImageElement'
 }) {
@@ -174,6 +260,10 @@ const loadBitmapFromAtlas = function ({
         if (runtime.atlas) {
             const tile = runtime.atlas.findTile(scope.costume.assetId);
             if (tile) {
+                if (tile.asset.imageData) {
+                    scope.canvas = tile.asset.imageData;
+                    return;
+                }
                 return tile.map.asset.loadCanvas().then(mapAsset => {
                     let _bytes;
                     scope.costume.asset = {
@@ -198,7 +288,18 @@ const loadBitmapFromAtlas = function ({
                             return _bytes;
                         }
                     };
-                    scope.canvas = tile.getImageData(mapAsset);
+                    if (typeof performance === 'object' && performance.mark && performance.measure) {
+                        performance.mark(`getImageData(${tile.tile.width}, ${tile.tile.height}):${tile.asset.assetId}:start`);
+                    }
+                    tile.asset.imageData = scope.canvas = tile.getImageData(mapAsset);
+                    if (typeof performance === 'object' && performance.mark && performance.measure) {
+                        performance.mark(`getImageData(${tile.tile.width}, ${tile.tile.height}):${tile.asset.assetId}:stop`);
+                        performance.measure(
+                            `getImageData(${tile.tile.width}, ${tile.tile.height}):${tile.asset.assetId}`,
+                            `getImageData(${tile.tile.width}, ${tile.tile.height}):${tile.asset.assetId}:start`,
+                            `getImageData(${tile.tile.width}, ${tile.tile.height}):${tile.asset.assetId}:stop`
+                        );
+                    }
                 });
             }
         }
@@ -337,59 +438,134 @@ const loadBitmapCanvasCleanup = function ({
     };
 };
 
+const loadVectorRasterAssets = function ({
+    loadBitmapAsset
+}) {
+    return function (scope, options) {
+        if (scope.costume && scope.costume.derivedAsset) {
+            const derivedAsset = scope.costume.derivedAsset;
+            const jsonText = scope.costume.derivedAsset.decodeText();
+            const json = JSON.parse(jsonText);
+            if (json.raster) {
+                derivedAsset.rasterAssets = [];
+                return Promise.all(json.raster.map((rasterAsset, index) => {
+                    const scope = Object.assign({}, rasterAsset);
+                    return loadBitmapAsset.run(scope, options)
+                    .then(() => {
+                        derivedAsset.rasterAssets[index] = scope.asset;
+                    });
+                }));
+            }
+        }
+    };
+};
+
 const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
     return new Promise(resolve => {
-        let svgString = costume.asset.decodeText();
-        // SVG Renderer load fixes "quirks" associated with Scratch 2 projects
-        if (optVersion && optVersion === 2 && !runtime.v2SvgAdapter) {
-            log.error('No V2 SVG adapter present; SVGs may not render correctly.');
-        } else if (optVersion && optVersion === 2 && runtime.v2SvgAdapter) {
-            runtime.v2SvgAdapter.loadString(svgString, true /* fromVersion2 */);
-            svgString = runtime.v2SvgAdapter.toString();
-            // Put back into storage
-            const storage = runtime.storage;
-            costume.asset.encodeTextData(svgString, storage.DataFormat.SVG, true);
-            costume.assetId = costume.asset.assetId;
-            costume.md5 = `${costume.assetId}.${costume.dataFormat}`;
-        }
+        let svgString;
 
         if (costume.derivedAsset && costume.derivedAsset.data) {
             const jsonText = costume.derivedAsset.decodeText();
-            svgString = JSON.parse(jsonText);
-            costume.derivedAsset.parsed = svgString;
+            const rasterAssets = costume.derivedAsset.rasterAssets;
+            svgString = JSON.parse(jsonText, jsonText.includes('imageData') ? function (key, value) {
+                if (key === 'imageData') {
+                    return rasterAssets[value].imageData;
+                } else if (key === 'source') {
+                    return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+P+/HgAFhAJ/wlseKgAAAABJRU5ErkJggg==';
+                    // return 'data:';
+                }
+                // if (key === 'source' && !value.startsWith('data:')) {
+                //     const raster = rasterAssets.find(asset => asset.assetId === value);
+                //     if (raster.imageData) {
+                //         return raster.imageData;
+                //     }
+                //     return raster.encodeDataURI();
+                // }
+                return value;
+            } : null);
+            // console.log(jsonText.length);
+            // if (jsonText.length > 100000) debugger;
         } else {
+            svgString = costume.asset.decodeText();
+            // SVG Renderer load fixes "quirks" associated with Scratch 2 projects
+            if (optVersion && optVersion === 2 && !runtime.v2SvgAdapter) {
+                log.error('No V2 SVG adapter present; SVGs may not render correctly.');
+            } else if (optVersion && optVersion === 2 && runtime.v2SvgAdapter) {
+                runtime.v2SvgAdapter.loadString(svgString, true /* fromVersion2 */);
+                svgString = runtime.v2SvgAdapter.toString();
+                // Put back into storage
+                const storage = runtime.storage;
+                costume.asset.encodeTextData(svgString, storage.DataFormat.SVG, true);
+                costume.assetId = costume.asset.assetId;
+                costume.md5 = `${costume.assetId}.${costume.dataFormat}`;
+            }
+
             runtime.v2SvgAdapter.loadString(svgString);
             runtime.v2SvgAdapter.toJson().then(json => {
-                // const walk = (node, index, parent) => {
-                //     if (Array.isArray(node)) {
-                //         if (node[0] === 'Raster') {
-                //             const url = node[1].buffer;
-                //             const content = url.split(/^[^,]+,/)[1];
-                //             const utfBytes = atob(content);
-                //             const bytes = new Uint8Array(utfBytes.length);
-                //
-                //             for (let i = 0; i < bytes.length; i++) {
-                //                 bytes[i] = utfBytes.charCodeAt(i);
-                //             }
-                //
-                //             costume.asset.rasterAssets = costume.asset.rasterAssets || [];
-                //             costume.asset.rasterAssets.push(runtime.storage.createAsset(
-                //                 runtime.storage.AssetType.ImageBitmap,
-                //                 runtime.storage.DataFormat.PNG,
-                //                 bytes, null, true));
-                //
-                //             console.log(node);
-                //             // parent[Object.keys(parent)[index]] = ["Raster", node[1].name];
-                //         } else {
-                //             node.forEach(walk);
-                //         }
-                //     } else if (node && typeof node === 'object') {
-                //         Object.values(node).forEach(walk);
-                //     }
-                // };
-                // walk(json);
+                const rasterAssets = [];
+
+                const walk = (node, index, parent) => {
+                    if (Array.isArray(node)) {
+                        if (node[0] === 'Raster' && node[1].imageData) {
+                            const content = node[1].pngData;
+                            const utfBytes = atob(content);
+                            const bytes = new Uint8Array(utfBytes.length);
+
+                            for (let i = 0; i < bytes.length; i++) {
+                                bytes[i] = utfBytes.charCodeAt(i);
+                            }
+
+                            rasterAssets.push(runtime.storage.createAsset(
+                                runtime.storage.AssetType.ImageBitmap,
+                                runtime.storage.DataFormat.PNG,
+                                bytes, null, true));
+                            rasterAssets[rasterAssets.length - 1].imageData = node[1].imageData;
+
+                            node[1].pngData = node[1].imageData = rasterAssets.length - 1;
+                        } else if (node[0] === 'Raster' && node[1].source) {
+                            const url = node[1].buffer;
+                            const content = url.split(/^[^,]+,/)[1];
+                            const utfBytes = atob(content);
+                            const bytes = new Uint8Array(utfBytes.length);
+
+                            for (let i = 0; i < bytes.length; i++) {
+                                bytes[i] = utfBytes.charCodeAt(i);
+                            }
+
+                            rasterAssets.push(runtime.storage.createAsset(
+                                runtime.storage.AssetType.ImageBitmap,
+                                runtime.storage.DataFormat.PNG,
+                                bytes, null, true));
+                        } else {
+                            node.forEach(walk);
+                        }
+                    } else if (node && typeof node === 'object') {
+                        Object.values(node).forEach(walk);
+                    }
+                };
+                walk(json);
+
+                json.raster = rasterAssets.map(asset => {
+                    return {
+                        assetId: asset.assetId,
+                        dataFormat: asset.dataFormat
+                    };
+                    // if (asset.imageData) {
+                    //     const rawAsset = runtime.storage.createAsset({
+                    //         content: 'application/octet-stream',
+                    //         name: 'RGBAImage',
+                    //         runtimeFormat: 'octet-stream'
+                    //     }, 'octet-stream', asset.imageData.data, null, true);
+                    //
+                    //     return {
+                    //         imageId: rawAsset.assetId
+                    //     };
+                    // } else {
+                    // }
+                });
 
                 const data = JSON.stringify(json);
+
                 costume.derivedAsset = runtime.storage.createAsset({
                     contentType: 'application/json',
                     name: 'ImagePaper',
@@ -397,6 +573,8 @@ const loadVector_ = function (costume, runtime, rotationCenter, optVersion) {
                     immutable: true
                 }, runtime.storage.DataFormat.JSON, null, null, false);
                 costume.derivedAsset.encodeTextData(data, runtime.storage.DataFormat.JSON, true);
+
+                costume.derivedAsset.rasterAssets = rasterAssets;
             });
         }
 
@@ -778,7 +956,8 @@ const loadCostumeAfterLoad = function ({
     return function (scope, {runtime}) {
         const {costume} = scope;
 
-        costume.assetId = costume.asset.assetId;
+        costume.assetId = costume.asset ? costume.asset.assetId : costume.assetId;
+
         const renderer = runtime.renderer;
         if (!renderer) {
             log.error('No rendering module present; cannot load costume: ', costume.name);
@@ -794,14 +973,21 @@ const loadCostumeAfterLoad = function ({
     };
 };
 
+const pause = function ({
+}) {
+    return function () {
+        return Promise.resolve().then(() => Promise.resolve());
+    };
+};
+
 const loadCostume = (function () {
     const {Branch, DerefScope, GeneratedFunction, MayFail, Parallel, Sequence} = LoadTask;
     const firstBitmapLoad = new Sequence([
-        new GeneratedFunction(loadAspect.loadBulk, {}),
-        new MayFail(new DerefScope('costume', new GeneratedFunction(loadAspect.loadAssetFromBulk, {
-            formatOf: ({dataFormat}) => dataFormat,
-            typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageBitmap
-        }))),
+        // new GeneratedFunction(loadAspect.loadBulk, {}),
+        // new MayFail(new DerefScope('costume', new GeneratedFunction(loadAspect.loadAssetFromBulk, {
+        //     formatOf: ({dataFormat}) => dataFormat,
+        //     typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageBitmap
+        // }))),
         new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
             formatOf: ({dataFormat}) => dataFormat,
             typeOf: ({dataFormat}, {runtime: {storage: {AssetType}}}) => (dataFormat === 'svg') ? AssetType.ImageVector : AssetType.ImageBitmap
@@ -810,30 +996,21 @@ const loadCostume = (function () {
     ]);
     const tasks = new Branch(new GeneratedFunction(loadCostumeIsVector, {}),
         new Sequence([
-            new Parallel([
-                new GeneratedFunction(loadAspect.loadBulk, {}),
-                new Sequence([
-                    new MayFail(new DerefScope('costume', new GeneratedFunction(loadAspect.loadAssetFromBulk, {
-                        formatOf: ({dataFormat}) => dataFormat,
-                        typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
-                    }))),
-                    new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
-                        formatOf: ({dataFormat}) => dataFormat,
-                        typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
-                    })),
-                ]),
+            // new GeneratedFunction(pause, {}),
+            new Branch(new GeneratedFunction(loadCostumeInDerived, {}),
                 new Branch(new GeneratedFunction(loadCostumeInDerived, {}),
                     new Sequence([
-                        new MayFail(new DerefScope('costume', new GeneratedFunction(loadAspect.loadAssetFromBulk, {
-                            assetName: 'derived costume',
-                            field: 'derivedAsset',
-                            fieldId: null,
-                            fieldMd5: null,
-                            generateMd5: false,
-                            formatOf: () => 'json',
-                            md5Of: ({asset, assetId}, {runtime}) => runtime.derived[assetId || asset.assetId].assetId,
-                            typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
-                        }))),
+                        // new GeneratedFunction(loadAspect.loadBulk, {}),
+                        // new MayFail(new DerefScope('costume', new GeneratedFunction(loadAspect.loadAssetFromBulk, {
+                        //     assetName: 'derived costume',
+                        //     field: 'derivedAsset',
+                        //     fieldId: null,
+                        //     fieldMd5: null,
+                        //     generateMd5: false,
+                        //     formatOf: () => 'json',
+                        //     md5Of: ({asset, assetId}, {runtime}) => runtime.derived[assetId || asset.assetId].assetId,
+                        //     typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
+                        // }))),
                         new MayFail(new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
                             assetName: 'derived costume',
                             field: 'derivedAsset',
@@ -843,16 +1020,54 @@ const loadCostume = (function () {
                             formatOf: () => 'json',
                             md5Of: ({asset, assetId}, {runtime}) => runtime.derived[assetId || asset.assetId].assetId,
                             typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
-                        })))
+                        }))),
+                        new GeneratedFunction(loadVectorRasterAssets, {
+                            loadBitmapAsset: new Branch(new GeneratedFunction(loadAssetInAtlas, {}),
+                                new Sequence([
+                                    new GeneratedFunction(loadAtlasMapCanvas, {
+                                        loadAsset: new Sequence([
+                                            new MayFail(new Sequence([
+                                                new GeneratedFunction(loadAspect.loadBulk, {}),
+                                                new GeneratedFunction(loadAtlasMapFromBulk, {}),
+                                            ])),
+                                            new GeneratedFunction(loadAtlasMapAsset, {}),
+                                        ]),
+                                    }),
+                                    new GeneratedFunction(loadImageDataFromAtlas, {}),
+                                ]),
+                                new Sequence([
+                                    // new GeneratedFunction(loadAspect.loadBulk, {}),
+                                    // new MayFail(new GeneratedFunction(loadAspect.loadAssetFromBulk, {
+                                    //     formatOf: ({dataFormat}) => dataFormat,
+                                    //     typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageBitmap
+                                    // })),
+                                    new GeneratedFunction(loadAspect.loadAsset, {
+                                        formatOf: ({dataFormat}) => dataFormat,
+                                        typeOf: ({dataFormat}, {runtime: {storage: {AssetType}}}) => AssetType.ImageBitmap
+                                    }),
+                                ])
+                            )
+                        }),
                     ])
-                )
-            ]),
+                ),
+                new Sequence([
+                    // new GeneratedFunction(loadAspect.loadBulk, {}),
+                    // new MayFail(new DerefScope('costume', new GeneratedFunction(loadAspect.loadAssetFromBulk, {
+                    //     formatOf: ({dataFormat}) => dataFormat,
+                    //     typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
+                    // }))),
+                    new DerefScope('costume', new GeneratedFunction(loadAspect.loadAsset, {
+                        formatOf: ({dataFormat}) => dataFormat,
+                        typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.ImageVector
+                    })),
+                ]),
+            ),
             new GeneratedFunction(loadCostumeAfterLoad, {}),
             new GeneratedFunction(loadVectorWrapper, {}),
         ]),
-        new Branch(new GeneratedFunction(loadCostumeInAtlas, {}),
+        new Branch(new DerefScope('costume', new GeneratedFunction(loadAssetInAtlas, {})),
             new Sequence([
-                new GeneratedFunction(loadAtlasMapCanvas, {
+                new DerefScope('costume', new GeneratedFunction(loadAtlasMapCanvas, {
                     loadAsset: new Sequence([
                         new MayFail(new Sequence([
                             new GeneratedFunction(loadAspect.loadBulk, {}),
@@ -860,8 +1075,10 @@ const loadCostume = (function () {
                         ])),
                         new GeneratedFunction(loadAtlasMapAsset, {}),
                     ]),
-                }),
-                new GeneratedFunction(loadBitmapFromAtlas, {}),
+                })),
+                // new GeneratedFunction(loadCanvasFromAtlas, {}),
+                new DerefScope('costume', new GeneratedFunction(loadImageDataFromAtlas, {})),
+                new GeneratedFunction(loadCanvasFromAtlasImageData, {}),
                 new GeneratedFunction(loadCostumeAfterLoad, {}),
                 new GeneratedFunction(loadBitmapRender, {}),
                 new GeneratedFunction(loadCostumeUpdateSkinRotationCenter, {}),

@@ -1,6 +1,10 @@
 const StringUtil = require('../util/string-util');
 const log = require('../util/log');
 
+const LoadTask = require('./load-task');
+const loadAspect = require('./load-aspect');
+
+
 /**
  * Initialize a sound from an asset asynchronously.
  * @param {!object} sound - the Scratch sound object.
@@ -47,23 +51,61 @@ const loadSoundFromAsset = function (sound, soundAsset, runtime, soundBank) {
  * @param {SoundBank} soundBank - Scratch Audio SoundBank to add sounds to.
  * @returns {!Promise} - a promise which will resolve to the sound when ready.
  */
-const loadSound = function (sound, runtime, soundBank) {
-    if (!runtime.storage) {
-        log.error('No storage module present; cannot load sound asset: ', sound.md5);
-        return Promise.resolve(sound);
-    }
-    const idParts = StringUtil.splitFirst(sound.md5, '.');
-    const md5 = idParts[0];
-    const ext = idParts[1].toLowerCase();
-    sound.dataFormat = ext;
-    return (
-        (sound.asset && Promise.resolve(sound.asset)) ||
-        runtime.storage.load(runtime.storage.AssetType.Sound, md5, ext)
-    ).then(soundAsset => {
-        sound.asset = soundAsset;
-        return loadSoundFromAsset(sound, soundAsset, runtime, soundBank);
-    });
-};
+// const loadSound = function (sound, runtime, soundBank) {
+//     if (!runtime.storage) {
+//         log.error('No storage module present; cannot load sound asset: ', sound.md5);
+//         return Promise.resolve(sound);
+//     }
+//     const idParts = StringUtil.splitFirst(sound.md5, '.');
+//     const md5 = idParts[0];
+//     const ext = idParts[1].toLowerCase();
+//     sound.dataFormat = ext;
+//     return (
+//         (sound.asset && Promise.resolve(sound.asset)) ||
+//         runtime.storage.load(runtime.storage.AssetType.Sound, md5, ext)
+//     ).then(soundAsset => {
+//         sound.asset = soundAsset;
+//         return loadSoundFromAsset(sound, soundAsset, runtime, soundBank);
+//     });
+// };
+
+const loadSound = (function () {
+    const {Branch, DerefScope, GeneratedFunction, MayFail, Parallel, Sequence} = LoadTask;
+
+    const load = new Sequence([
+        new GeneratedFunction(loadAspect.loadBulk, {}),
+        new MayFail(new GeneratedFunction(loadAspect.loadAssetFromBulk, {
+            formatOf: ({dataFormat}) => dataFormat,
+            md5Of: ({assetId}) => assetId,
+            typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.Sound
+        }), new GeneratedFunction(() => ({assetId}, {runtime: {bulk}}) => console.error(`${assetId} not in bulk`, bulk), {})),
+        new GeneratedFunction(loadAspect.loadAsset, {
+            formatOf: ({dataFormat}) => dataFormat,
+            md5Of: ({assetId}) => assetId,
+            typeOf: (scope, {runtime: {storage: {AssetType}}}) => AssetType.Sound
+        }),
+    ]);
+
+    return async function (sound, runtime, soundBank) {
+        if (!runtime.storage) {
+            log.error('No storage module present; cannot load sound asset: ', sound.md5);
+            return Promise.resolve(sound);
+        }
+        const idParts = StringUtil.splitFirst(sound.md5, '.');
+        const md5 = idParts[0];
+        const ext = idParts[1].toLowerCase();
+        sound.dataFormat = ext;
+        const scope = {assetId: md5, dataFormat: ext};
+        return (
+            (sound.asset && Promise.resolve(sound.asset)) ||
+            // runtime.storage.load(runtime.storage.AssetType.Sound, md5, ext)
+            load.run(scope, {runtime}).then(() => scope.asset)
+        ).then(soundAsset => {
+            sound.asset = soundAsset;
+            return loadSoundFromAsset(sound, soundAsset, runtime, soundBank);
+        });
+    };
+}());
 
 module.exports = {
     loadSound,

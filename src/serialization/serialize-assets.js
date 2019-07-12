@@ -24,13 +24,6 @@ const serializeAssets = function (runtime, assetType, optTargetId) {
                 fileName: `${asset.assetId}.${asset.dataFormat}`,
                 fileContent: asset.data});
 
-            runtime.bulk = runtime.bulk || new LoadBulk();
-            runtime.bulk.add({
-                assetId: asset.assetId,
-                dataFormat: asset.dataFormat,
-                data: asset.data
-            });
-
             if (asset._imageData) {
                 // debugger;
                 runtime.atlas = runtime.atlas || new Atlas();
@@ -47,6 +40,13 @@ const serializeAssets = function (runtime, assetType, optTargetId) {
                         tile: null
                     });
                 }
+            } else if (!currAsset.derivedAsset && false) {
+                runtime.bulk = runtime.bulk || new LoadBulk();
+                runtime.bulk.add({
+                    assetId: asset.assetId,
+                    dataFormat: asset.dataFormat,
+                    data: asset.data
+                });
             }
 
             // if (asset.rasterAssets) {
@@ -61,22 +61,70 @@ const serializeAssets = function (runtime, assetType, optTargetId) {
             if (derivedAsset) {
                 runtime.derived = runtime.derived || {};
 
-                if (derivedAsset.parsed) debugger;
+                // if (derivedAsset.parsed) debugger;
+                if (derivedAsset.rasterAssets) {
+                    for (let k = 0; k < derivedAsset.rasterAssets.length; k++) {
+                        let rasterAsset = derivedAsset.rasterAssets[k];
+                        if (rasterAsset.imageData) {
+                            const imageData = rasterAsset.imageData;
+                            runtime.atlas = runtime.atlas || new Atlas();
+
+                            if (!rasterAsset.assetId) {
+                                const canvas = document.createElement('canvas');
+                                canvas.width = rasterAsset.imageData.width;
+                                canvas.height = rasterAsset.imageData.height;
+                                const ctx = canvas.getContext('2d');
+                                ctx.putImageData(rasterAsset.imageData, 0, 0);
+
+                                const url = canvas.toDataURL();
+                                const content = url.split(/^[^,]+,/)[1];
+                                const utfBytes = atob(content);
+                                const bytes = new Uint8Array(utfBytes.length);
+
+                                for (let i = 0; i < bytes.length; i++) {
+                                    bytes[i] = utfBytes.charCodeAt(i);
+                                }
+
+                                rasterAsset = runtime.storage.createAsset(
+                                    runtime.storage.AssetType.ImageBitmap,
+                                    runtime.storage.DataFormat.PNG,
+                                    bytes, null, true);
+                                rasterAsset.imageData = imageData;
+                            }
+
+                            if (!runtime.atlas.findTile(rasterAsset.assetId)) {
+                                // debugger;
+                                runtime.atlas.createTile({
+                                    asset: runtime.atlas.createAsset({
+                                        assetId: rasterAsset.assetId,
+                                        dataFormat: rasterAsset.dataFormat,
+                                        imageData: rasterAsset.imageData
+                                    }),
+                                    map: null,
+                                    tile: null
+                                });
+                            }
+                        }
+                    }
+                }
 
                 runtime.derived[asset.assetId] = {
                     assetId: derivedAsset.assetId,
                     dataFormat: derivedAsset.dataFormat
                 };
-                assetDescs.push({
-                    fileName: `${derivedAsset.assetId}.${derivedAsset.dataFormat}`,
-                    fileContent: derivedAsset.data});
 
-                runtime.bulk = runtime.bulk || new LoadBulk();
-                runtime.bulk.add({
-                    assetId: derivedAsset.assetId,
-                    dataFormat: derivedAsset.dataFormat,
-                    data: derivedAsset.data
-                });
+                if (false) {
+                    runtime.bulk = runtime.bulk || new LoadBulk();
+                    runtime.bulk.add({
+                        assetId: derivedAsset.assetId,
+                        dataFormat: derivedAsset.dataFormat,
+                        data: derivedAsset.data
+                    });
+                } else {
+                    assetDescs.push({
+                        fileName: `${derivedAsset.assetId}.${derivedAsset.dataFormat}`,
+                        fileContent: derivedAsset.data});
+                }
             }
         }
     }

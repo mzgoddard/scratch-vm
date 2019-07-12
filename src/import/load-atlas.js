@@ -1,8 +1,10 @@
 class Asset {
-    constructor ({assetId, dataFormat, imageData}) {
+    constructor ({assetId, dataFormat, imageId, imageData}) {
         this.assetId = assetId;
         this.dataFormat = dataFormat;
+        this.imageId = imageId;
         this.imageData = imageData;
+        this.imageRGBA = null;
 
         this.promise = null;
         this.canvas = null;
@@ -26,7 +28,38 @@ class Asset {
         return this.promise;
     }
 
+    prepareImageData () {
+        if (!this.imageData) {
+            this.imageData = this.context.getImageData(0, 0, this.canvas.width, this.canvas.height);
+        }
+        if (!this.imageRGBA) {
+            this.imageRGBA = new Uint32Array(this.imageData.data.buffer);
+        }
+    }
+
     getImageData (left = 0, top = 0, width = this.canvas.width - left, height = this.canvas.height - top) {
+        if (!this.imageData) {
+            this.imageData = this.context.getImageData(0, 0, this.canvas.width, this.canvas.height);
+        }
+        if (!this.imageRGBA) {
+            this.imageRGBA = new Uint32Array(this.imageData.data.buffer);
+        }
+
+        const {imageData, imageRGBA} = this;
+        const imageWidth = this.canvas.width;
+        const tileData = new ImageData(width, height);
+        const tileRGBA = new Uint32Array(tileData.data.buffer);
+
+        for (let y = 0; y < height; y++) {
+            const tileY = (y * width);
+            const imageY = ((y + top) * imageWidth) + left;
+            for (let x = 0; x < width; x++) {
+                tileRGBA[tileY + x] = imageRGBA[imageY + x];
+            }
+        }
+
+        return tileData;
+
         // try {
         // const imageData = new ImageData(width, height);
         // const bottom = top - height;
@@ -342,6 +375,14 @@ const saveAtlas = function (atlas, runtime, zipDescs) {
         if (!tile.asset.imageData) continue;
         tile.findFreeArea(atlas, tile.asset.imageData.width, tile.asset.imageData.height);
         tile.putImageData(tile.asset.imageData);
+
+        const rawAsset = runtime.storage.createAsset({
+            content: 'application/octet-stream',
+            name: 'RGBAImage',
+            runtimeFormat: 'octet-stream'
+        }, 'octet-stream', tile.asset.imageData.data, null, true);
+
+        tile.asset.imageId = rawAsset.assetId;
     }
 
     for (let i = 0; i < atlas.maps.length; i++) {
@@ -353,17 +394,21 @@ const saveAtlas = function (atlas, runtime, zipDescs) {
             data, null, true);
         map.asset.assetId = asset.assetId;
 
-        zipDescs.push({
-            fileName: `${asset.assetId}.${asset.dataFormat}`,
-            fileContent: asset.data
-        });
+        if (true) {
+            zipDescs.push({
+                fileName: `${asset.assetId}.${asset.dataFormat}`,
+                fileContent: asset.data
+            });
+        }
 
-        runtime.bulk = runtime.bulk || new LoadBulk();
-        runtime.bulk.add({
-            assetId: asset.assetId,
-            dataFormat: asset.dataFormat,
-            data: asset.data
-        });
+        if (false) {
+            runtime.bulk = runtime.bulk || new LoadBulk();
+            runtime.bulk.add({
+                assetId: asset.assetId,
+                dataFormat: asset.dataFormat,
+                data: asset.data
+            });
+        }
     }
 
     return serializeAtlas(atlas);
@@ -375,7 +420,7 @@ const loadAtlas = function (atlasData, runtime, zip) {
     for (let i = 0; i < atlas.maps.length; i++) {
         const map = atlas.maps[i];
         if (!map.asset.promise) {
-            continue;
+            // continue;
             map.asset.loadCanvas(Promise.resolve()
                 .then(() => {
                     const assetType = runtime.storage.AssetType.ImageBitmap;
@@ -384,18 +429,35 @@ const loadAtlas = function (atlasData, runtime, zip) {
                     return runtime.storage.load(assetType, md5, dataFormat);
                 })
                 .then(asset => (
-                    createImageBitmap(
-                        new Blob([asset.data], {type: asset.assetType.contentType})
-                    )
+                    performance.mark(`createImageBitmap(${map.asset.assetId}):start`),
+                    (typeof createImageBitmap === 'function') ?
+                        createImageBitmap(new Blob([asset.data], {type: asset.assetType.contentType})) :
+                        new Promise((resolve) => {
+                            const img = new Image();
+                            if (URL.createObjectURL) {
+                                img.src = URL.createObjectURL(new Blob([asset.data], {type: asset.assetType.contentType}));
+                            } else {
+                                img.src = asset.encodeDataURI();
+                            }
+                            img.onload = () => resolve(img);
+                        })
                 ))
                 .then(bitmap => {
+                    performance.mark(`createImageBitmap(${map.asset.assetId}):stop`);
+                    performance.measure(
+                        `createImageBitmap(${map.asset.assetId})`,
+                        `createImageBitmap(${map.asset.assetId}):start`,
+                        `createImageBitmap(${map.asset.assetId}):stop`);
+
                     const canvas = document.createElement('canvas');
                     canvas.width = bitmap.width;
                     canvas.height = bitmap.height;
                     canvas.getContext('2d').drawImage(bitmap, 0, 0);
                     return canvas;
                 })
-            );
+            ).then(() => {
+                map.asset.prepareImageData();
+            });
         }
     }
 

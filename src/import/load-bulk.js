@@ -72,6 +72,7 @@ class Bulk {
                     size = piece.dataSize;
                     available += piece.bulkEnd - piece.bulkOffset;
                     pieces.unshift([piece, this.slices[i]]);
+                    if (available === size) break;
                 } else if (pieces.length > 0) {
                     break;
                 }
