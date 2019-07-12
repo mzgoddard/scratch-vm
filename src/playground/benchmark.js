@@ -35,21 +35,12 @@ class LoadingMiddleware {
     }
 }
 
-const importLoadCostume = require('../import/load-costume');
-const costumeMiddleware = new LoadingMiddleware();
-importLoadCostume.loadCostume = costumeMiddleware.install(importLoadCostume, importLoadCostume.loadCostume);
-
-const importLoadSound = require('../import/load-sound');
-const soundMiddleware = new LoadingMiddleware();
-importLoadSound.loadSound = soundMiddleware.install(importLoadSound, importLoadSound.loadSound);
-
 const ScratchStorage = require('scratch-storage');
 const VirtualMachine = require('..');
 const Runtime = require('../engine/runtime');
 
-const ScratchRender = require('scratch-render');
-const AudioEngine = require('scratch-audio');
-const ScratchSVGRenderer = require('scratch-svg-renderer');
+const costumeMiddleware = new LoadingMiddleware();
+const soundMiddleware = new LoadingMiddleware();
 
 const Scratch = window.Scratch = window.Scratch || {};
 
@@ -79,11 +70,11 @@ const loadProject = function () {
     if (id.length < 1 || !isFinite(id)) {
         id = projectInput.value;
     }
-    fetch(`./${id}`)
-    .then(response => response.arrayBuffer())
-    .then(buffer => (console.log('loadProject'), Scratch.vm.loadProject(buffer)))
-    .catch(e => (console.log('downloadProjectId', e), Scratch.vm.downloadProjectId(id)));
-    // Scratch.vm.downloadProjectId(id);
+    // fetch(`./${id}`)
+    // .then(response => response.arrayBuffer())
+    // .then(buffer => (console.log('loadProject'), Scratch.vm.loadProject(buffer)))
+    // .catch(e => (console.log('downloadProjectId', e), Scratch.vm.downloadProjectId(id)));
+    Scratch.vm.downloadProjectId(id);
     return id;
 };
 
@@ -651,79 +642,100 @@ const runBenchmark = function () {
         maxRecordedTime
     }).run();
 
-    // Instantiate the renderer and connect it to the VM.
-    const canvas = document.getElementById('scratch-stage');
-    const renderer = new ScratchRender(canvas);
-    Scratch.renderer = renderer;
-    vm.attachRenderer(renderer);
-    const audioEngine = new AudioEngine();
-    vm.attachAudioEngine(audioEngine);
-    vm.attachV2SVGAdapter(new ScratchSVGRenderer.SVGRenderer());
-    vm.attachV2BitmapAdapter(new ScratchSVGRenderer.BitmapAdapter());
-
-    // Feed mouse events as VM I/O events.
-    document.addEventListener('mousemove', e => {
-        const rect = canvas.getBoundingClientRect();
-        const coordinates = {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top,
-            canvasWidth: rect.width,
-            canvasHeight: rect.height
-        };
-        Scratch.vm.postIOData('mouse', coordinates);
-    });
-    canvas.addEventListener('mousedown', e => {
-        const rect = canvas.getBoundingClientRect();
-        const data = {
-            isDown: true,
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top,
-            canvasWidth: rect.width,
-            canvasHeight: rect.height
-        };
-        Scratch.vm.postIOData('mouse', data);
-        e.preventDefault();
-    });
-    canvas.addEventListener('mouseup', e => {
-        const rect = canvas.getBoundingClientRect();
-        const data = {
-            isDown: false,
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top,
-            canvasWidth: rect.width,
-            canvasHeight: rect.height
-        };
-        Scratch.vm.postIOData('mouse', data);
-        e.preventDefault();
-    });
-
-    // Feed keyboard events as VM I/O events.
-    document.addEventListener('keydown', e => {
-        // Don't capture keys intended for Blockly inputs.
-        if (e.target !== document && e.target !== document.body) {
-            return;
-        }
-        Scratch.vm.postIOData('keyboard', {
-            key: e.key,
-            isDown: true
-        });
-        e.preventDefault();
-    });
-    document.addEventListener('keyup', e => {
-        // Always capture up events,
-        // even those that have switched to other targets.
-        Scratch.vm.postIOData('keyboard', {
-            key: e.key,
-            isDown: false
-        });
-        // E.g., prevent scroll.
-        if (e.target !== document && e.target !== document.body) {
-            e.preventDefault();
-        }
-    });
-
     // Run threads
     vm.start();
+
+    const deserializeProject = vm.deserializeProject;
+    vm.deserializeProject = function () {
+        const AudioEngine = require('scratch-audio');
+        const audioEngine = new AudioEngine();
+        vm.attachAudioEngine(audioEngine);
+
+        Promise.resolve()
+        .then(() => Promise.resolve())
+        // .then(() => Promise.resolve())
+        .then(() => {
+            const importLoadCostume = require('../import/load-costume');
+            importLoadCostume.loadCostume = costumeMiddleware.install(importLoadCostume, importLoadCostume.loadCostume);
+
+            const importLoadSound = require('../import/load-sound');
+            importLoadSound.loadSound = soundMiddleware.install(importLoadSound, importLoadSound.loadSound);
+
+            const ScratchRender = require('scratch-render');
+            const ScratchSVGRenderer = require('scratch-svg-renderer');
+
+            // Instantiate the renderer and connect it to the VM.
+            const canvas = document.getElementById('scratch-stage');
+            const renderer = new ScratchRender(canvas);
+            Scratch.renderer = renderer;
+            vm.attachRenderer(renderer);
+            vm.attachV2SVGAdapter(new ScratchSVGRenderer.SVGRenderer());
+            vm.attachV2BitmapAdapter(new ScratchSVGRenderer.BitmapAdapter());
+
+            // Feed mouse events as VM I/O events.
+            document.addEventListener('mousemove', e => {
+                const rect = canvas.getBoundingClientRect();
+                const coordinates = {
+                    x: e.clientX - rect.left,
+                    y: e.clientY - rect.top,
+                    canvasWidth: rect.width,
+                    canvasHeight: rect.height
+                };
+                Scratch.vm.postIOData('mouse', coordinates);
+            });
+            canvas.addEventListener('mousedown', e => {
+                const rect = canvas.getBoundingClientRect();
+                const data = {
+                    isDown: true,
+                    x: e.clientX - rect.left,
+                    y: e.clientY - rect.top,
+                    canvasWidth: rect.width,
+                    canvasHeight: rect.height
+                };
+                Scratch.vm.postIOData('mouse', data);
+                e.preventDefault();
+            });
+            canvas.addEventListener('mouseup', e => {
+                const rect = canvas.getBoundingClientRect();
+                const data = {
+                    isDown: false,
+                    x: e.clientX - rect.left,
+                    y: e.clientY - rect.top,
+                    canvasWidth: rect.width,
+                    canvasHeight: rect.height
+                };
+                Scratch.vm.postIOData('mouse', data);
+                e.preventDefault();
+            });
+
+            // Feed keyboard events as VM I/O events.
+            document.addEventListener('keydown', e => {
+                // Don't capture keys intended for Blockly inputs.
+                if (e.target !== document && e.target !== document.body) {
+                    return;
+                }
+                Scratch.vm.postIOData('keyboard', {
+                    key: e.key,
+                    isDown: true
+                });
+                e.preventDefault();
+            });
+            document.addEventListener('keyup', e => {
+                // Always capture up events,
+                // even those that have switched to other targets.
+                Scratch.vm.postIOData('keyboard', {
+                    key: e.key,
+                    isDown: false
+                });
+                // E.g., prevent scroll.
+                if (e.target !== document && e.target !== document.body) {
+                    e.preventDefault();
+                }
+            });
+        });
+
+        return deserializeProject.apply(this, arguments);
+    };
 
     const downloadLink = document.querySelector('.download');
     const downloadLabel = downloadLink.querySelector('label');
