@@ -384,6 +384,26 @@ const loadBitmapUpgradeAsset = function ({
     };
 };
 
+const loadBitmapRenderInput = {
+  costume: {
+    bitmapResolution: number,
+  },
+  canvas: oneOf([HTMLCanvasElement, ImageData].map(is)),
+  rotationCenter: arrayOf(number),
+  runtime: {
+    renderer: {
+      createBitmapSkin: func,
+    },
+  },
+}
+const loadBitmapRenderOutput = {
+  costume: {
+    skinId: number,
+  },
+  asset: {
+    _imageData: is(ImageData),
+  },
+}
 const loadBitmapRender = function ({
 
 }) {
@@ -404,6 +424,32 @@ const loadBitmapRender = function ({
     };
 };
 
+const loadCostumeUpdateSkinRotationCenterInput = {
+  costume: {
+    skinId: number,
+  },
+  rotationCenter: unset,
+  runtime: {
+    renderer: {
+      getSkinSize: func,
+      getSkinRotationCenter: func,
+    },
+  },
+}
+const loadCostumeUpdateSkinRotationCenterOutput = {
+  costume: {
+    size: arrayOf(unscaled),
+    rotationCenterX: unscaled,
+    rotationCenterY: unscaled,
+  },
+}
+const loadCostumeUpdateSkinRotationCenterOptions = {
+  afterOutput: {
+    costume: {
+      skinId: number,
+    },
+  },
+}
 const loadCostumeUpdateSkinRotationCenter = function ({
 
 }) {
@@ -417,6 +463,23 @@ const loadCostumeUpdateSkinRotationCenter = function ({
     };
 };
 
+const loadCostumeScaleSkinRotationCenterInput = {
+  costume: {
+    skinId: number,
+    size: arrayOf(unscaled),
+    rotationCenterX: unscaled,
+    rotationCenterY: unscaled,
+  },
+  rotationCenter: unset,
+}
+const loadCostumeScaleSkinRotationCenterOutput = {
+  costume: {
+    size: arrayOf(scaled),
+    rotationCenterX: scaled,
+    rotationCenterY: scaled,
+    bitmapResolution: scaled,
+  },
+}
 const loadCostumeScaleSkinRotationCenter = function ({
     scale = 2
 }) {
@@ -430,6 +493,12 @@ const loadCostumeScaleSkinRotationCenter = function ({
     };
 };
 
+const loadBitmapCanvasCleanupInput = {
+  mergeCanvas: is(HTMLCanvasElement),
+}
+const loadBitmapCanvasCleanupOutput = {
+  mergeCanvas: unset,
+}
 const loadBitmapCanvasCleanup = function ({
 
 }) {
